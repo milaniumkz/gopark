@@ -35,7 +35,7 @@ class DriverPushNotifications {
         _initialized = true;
       }
 
-      return FirebaseMessaging.instance.getToken();
+      return await FirebaseMessaging.instance.getToken();
     } catch (error) {
       debugPrint('GoPark driver push init failed: $error');
       return null;

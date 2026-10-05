@@ -5237,7 +5237,7 @@ Future<bool> _confirmQuickStatusRequest(
 Future<String?> _showForceMajeureReasonDialog(BuildContext context) async {
   final controller = TextEditingController();
   try {
-    return showDialog<String?>(
+    return await showDialog<String?>(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
@@ -5288,7 +5288,7 @@ Future<num?> _showPartialPaymentSheet(
     text: suggestedAmount > 0 ? suggestedAmount.round().toString() : '',
   );
   try {
-    return showModalBottomSheet<num>(
+    return await showModalBottomSheet<num>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
