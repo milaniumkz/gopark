@@ -17,13 +17,18 @@ ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 ENV VITE_FIREBASE_WEB_VAPID_KEY=${VITE_FIREBASE_WEB_VAPID_KEY}
 COPY . .
 RUN pnpm --filter @gopark/crm-web build
+RUN mkdir -p /app/_optional/driver /app/_optional/manager /app/_optional/apk /app/_optional/root \
+  && if [ -d apps/driver-app/build/web ]; then cp -a apps/driver-app/build/web/. /app/_optional/driver/; fi \
+  && if [ -d apps/manager-app/build/web ]; then cp -a apps/manager-app/build/web/. /app/_optional/manager/; fi \
+  && if [ -d apk ]; then cp -a apk/. /app/_optional/apk/; fi \
+  && if [ -f gopark-manager.apk ]; then cp gopark-manager.apk /app/_optional/root/gopark-manager.apk; fi \
+  && if [ -f gopark-driver.apk ]; then cp gopark-driver.apk /app/_optional/root/gopark-driver.apk; fi
 
 FROM nginx:1.27-alpine AS runtime
 COPY --from=build /app/apps/crm-web/dist /usr/share/nginx/html
-COPY apps/driver-app/build/web /usr/share/nginx/html/driver
-COPY apps/manager-app/build/web /usr/share/nginx/html/manager
-COPY gopark-manager.apk /usr/share/nginx/html/gopark-manager.apk
-COPY gopark-driver.apk /usr/share/nginx/html/gopark-driver.apk
-COPY apk /usr/share/nginx/html/apk
+COPY --from=build /app/_optional/driver /usr/share/nginx/html/driver
+COPY --from=build /app/_optional/manager /usr/share/nginx/html/manager
+COPY --from=build /app/_optional/root /usr/share/nginx/html
+COPY --from=build /app/_optional/apk /usr/share/nginx/html/apk
 COPY apps/crm-web/nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80

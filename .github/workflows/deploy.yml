@@ -70,6 +70,18 @@ jobs:
           mkdir -p "$RELEASE_DIR"
           tar -xzf "$ARCHIVE" -C "$RELEASE_DIR"
           rm -f "$ARCHIVE"
+          for artifact in \
+            "apps/driver-app/build/web" \
+            "apps/manager-app/build/web" \
+            "apk" \
+            "gopark-manager.apk" \
+            "gopark-driver.apk"
+          do
+            if [ -e "$CONFIG_DIR/$artifact" ]; then
+              mkdir -p "$RELEASE_DIR/$(dirname "$artifact")"
+              cp -a "$CONFIG_DIR/$artifact" "$RELEASE_DIR/$artifact"
+            fi
+          done
           cd "$RELEASE_DIR"
 
           docker compose --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml build api crm-web
