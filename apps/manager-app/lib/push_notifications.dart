@@ -35,7 +35,7 @@ class ManagerPushNotifications {
         _initialized = true;
       }
 
-      return FirebaseMessaging.instance.getToken();
+      return await FirebaseMessaging.instance.getToken();
     } catch (error) {
       debugPrint('GoPark manager push init failed: $error');
       return null;

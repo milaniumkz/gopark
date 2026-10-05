@@ -4907,7 +4907,7 @@ Future<_ManagerIncidentDetails?> _showManagerIncidentDetailsDialog(
   final noteController = TextEditingController();
   String? photoDataUrl;
   try {
-    return showDialog<_ManagerIncidentDetails>(
+    return await showDialog<_ManagerIncidentDetails>(
       context: context,
       builder: (dialogContext) {
         return StatefulBuilder(
@@ -5025,7 +5025,7 @@ Future<_ManagerIncidentDetails?> _showManagerRequiredNoteDialog(
   final noteController = TextEditingController();
   String? errorText;
   try {
-    return showDialog<_ManagerIncidentDetails>(
+    return await showDialog<_ManagerIncidentDetails>(
       context: context,
       builder: (dialogContext) {
         return StatefulBuilder(
