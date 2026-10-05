@@ -1,0 +1,11 @@
+.gcloudignore
+.git
+.github
+node_modules
+.pnpm-store
+apps/crm-web/dist
+apps/api/dist
+GoPark.zip
+*.pdf
+~$*.docx
+.DS_Store

@@ -1,0 +1,26 @@
+name: gopark_driver_app
+description: GoPark driver mobile application
+publish_to: "none"
+version: 0.1.0+3
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  firebase_core: ^4.11.0
+  firebase_messaging: ^16.4.1
+  flutter:
+    sdk: flutter
+  http: ^1.2.2
+  image_picker: ^1.1.2
+  shared_preferences: ^2.3.3
+  web: ^1.1.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/gopark-logo.png

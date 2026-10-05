@@ -1,0 +1,81 @@
+name: deploy-production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit SHA or branch to deploy
+        required: false
+        default: main
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.sha }}
+      - name: Resolve commit
+        id: rev
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Pack checked commit
+        run: tar --exclude='.git' -czf /tmp/gopark-release.tgz .
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.PROD_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${{ secrets.PROD_SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+      - name: Upload release archive
+        env:
+          SHA: ${{ steps.rev.outputs.sha }}
+        run: |
+          scp -i ~/.ssh/id_ed25519 -P "${{ secrets.PROD_SSH_PORT }}" /tmp/gopark-release.tgz "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}:/tmp/gopark-release-$SHA.tgz"
+      - name: Deploy checked commit
+        env:
+          SHA: ${{ steps.rev.outputs.sha }}
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -p "${{ secrets.PROD_SSH_PORT }}" "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}" "SHA='$SHA' bash -s" <<'REMOTE'
+          set -euo pipefail
+          SHA="${SHA}"
+          BASE="/home/client"
+          CONFIG_DIR="$BASE/gopark"
+          RELEASES="$BASE/gopark-releases"
+          RELEASE_DIR="$RELEASES/$SHA"
+          ARCHIVE="/tmp/gopark-release-$SHA.tgz"
+          LOCK="/tmp/gopark-production-deploy.lock"
+
+          exec 9>"$LOCK"
+          flock -n 9 || { echo "Deploy already running"; exit 1; }
+
+          mkdir -p "$RELEASES" "$BASE/backups"
+          cd "$CONFIG_DIR"
+          docker compose --env-file .env -f docker-compose.server.yml ps >/dev/null
+
+          docker exec gopark-postgres pg_dump -U gopark gopark | gzip > "$BASE/backups/gopark-ci-$SHA.sql.gz"
+          tar -czf "$BASE/backups/gopark-env-$SHA.tgz" -C "$CONFIG_DIR" .env secrets 2>/dev/null || true
+
+          rm -rf "$RELEASE_DIR"
+          mkdir -p "$RELEASE_DIR"
+          tar -xzf "$ARCHIVE" -C "$RELEASE_DIR"
+          rm -f "$ARCHIVE"
+          cd "$RELEASE_DIR"
+
+          docker compose --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml build api crm-web
+          docker compose --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml run --rm api-migrate
+          docker compose --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml up -d --no-deps api worker crm-web
+          curl -fsS http://127.0.0.1:3000/api/health
+          ln -sfn "$RELEASE_DIR" "$BASE/gopark-current"
+          echo "$SHA" > "$BASE/gopark-current-sha"
+REMOTE

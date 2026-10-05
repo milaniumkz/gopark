@@ -1,0 +1,659 @@
+openapi: 3.1.0
+info:
+  title: GoPark API
+  version: 0.1.0
+  description: Production API skeleton for CRM, manager app, and driver app. Bearer auth is the primary client path; bootstrap headers remain a non-production fallback.
+servers:
+  - url: https://api.gopark.example
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token returned by `/api/auth/login` or `/api/auth/refresh`.
+    xUserId:
+      type: apiKey
+      in: header
+      name: x-user-id
+      description: Temporary non-production bootstrap identity header.
+    xRole:
+      type: apiKey
+      in: header
+      name: x-role
+      description: Temporary non-production bootstrap role header.
+security:
+  - bearerAuth: []
+tags:
+  - name: Auth
+  - name: Health
+  - name: Dashboard
+  - name: Drivers
+  - name: Cars
+  - name: Contracts
+  - name: Payments
+  - name: Payouts
+  - name: Ledger
+  - name: Reports
+  - name: Settings
+  - name: Notifications
+  - name: Audit
+  - name: Incidents
+  - name: Users
+  - name: Outbox
+  - name: Approvals
+  - name: Debt Engine
+  - name: Integrations
+  - name: Mobile Driver
+  - name: Mobile Manager
+paths:
+  /api/health:
+    get:
+      tags: [Health]
+      summary: Health check
+      security: []
+      responses:
+        "200":
+          description: Service status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  service:
+                    type: string
+                    example: gopark-api
+                  appRuntime:
+                    type: string
+                    enum: [api, worker]
+                  mode:
+                    type: string
+                    enum: [in-memory, prisma]
+                  prismaEnabled:
+                    type: boolean
+                  databaseUrlConfigured:
+                    type: boolean
+                  prismaClientAvailable:
+                    type: boolean
+                  redisConfigured:
+                    type: boolean
+                  bullmqAvailable:
+                    type: boolean
+                  redisQueueReady:
+                    type: boolean
+                  authTokenSecretConfigured:
+                    type: boolean
+                  bearerAuthReady:
+                    type: boolean
+                  bootstrapAuthEnabled:
+                    type: boolean
+                  inMemoryProductionAllowed:
+                    type: boolean
+                  productionStartupSafe:
+                    type: boolean
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Login with email or phone
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [login, password]
+              properties:
+                login:
+                  type: string
+                password:
+                  type: string
+      responses:
+        "200":
+          description: Access token pair
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accessToken:
+                    type: string
+                  refreshToken:
+                    type: string
+                  expiresInSeconds:
+                    type: integer
+                  requestUserId:
+                    type: string
+                  requestUserRole:
+                    type: string
+        "429":
+          description: Too many authentication attempts
+  /api/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Rotate a new token pair by refresh token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken:
+                  type: string
+      responses:
+        "200":
+          description: Access token pair
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accessToken:
+                    type: string
+                  refreshToken:
+                    type: string
+                  expiresInSeconds:
+                    type: integer
+                  requestUserId:
+                    type: string
+                  requestUserRole:
+                    type: string
+        "429":
+          description: Too many authentication attempts
+  /api/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoke the active refresh session
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken:
+                  type: string
+      responses:
+        "200":
+          description: Refresh session revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  revoked:
+                    type: boolean
+                    const: true
+        "429":
+          description: Too many authentication attempts
+  /api/dashboard/summary:
+    get:
+      tags: [Dashboard]
+      summary: Get dashboard summary metrics
+      responses:
+        "200":
+          description: Summary payload
+  /api/dashboard/overview:
+    get:
+      tags: [Dashboard]
+      summary: Get dashboard overview read-model
+      responses:
+        "200":
+          description: Dashboard overview payload
+  /api/drivers:
+    get:
+      tags: [Drivers]
+      summary: List drivers
+      responses:
+        "200":
+          description: Driver collection
+    post:
+      tags: [Drivers]
+      summary: Create driver
+      responses:
+        "201":
+          description: Driver created
+  /api/drivers/{driverId}:
+    get:
+      tags: [Drivers]
+      summary: Get driver detail
+      responses:
+        "200":
+          description: Driver detail payload
+  /api/cars:
+    get:
+      tags: [Cars]
+      summary: List cars
+      responses:
+        "200":
+          description: Cars collection
+    post:
+      tags: [Cars]
+      summary: Create car
+      responses:
+        "201":
+          description: Car created
+  /api/cars/{carId}:
+    get:
+      tags: [Cars]
+      summary: Get car detail
+      responses:
+        "200":
+          description: Car detail payload
+  /api/contracts:
+    get:
+      tags: [Contracts]
+      summary: List contracts
+      responses:
+        "200":
+          description: Contract collection
+    post:
+      tags: [Contracts]
+      summary: Create contract
+      responses:
+        "201":
+          description: Contract created
+  /api/contracts/{contractId}:
+    get:
+      tags: [Contracts]
+      summary: Get contract detail
+      responses:
+        "200":
+          description: Contract detail
+  /api/incidents:
+    get:
+      tags: [Incidents]
+      summary: List active incidents
+      responses:
+        "200":
+          description: Incident collection
+  /api/users:
+    get:
+      tags: [Users]
+      summary: List admin users and roles
+      responses:
+        "200":
+          description: User admin collection
+  /api/reports/overview:
+    get:
+      tags: [Reports]
+      summary: Get reporting overview
+      responses:
+        "200":
+          description: Reports overview payload
+  /api/settings/overview:
+    get:
+      tags: [Settings]
+      summary: Get settings overview
+      responses:
+        "200":
+          description: Settings overview payload
+  /api/notifications:
+    get:
+      tags: [Notifications]
+      summary: List notifications
+      responses:
+        "200":
+          description: Notifications collection
+  /api/audit/logs:
+    get:
+      tags: [Audit]
+      summary: List audit logs
+      responses:
+        "200":
+          description: Audit log collection
+  /api/outbox:
+    get:
+      tags: [Outbox]
+      summary: List outbox events
+      responses:
+        "200":
+          description: Outbox event collection
+  /api/workers/outbox/process:
+    post:
+      tags: [Outbox]
+      summary: Process pending outbox events
+      responses:
+        "200":
+          description: Outbox processing result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mode:
+                    type: string
+                    enum: [inline, queued]
+                  processedCount:
+                    type: integer
+                  processed:
+                    type: array
+                    items:
+                      type: string
+                  queuedCount:
+                    type: integer
+                  queued:
+                    type: array
+                    items:
+                      type: string
+  /api/approvals/payouts/{payoutId}/approve:
+    post:
+      tags: [Approvals]
+      summary: Approve payout request
+      responses:
+        "200":
+          description: Payout approved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  driverId:
+                    type: string
+                  amount:
+                    type: number
+                  status:
+                    type: string
+                  createdAt:
+                    type: string
+                    format: date-time
+                  approvedByUserId:
+                    type: string
+        "403":
+          description: Approval threshold exceeded for the current role
+        "404":
+          description: Payout not found
+  /api/approvals/status-requests/{requestId}/approve:
+    post:
+      tags: [Approvals]
+      summary: Approve driver status request
+      responses:
+        "200":
+          description: Status request approved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  driverId:
+                    type: string
+                  type:
+                    type: string
+                  status:
+                    type: string
+                  period:
+                    type: string
+        "400":
+          description: Request is not pending or overlaps an approved period
+        "403":
+          description: Current role cannot review this driver's request
+        "404":
+          description: Status request not found
+  /api/approvals/status-requests/{requestId}/reject:
+    post:
+      tags: [Approvals]
+      summary: Reject driver status request
+      responses:
+        "200":
+          description: Status request rejected
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  driverId:
+                    type: string
+                  type:
+                    type: string
+                  status:
+                    type: string
+                  period:
+                    type: string
+        "400":
+          description: Only pending requests can be reviewed
+        "403":
+          description: Current role cannot review this driver's request
+        "404":
+          description: Status request not found
+  /api/debt-engine/drivers/{driverId}/summary:
+    get:
+      tags: [Debt Engine]
+      summary: Get debt summary for a driver
+      responses:
+        "200":
+          description: Debt engine summary payload
+  /api/integrations/yandex/drivers/{driverId}/balance:
+    get:
+      tags: [Integrations]
+      summary: Get Yandex balance for a driver
+      responses:
+        "200":
+          description: Driver balance payload
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  driverId:
+                    type: string
+                  amount:
+                    type: number
+                  currency:
+                    type: string
+                    enum: [KGS]
+                  syncedAt:
+                    type: string
+                    format: date-time
+  /api/integrations/bakai/webhooks:
+    post:
+      tags: [Integrations]
+      summary: Receive Bakai webhook
+      security: []
+      responses:
+        "200":
+          description: Webhook accepted
+        "503":
+          description: Bakai webhook intake disabled in settings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accepted:
+                    type: boolean
+                  payload: {}
+  /api/payments:
+    get:
+      tags: [Payments]
+      summary: List payments
+      responses:
+        "200":
+          description: Payment collection
+    post:
+      tags: [Payments]
+      summary: Register payment
+      responses:
+        "201":
+          description: Payment accepted
+  /api/payments/early-payoff:
+    post:
+      tags: [Payments]
+      summary: Close contract by early payoff
+      responses:
+        "201":
+          description: Contract paid off and closed
+        "400":
+          description: Contract is invalid, not active, or amount does not cover the full remaining debt
+  /api/payments/credit-writeoff:
+    post:
+      tags: [Payments]
+      summary: Write off part of driver credit
+      responses:
+        "201":
+          description: Driver credit writeoff accepted
+        "400":
+          description: Writeoff amount is invalid or exceeds current credit balance
+  /api/payouts:
+    get:
+      tags: [Payouts]
+      summary: List payouts
+      responses:
+        "200":
+          description: Payout collection
+    post:
+      tags: [Payouts]
+      summary: Request payout
+      responses:
+        "201":
+          description: Payout accepted
+  /api/mobile/driver/{driverId}/debt-summary:
+    get:
+      tags: [Mobile Driver]
+      summary: Driver debt summary
+      responses:
+        "200":
+          description: Debt summary payload
+  /api/mobile/driver/{driverId}/home-summary:
+    get:
+      tags: [Mobile Driver]
+      summary: Driver home summary
+      responses:
+        "200":
+          description: Driver home summary payload
+  /api/mobile/driver/{driverId}/profile-summary:
+    get:
+      tags: [Mobile Driver]
+      summary: Driver profile summary
+      responses:
+        "200":
+          description: Driver profile summary payload
+  /api/mobile/driver/{driverId}/contract:
+    get:
+      tags: [Mobile Driver]
+      summary: Driver active contract
+      responses:
+        "200":
+          description: Active contract payload
+  /api/mobile/driver/{driverId}/payouts:
+    get:
+      tags: [Mobile Driver]
+      summary: Driver payouts
+      responses:
+        "200":
+          description: Driver payouts list
+    post:
+      tags: [Mobile Driver]
+      summary: Create driver payout request
+      responses:
+        "201":
+          description: Payout request created
+        "400":
+          description: Payout amount is invalid or exceeds available balance
+  /api/mobile/driver/{driverId}/status-requests:
+    get:
+      tags: [Mobile Driver]
+      summary: Driver status requests
+      responses:
+        "200":
+          description: Driver status request list
+    post:
+      tags: [Mobile Driver]
+      summary: Create driver status request
+      responses:
+        "201":
+          description: Status request created
+  /api/mobile/driver/{driverId}/payment-schedule:
+    get:
+      tags: [Mobile Driver]
+      summary: Driver payment schedule
+      responses:
+        "200":
+          description: Driver installment schedule
+  /api/mobile/manager/drivers:
+    get:
+      tags: [Mobile Manager]
+      summary: Manager driver list
+      responses:
+        "200":
+          description: Assigned drivers
+  /api/mobile/manager/summary:
+    get:
+      tags: [Mobile Manager]
+      summary: Manager dashboard summary
+      responses:
+        "200":
+          description: Manager dashboard summary payload
+  /api/mobile/manager/drivers/{driverId}:
+    get:
+      tags: [Mobile Manager]
+      summary: Manager driver detail
+      responses:
+        "200":
+          description: Manager driver detail payload
+  /api/mobile/manager/alerts:
+    get:
+      tags: [Mobile Manager]
+      summary: Manager alerts
+      responses:
+        "200":
+          description: Manager alerts
+  /api/mobile/manager/quick-actions:
+    get:
+      tags: [Mobile Manager]
+      summary: Manager quick actions
+      responses:
+        "200":
+          description: Manager quick actions
+  /api/mobile/manager/incidents:
+    get:
+      tags: [Mobile Manager]
+      summary: Manager incidents
+      responses:
+        "200":
+          description: Manager incident list
+  /api/mobile/manager/quick-actions/execute:
+    post:
+      tags: [Mobile Manager]
+      summary: Execute manager quick action
+      responses:
+        "200":
+          description: Quick action executed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  actionId:
+                    type: string
+                  executedAt:
+                    type: string
+                    format: date-time
+  /api/ledger/entries:
+    get:
+      tags: [Ledger]
+      summary: List ledger entries
+      responses:
+        "200":
+          description: Ledger entry collection
+    post:
+      tags: [Ledger]
+      summary: Create ledger entry
+      responses:
+        "201":
+          description: Ledger entry created

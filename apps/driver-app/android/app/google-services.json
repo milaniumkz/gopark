@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "838745336899",
+    "project_id": "goparkpush",
+    "storage_bucket": "goparkpush.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:838745336899:android:3ea551ab0c48bf42c5b8f6",
+        "android_client_info": {
+          "package_name": "com.milanium.goparkdriver"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDBGwFTq91Ug-TlOlRRkV4vmwJ36zeX8hg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:838745336899:android:fc6854e1dea7fb36c5b8f6",
+        "android_client_info": {
+          "package_name": "com.milanium.goparkmanager"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDBGwFTq91Ug-TlOlRRkV4vmwJ36zeX8hg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

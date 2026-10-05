@@ -1,0 +1,48 @@
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web-and-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @gopark/contracts build
+      - run: pnpm --filter @gopark/api typecheck
+      - run: pnpm --filter @gopark/crm-web typecheck
+      - run: pnpm --filter @gopark/crm-web build
+
+  flutter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Driver app analyze
+        working-directory: apps/driver-app
+        run: |
+          flutter pub get
+          flutter analyze
+      - name: Manager app analyze
+        working-directory: apps/manager-app
+        run: |
+          flutter pub get
+          flutter analyze

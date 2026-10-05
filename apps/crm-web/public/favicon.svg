@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="gopark-favicon" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3E63F4" />
+      <stop offset="1" stop-color="#4FB8D5" />
+    </linearGradient>
+  </defs>
+  <rect x="6" y="6" width="52" height="52" rx="18" fill="url(#gopark-favicon)" />
+  <path
+    d="M22 20.5H34.5C42 20.5 46.5 24.5 46.5 30.75C46.5 37 42 41 34.5 41H29V48H22V20.5ZM34.25 35.25C38.25 35.25 40 33.75 40 30.75C40 27.75 38.25 26.25 34.25 26.25H29V35.25H34.25Z"
+    fill="white"
+  />
+</svg>

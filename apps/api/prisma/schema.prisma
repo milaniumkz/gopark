@@ -1,0 +1,717 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  owner
+  admin
+  finance
+  manager
+  operator
+  auditor
+  driver
+
+  @@map("user_role")
+}
+
+enum UserStatus {
+  active
+  blocked
+  invited
+
+  @@map("user_status")
+}
+
+enum DriverStatus {
+  active
+  day_off
+  vacation
+  force_majeure
+  accident
+  idle
+  terminated
+
+  @@map("driver_status")
+}
+
+enum DriverRiskStatus {
+  normal
+  medium
+  risk
+
+  @@map("driver_risk_status")
+}
+
+enum ManagerLevel {
+  regular
+  senior
+
+  @@map("manager_level")
+}
+
+enum DriverRiskStatusReviewStatus {
+  pending
+  approved
+  rejected
+
+  @@map("driver_risk_status_review_status")
+}
+
+enum CarStatus {
+  free
+  assigned
+  maintenance
+  accident
+  customs
+  office
+  impound
+  sold
+  idle
+
+  @@map("car_status")
+}
+
+enum ContractStatus {
+  draft
+  active
+  closed
+  defaulted
+  terminated
+
+  @@map("contract_status")
+}
+
+enum ObligationType {
+  installment
+  insurance
+  gps
+  penalty
+  adjustment
+
+  @@map("obligation_type")
+}
+
+enum PaymentStatus {
+  pending
+  processing
+  succeeded
+  failed
+  cancelled
+
+  @@map("payment_status")
+}
+
+enum PayoutStatus {
+  requested
+  approved
+  processing
+  paid
+  rejected
+  failed
+
+  @@map("payout_status")
+}
+
+enum LedgerEntryType {
+  obligation
+  payment
+  adjustment
+  payout
+  refund
+  penalty
+
+  @@map("ledger_entry_type")
+}
+
+enum NotificationChannel {
+  push
+  sms
+  email
+  in_app
+
+  @@map("notification_channel")
+}
+
+model User {
+  id              String      @id @default(uuid()) @db.Uuid
+  email           String?     @unique
+  phone           String?     @unique
+  companyName     String?     @map("company_name")
+  passwordHash    String      @map("password_hash")
+  mustChangePassword Boolean  @default(false) @map("must_change_password")
+  refreshTokenVersion Int     @default(0) @map("refresh_token_version")
+  role            UserRole
+  customRoleKey   String?     @map("custom_role_key")
+  status          UserStatus  @default(invited)
+  firstName       String      @map("first_name")
+  lastName        String      @map("last_name")
+  mfaEnabled      Boolean     @default(false) @map("mfa_enabled")
+  lastLoginAt     DateTime?   @map("last_login_at")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+  manager         Manager?
+  driver          Driver?
+  approvedPayouts Payout[]  @relation("ApprovedPayouts")
+  auditLogs       AuditLog[]
+  driverRiskStatusChanges DriverRiskStatusChange[]
+  devicePushTokens DevicePushToken[]
+  paymentCalendarDayOverrides PaymentCalendarDayOverride[]
+
+  @@map("users")
+}
+
+model DevicePushToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid @map("user_id")
+  token      String    @unique
+  platform   String
+  app        String
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  lastSeenAt DateTime  @default(now()) @map("last_seen_at")
+  disabledAt DateTime? @map("disabled_at")
+  user       User      @relation(fields: [userId], references: [id])
+
+  @@index([userId, disabledAt], map: "idx_device_push_tokens_user_active")
+  @@map("device_push_tokens")
+}
+
+model Manager {
+  id        String       @id @default(uuid()) @db.Uuid
+  userId    String       @unique @db.Uuid @map("user_id")
+  title     String
+  level     ManagerLevel @default(regular)
+  seniorManagerId String? @db.Uuid @map("senior_manager_id")
+  createdAt DateTime     @default(now()) @map("created_at")
+  user      User         @relation(fields: [userId], references: [id])
+  seniorManager Manager? @relation("SeniorManagerAssignments", fields: [seniorManagerId], references: [id])
+  juniorManagers Manager[] @relation("SeniorManagerAssignments")
+  drivers   Driver[]
+  cars      Car[]
+  chatThreads ChatThread[]
+  requestedRiskStatusReviews DriverRiskStatusReview[] @relation("RequestedRiskStatusReviews")
+  reviewedRiskStatusReviews DriverRiskStatusReview[] @relation("ReviewedRiskStatusReviews")
+
+  @@map("managers")
+}
+
+model Driver {
+  id             String          @id @default(uuid()) @db.Uuid
+  userId         String?         @unique @db.Uuid @map("user_id")
+  managerId      String?         @db.Uuid @map("manager_id")
+  firstName      String          @map("first_name")
+  lastName       String          @map("last_name")
+  middleName     String?         @map("middle_name")
+  phone          String          @unique
+  nearestRelativePhone String?   @map("nearest_relative_phone")
+  companyName    String?         @map("company_name")
+  licenseNumber  String?         @map("license_number")
+  passportNumber String?         @map("passport_number")
+  weeklyDayOff   String?         @map("weekly_day_off")
+  status         DriverStatus    @default(active)
+  riskStatus     DriverRiskStatus @default(normal) @map("risk_status")
+  photoUrl       String?         @map("photo_url")
+  photoStatus    String          @default("missing") @map("photo_status")
+  photoUploadedAt DateTime?      @map("photo_uploaded_at")
+  photoReviewedAt DateTime?      @map("photo_reviewed_at")
+  photoReviewedByUserId String?  @db.Uuid @map("photo_reviewed_by_user_id")
+  photoReviewNote String?        @map("photo_review_note")
+  hiredAt        DateTime?       @map("hired_at")
+  terminatedAt   DateTime?       @map("terminated_at")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+  user           User?           @relation(fields: [userId], references: [id])
+  manager        Manager?        @relation(fields: [managerId], references: [id])
+  contracts      Contract[]
+  assignments    CarAssignment[]
+  obligations    Obligation[]
+  payments       Payment[]
+  paymentCalendarDayOverrides PaymentCalendarDayOverride[]
+  payouts        Payout[]
+  yandexBalances YandexBalance[]
+  creditBalance  DriverCreditBalance?
+  chatThreads    ChatThread[]
+  riskStatusChanges DriverRiskStatusChange[]
+  riskStatusReviews DriverRiskStatusReview[]
+
+  @@map("drivers")
+}
+
+model DriverRiskStatusReview {
+  id                   String                         @id @default(uuid()) @db.Uuid
+  driverId             String                         @db.Uuid @map("driver_id")
+  requestedByManagerId String                         @db.Uuid @map("requested_by_manager_id")
+  reviewedByManagerId  String?                        @db.Uuid @map("reviewed_by_manager_id")
+  previousStatus       DriverRiskStatus               @map("previous_status")
+  requestedStatus      DriverRiskStatus               @map("requested_status")
+  reviewStatus         DriverRiskStatusReviewStatus   @default(pending) @map("review_status")
+  note                 String?
+  createdAt            DateTime                       @default(now()) @map("created_at")
+  reviewedAt           DateTime?                      @map("reviewed_at")
+  driver               Driver                         @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  requestedByManager   Manager                        @relation("RequestedRiskStatusReviews", fields: [requestedByManagerId], references: [id])
+  reviewedByManager    Manager?                       @relation("ReviewedRiskStatusReviews", fields: [reviewedByManagerId], references: [id])
+
+  @@index([driverId, reviewStatus])
+  @@index([requestedByManagerId, reviewStatus])
+  @@map("driver_risk_status_reviews")
+}
+
+model DriverRiskStatusChange {
+  id              String            @id @default(uuid()) @db.Uuid
+  driverId        String            @db.Uuid @map("driver_id")
+  previousStatus  DriverRiskStatus? @map("previous_status")
+  nextStatus      DriverRiskStatus  @map("next_status")
+  changedByUserId String?           @db.Uuid @map("changed_by_user_id")
+  changedAt       DateTime          @default(now()) @map("changed_at")
+  note            String?
+  driver          Driver            @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  changedByUser   User?             @relation(fields: [changedByUserId], references: [id])
+
+  @@index([driverId, changedAt])
+  @@index([nextStatus, changedAt])
+  @@map("driver_risk_status_changes")
+}
+
+model ChatThread {
+  id        String        @id @default(uuid()) @db.Uuid
+  driverId  String?       @db.Uuid @map("driver_id")
+  managerId String?       @db.Uuid @map("manager_id")
+  subject   String        @default("Чат")
+  status    String        @default("open")
+  createdAt DateTime      @default(now()) @map("created_at")
+  updatedAt DateTime      @updatedAt @map("updated_at")
+  driver    Driver?       @relation(fields: [driverId], references: [id])
+  manager   Manager?      @relation(fields: [managerId], references: [id])
+  messages  ChatMessage[]
+
+  @@index([driverId])
+  @@index([managerId])
+  @@map("chat_threads")
+}
+
+model ChatMessage {
+  id           String     @id @default(uuid()) @db.Uuid
+  threadId     String     @db.Uuid @map("thread_id")
+  senderUserId String?    @db.Uuid @map("sender_user_id")
+  senderRole   UserRole   @map("sender_role")
+  senderName   String     @map("sender_name")
+  body         String
+  createdAt    DateTime   @default(now()) @map("created_at")
+  thread       ChatThread @relation(fields: [threadId], references: [id])
+
+  @@index([threadId, createdAt])
+  @@map("chat_messages")
+}
+
+model Car {
+  id             String          @id @default(uuid()) @db.Uuid
+  vin            String          @unique
+  plateNumber    String          @unique @map("plate_number")
+  make           String
+  model          String
+  companyName    String?         @map("company_name")
+  productionYear Int?            @map("production_year")
+  mileage        Int?
+  osagoStartDate DateTime?       @map("osago_start_date")
+  osagoEndDate   DateTime?       @map("osago_end_date")
+  cascoStartDate DateTime?       @map("casco_start_date")
+  cascoEndDate   DateTime?       @map("casco_end_date")
+  technicalInspectionStartDate DateTime? @map("technical_inspection_start_date")
+  technicalInspectionEndDate   DateTime? @map("technical_inspection_end_date")
+  engineOilReplacementKm Int?    @map("engine_oil_replacement_km")
+  gearboxOilReplacementKm Int?   @map("gearbox_oil_replacement_km")
+  color          String?
+  purchasePrice  Decimal?        @db.Decimal(18, 2) @map("purchase_price")
+  customsCost    Decimal?        @db.Decimal(18, 2) @map("customs_cost")
+  deliveryCost   Decimal?        @db.Decimal(18, 2) @map("delivery_cost")
+  repairCost     Decimal?        @db.Decimal(18, 2) @map("repair_cost")
+  targetSalePrice Decimal?       @db.Decimal(18, 2) @map("target_sale_price")
+  managerId      String?         @db.Uuid @map("manager_id")
+  status         CarStatus       @default(free)
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+  assignments    CarAssignment[]
+  contracts      Contract[]
+  partMovements  PartMovement[]
+  manager        Manager?        @relation(fields: [managerId], references: [id], onDelete: SetNull)
+
+  @@index([managerId])
+  @@map("cars")
+}
+
+model Part {
+  id          String         @id @default(uuid()) @db.Uuid
+  name        String
+  sku         String?
+  companyName String?        @map("company_name")
+  make        String?
+  model       String?
+  productionYear Int?        @map("production_year")
+  unit        String         @default("шт")
+  quantity    Int           @default(0)
+  minQuantity Int           @default(0) @map("min_quantity")
+  unitPrice   Decimal?      @db.Decimal(18, 2) @map("unit_price")
+  supplier    String?
+  note        String?
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  movements   PartMovement[]
+
+  @@index([companyName])
+  @@index([name])
+  @@index([sku])
+  @@map("parts")
+}
+
+model PartMovement {
+  id        String   @id @default(uuid()) @db.Uuid
+  partId    String   @db.Uuid @map("part_id")
+  carId     String?  @db.Uuid @map("car_id")
+  type      String
+  quantity  Int
+  unitPrice Decimal? @db.Decimal(18, 2) @map("unit_price")
+  reason    String?
+  note      String?
+  createdAt DateTime @default(now()) @map("created_at")
+  part      Part     @relation(fields: [partId], references: [id])
+  car       Car?     @relation(fields: [carId], references: [id])
+
+  @@index([partId])
+  @@index([carId])
+  @@index([type])
+  @@map("part_movements")
+}
+
+model CarAssignment {
+  id        String   @id @default(uuid()) @db.Uuid
+  carId     String   @db.Uuid @map("car_id")
+  driverId  String   @db.Uuid @map("driver_id")
+  startedAt DateTime @map("started_at")
+  endedAt   DateTime? @map("ended_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  car       Car      @relation(fields: [carId], references: [id])
+  driver    Driver   @relation(fields: [driverId], references: [id])
+
+  @@map("car_assignments")
+}
+
+model Contract {
+  id                String         @id @default(uuid()) @db.Uuid
+  driverId          String         @db.Uuid @map("driver_id")
+  carId             String         @db.Uuid @map("car_id")
+  status            ContractStatus @default(draft)
+  contractNumber    String         @unique @map("contract_number")
+  currency          String         @default("KGS")
+  principalAmount   Decimal        @db.Decimal(18, 2) @map("principal_amount")
+  upfrontAmount     Decimal        @default(0) @db.Decimal(18, 2) @map("upfront_amount")
+  financedAmount    Decimal        @db.Decimal(18, 2) @map("financed_amount")
+  installmentAmount Decimal        @db.Decimal(18, 2) @map("installment_amount")
+  monthlyInsuranceAmount Decimal?  @db.Decimal(18, 2) @map("monthly_insurance_amount")
+  monthlyGpsAmount  Decimal?       @db.Decimal(18, 2) @map("monthly_gps_amount")
+  installmentDay    Int            @map("installment_day")
+  termMonths        Int            @map("term_months")
+  startDate         DateTime       @map("start_date")
+  endDate           DateTime?      @map("end_date")
+  version           Int            @default(1)
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+  driver            Driver         @relation(fields: [driverId], references: [id])
+  car               Car            @relation(fields: [carId], references: [id])
+  obligations       Obligation[]
+  ledgerEntries     LedgerEntry[]
+  payments          Payment[]
+
+  @@map("contracts")
+}
+
+model Obligation {
+  id                String         @id @default(uuid()) @db.Uuid
+  contractId        String         @db.Uuid @map("contract_id")
+  driverId          String         @db.Uuid @map("driver_id")
+  type              ObligationType
+  dueDate           DateTime       @map("due_date")
+  amount            Decimal        @db.Decimal(18, 2)
+  paidAmount        Decimal        @default(0) @db.Decimal(18, 2) @map("paid_amount")
+  overdueAmount     Decimal        @default(0) @db.Decimal(18, 2) @map("overdue_amount")
+  deferredUntil     DateTime?      @map("deferred_until")
+  deferredByStatusRequestId String? @db.Uuid @map("deferred_by_status_request_id")
+  externalReference String?        @map("external_reference")
+  metadata          Json?
+  createdAt         DateTime       @default(now()) @map("created_at")
+  contract          Contract       @relation(fields: [contractId], references: [id])
+  driver            Driver         @relation(fields: [driverId], references: [id])
+  payments          Payment[]
+
+  @@map("obligations")
+}
+
+model LedgerAccount {
+  id        String        @id @default(uuid()) @db.Uuid
+  code      String        @unique
+  name      String
+  currency  String        @default("KGS")
+  createdAt DateTime      @default(now()) @map("created_at")
+  entries   LedgerEntry[]
+
+  @@map("ledger_accounts")
+}
+
+model LedgerEntry {
+  id                String        @id @default(uuid()) @db.Uuid
+  accountId         String        @db.Uuid @map("account_id")
+  contractId        String?       @db.Uuid @map("contract_id")
+  driverId          String?       @db.Uuid @map("driver_id")
+  paymentId         String?       @db.Uuid @map("payment_id")
+  payoutId          String?       @db.Uuid @map("payout_id")
+  entryType         LedgerEntryType @map("entry_type")
+  amount            Decimal       @db.Decimal(18, 2)
+  direction         Int
+  idempotencyKey    String?       @map("idempotency_key")
+  externalReference String?       @map("external_reference")
+  description       String?
+  postedAt          DateTime      @map("posted_at")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  account           LedgerAccount @relation(fields: [accountId], references: [id])
+  contract          Contract?     @relation(fields: [contractId], references: [id])
+
+  @@map("ledger_entries")
+}
+
+model Payment {
+  id                String        @id @default(uuid()) @db.Uuid
+  driverId          String        @db.Uuid @map("driver_id")
+  contractId        String?       @db.Uuid @map("contract_id")
+  obligationId      String?       @db.Uuid @map("obligation_id")
+  provider          String
+  providerPaymentId String?       @map("provider_payment_id")
+  idempotencyKey    String        @unique @map("idempotency_key")
+  status            PaymentStatus @default(pending)
+  amount            Decimal       @db.Decimal(18, 2)
+  appliedAmount     Decimal       @default(0) @db.Decimal(18, 2) @map("applied_amount")
+  unappliedAmount   Decimal       @default(0) @db.Decimal(18, 2) @map("unapplied_amount")
+  currency          String        @default("KGS")
+  paymentForDate    DateTime?     @map("payment_for_date")
+  requestedAt       DateTime      @default(now()) @map("requested_at")
+  processedAt       DateTime?     @map("processed_at")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  driver            Driver        @relation(fields: [driverId], references: [id])
+  contract          Contract?     @relation(fields: [contractId], references: [id])
+  obligation        Obligation?   @relation(fields: [obligationId], references: [id])
+
+  @@map("payments")
+}
+
+model PaymentCalendarDayOverride {
+  id              String   @id @default(uuid()) @db.Uuid
+  driverId        String   @db.Uuid @map("driver_id")
+  date            DateTime @db.Date
+  status          String
+  note            String?
+  updatedByUserId String?  @db.Uuid @map("updated_by_user_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  driver          Driver   @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  updatedByUser   User?    @relation(fields: [updatedByUserId], references: [id])
+
+  @@unique([driverId, date])
+  @@index([date])
+  @@map("payment_calendar_day_overrides")
+}
+
+model DriverCreditBalance {
+  id        String   @id @default(uuid()) @db.Uuid
+  driverId  String   @unique @db.Uuid @map("driver_id")
+  amount    Decimal  @default(0) @db.Decimal(18, 2)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  driver    Driver   @relation(fields: [driverId], references: [id])
+
+  @@map("driver_credit_balances")
+}
+
+model Payout {
+  id               String       @id @default(uuid()) @db.Uuid
+  driverId         String       @db.Uuid @map("driver_id")
+  amount           Decimal      @db.Decimal(18, 2)
+  currency         String       @default("KGS")
+  status           PayoutStatus @default(requested)
+  provider         String?
+  providerPayoutId String?      @map("provider_payout_id")
+  idempotencyKey   String       @unique @map("idempotency_key")
+  requestedAt      DateTime     @default(now()) @map("requested_at")
+  approvedByUserId String?      @db.Uuid @map("approved_by_user_id")
+  paidAt           DateTime?    @map("paid_at")
+  createdAt        DateTime     @default(now()) @map("created_at")
+  driver           Driver       @relation(fields: [driverId], references: [id])
+  approvedBy       User?        @relation("ApprovedPayouts", fields: [approvedByUserId], references: [id])
+
+  @@map("payouts")
+}
+
+model YandexBalance {
+  id               String   @id @default(uuid()) @db.Uuid
+  driverId         String   @db.Uuid @map("driver_id")
+  externalDriverId String   @map("external_driver_id")
+  amount           Decimal  @db.Decimal(18, 2)
+  syncedAt         DateTime @map("synced_at")
+  createdAt        DateTime @default(now()) @map("created_at")
+  driver           Driver   @relation(fields: [driverId], references: [id])
+
+  @@map("yandex_balances")
+}
+
+model WebhookInbox {
+  id          String   @id @default(uuid()) @db.Uuid
+  provider    String
+  eventId     String   @map("event_id")
+  signature   String?
+  payload     Json
+  receivedAt  DateTime @default(now()) @map("received_at")
+  processedAt DateTime? @map("processed_at")
+  status      String   @default("received")
+
+  @@unique([provider, eventId])
+  @@map("webhook_inbox")
+}
+
+model Notification {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String?  @db.Uuid @map("user_id")
+  driverId     String?  @db.Uuid @map("driver_id")
+  channel      NotificationChannel
+  templateCode String   @map("template_code")
+  payload      Json
+  status       String   @default("pending")
+  createdAt    DateTime @default(now()) @map("created_at")
+  deliveredAt  DateTime? @map("delivered_at")
+
+  @@map("notifications")
+}
+
+model AuthRateLimit {
+  id              String   @id @default(uuid()) @db.Uuid
+  action          String
+  keyHash         String   @map("key_hash")
+  windowStartedAt DateTime @map("window_started_at")
+  attemptCount    Int      @default(0) @map("attempt_count")
+  blockedUntil    DateTime? @map("blocked_until")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@unique([action, keyHash, windowStartedAt], map: "auth_rate_limits_action_key_hash_window_started_at_key")
+  @@index([action, keyHash, blockedUntil], map: "auth_rate_limits_action_key_hash_blocked_until_idx")
+  @@map("auth_rate_limits")
+}
+
+model DriverStatusRequest {
+  id        String   @id @default(uuid()) @db.Uuid
+  driverId  String   @db.Uuid @map("driver_id")
+  type      String
+  status    String
+  period    String
+  note      String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("driver_status_requests")
+}
+
+model Incident {
+  id           String   @id @default(uuid()) @db.Uuid
+  title        String
+  incidentType String   @default("general") @map("incident_type")
+  status       String
+  priority     String
+  driverId     String?  @db.Uuid @map("driver_id")
+  carId        String?  @db.Uuid @map("car_id")
+  occurredAt   DateTime? @map("occurred_at")
+  periodLabel  String?  @map("period_label")
+  referenceNumber String? @map("reference_number")
+  amount       Decimal? @db.Decimal(18, 2)
+  insuranceCompensationAmount Decimal? @db.Decimal(18, 2) @map("insurance_compensation_amount")
+  writeoffAmount Decimal? @db.Decimal(18, 2) @map("writeoff_amount")
+  description  String?
+  accidentPhotoUrl String? @map("accident_photo_url")
+  insuranceNote String? @map("insurance_note")
+  repairNote   String?  @map("repair_note")
+  locationNote String?  @map("location_note")
+  managerLabel String?  @map("manager_label")
+  serviceStage String?  @map("service_stage")
+  serviceCaseType String? @map("service_case_type")
+  servicePaymentStatus String? @map("service_payment_status")
+  servicePayer String? @map("service_payer")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("incidents")
+}
+
+model OutboxEvent {
+  id            String   @id @default(uuid()) @db.Uuid
+  topic         String
+  aggregateType String   @map("aggregate_type")
+  aggregateId   String   @map("aggregate_id")
+  payload       Json
+  status        String   @default("pending")
+  createdAt     DateTime @default(now()) @map("created_at")
+  publishedAt   DateTime? @map("published_at")
+
+  @@map("outbox_events")
+}
+
+model Settings {
+  id                        String   @id @default(uuid()) @db.Uuid
+  payoutApprovalThreshold   Int      @map("payout_approval_threshold")
+  defaultInstallmentDay     Int      @map("default_installment_day")
+  yandexSyncIntervalMinutes Int      @map("yandex_sync_interval_minutes")
+  bakaiWebhookEnabled       Boolean  @default(false) @map("bakai_webhook_enabled")
+  allowedStatusRequestTypes String[] @map("allowed_status_request_types")
+  notificationChannels      String[] @map("notification_channels")
+  companies                 String[] @default([]) @map("companies")
+  customCrmRoles            Json     @default("[]") @map("custom_crm_roles")
+  crmRoleAccess             Json     @default("{}") @map("crm_role_access")
+  createdAt                 DateTime @default(now()) @map("created_at")
+  updatedAt                 DateTime @updatedAt @map("updated_at")
+
+  @@map("settings")
+}
+
+model ManagerAlert {
+  id        String   @id @default(uuid()) @db.Uuid
+  title     String
+  details   String
+  managerId String?  @map("manager_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("manager_alerts")
+}
+
+model QuickAction {
+  id        String   @id @default(uuid()) @db.Uuid
+  label     String
+  target    String
+  managerId String?  @map("manager_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("quick_actions")
+}
+
+model AuditLog {
+  id            String   @id @default(uuid()) @db.Uuid
+  actorUserId   String?  @db.Uuid @map("actor_user_id")
+  action        String
+  entityType    String   @map("entity_type")
+  entityId      String?  @db.Uuid @map("entity_id")
+  beforeData    Json?    @map("before_data")
+  afterData     Json?    @map("after_data")
+  correlationId String   @map("correlation_id")
+  ipAddress     String?  @map("ip_address")
+  createdAt     DateTime @default(now()) @map("created_at")
+  actorUser     User?    @relation(fields: [actorUserId], references: [id])
+
+  @@map("audit_logs")
+}

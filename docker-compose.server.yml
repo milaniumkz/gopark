@@ -1,0 +1,121 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: gopark-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-gopark}
+      POSTGRES_USER: ${POSTGRES_USER:-gopark}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gopark}
+    ports:
+      - "5432:5432"
+    volumes:
+      - gopark_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gopark} -d ${POSTGRES_DB:-gopark}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: gopark-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - gopark_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api-migrate:
+    image: gopark-api:local
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      APP_RUNTIME: api
+      PORT: 3000
+      API_PREFIX: api
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      AUTH_TOKEN_SECRET: ${AUTH_TOKEN_SECRET}
+      ALLOW_INSECURE_BOOTSTRAP_AUTH: "false"
+      HTTP_REQUEST_LOGGING: "true"
+    command: >
+      sh -lc "node /app/node_modules/.pnpm/prisma@5.22.0/node_modules/prisma/build/index.js migrate deploy --schema apps/api/prisma/schema.prisma &&
+      node apps/api/scripts/bootstrap-prisma.mjs"
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: gopark-api:local
+    container_name: gopark-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      APP_RUNTIME: api
+      PORT: 3000
+      API_PREFIX: api
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      AUTH_TOKEN_SECRET: ${AUTH_TOKEN_SECRET}
+      FIREBASE_SERVICE_ACCOUNT_PATH: ${FIREBASE_SERVICE_ACCOUNT_PATH:-/run/secrets/gopark-firebase-service-account.json}
+      ALLOW_INSECURE_BOOTSTRAP_AUTH: "false"
+      HTTP_REQUEST_LOGGING: "true"
+    volumes:
+      - ${FIREBASE_SERVICE_ACCOUNT_HOST_PATH:-/home/client/gopark/secrets/firebase-service-account.json}:${FIREBASE_SERVICE_ACCOUNT_PATH:-/run/secrets/gopark-firebase-service-account.json}:ro
+  worker:
+    image: gopark-api:local
+    container_name: gopark-worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      APP_RUNTIME: worker
+      PORT: 3001
+      API_PREFIX: api
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      AUTH_TOKEN_SECRET: ${AUTH_TOKEN_SECRET}
+      FIREBASE_SERVICE_ACCOUNT_PATH: ${FIREBASE_SERVICE_ACCOUNT_PATH:-/run/secrets/gopark-firebase-service-account.json}
+      ALLOW_INSECURE_BOOTSTRAP_AUTH: "false"
+      HTTP_REQUEST_LOGGING: "true"
+    volumes:
+      - ${FIREBASE_SERVICE_ACCOUNT_HOST_PATH:-/home/client/gopark/secrets/firebase-service-account.json}:${FIREBASE_SERVICE_ACCOUNT_PATH:-/run/secrets/gopark-firebase-service-account.json}:ro
+
+  crm-web:
+    build:
+      context: .
+      dockerfile: apps/crm-web/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://185.138.185.36:3000/api}
+        VITE_FIREBASE_WEB_VAPID_KEY: ${VITE_FIREBASE_WEB_VAPID_KEY:-}
+    image: gopark-crm-web:local
+    container_name: gopark-crm-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "3000:80"
+
+volumes:
+  gopark_postgres_data:
+  gopark_redis_data:

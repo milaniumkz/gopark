@@ -1,0 +1,75 @@
+name: server-ops
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: status, logs, restart, redeploy, rollback
+        required: true
+        default: status
+      rollback_sha:
+        description: Required only for rollback
+        required: false
+
+concurrency:
+  group: production-ops
+  cancel-in-progress: false
+
+jobs:
+  ops:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.PROD_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${{ secrets.PROD_SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+      - name: Run operation
+        env:
+          OPERATION: ${{ github.event.inputs.operation }}
+          ROLLBACK_SHA: ${{ github.event.inputs.rollback_sha }}
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -p "${{ secrets.PROD_SSH_PORT }}" "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}" "OPERATION='$OPERATION' ROLLBACK_SHA='$ROLLBACK_SHA' bash -s" <<'REMOTE'
+          set -euo pipefail
+          BASE="/home/client"
+          CONFIG_DIR="$BASE/gopark"
+          CURRENT="${BASE}/gopark-current"
+          if [ -L "$CURRENT" ]; then APP_DIR="$(readlink -f "$CURRENT")"; else APP_DIR="$CONFIG_DIR"; fi
+          cd "$APP_DIR"
+
+          case "$OPERATION" in
+            status)
+              docker compose --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml ps
+              cat "$BASE/gopark-current-sha" 2>/dev/null || true
+              curl -fsS http://127.0.0.1:3000/api/health
+              ;;
+            logs)
+              docker compose --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml logs --tail=200 api worker crm-web | sed -E 's/(Authorization: Bearer )[A-Za-z0-9._-]+/\1[redacted]/g'
+              ;;
+            restart)
+              docker compose --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml restart api worker crm-web
+              curl -fsS http://127.0.0.1:3000/api/health
+              ;;
+            redeploy)
+              docker compose --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml up -d --no-deps api worker crm-web
+              curl -fsS http://127.0.0.1:3000/api/health
+              ;;
+            rollback)
+              test -n "$ROLLBACK_SHA"
+              TARGET="$BASE/gopark-releases/$ROLLBACK_SHA"
+              test -d "$TARGET"
+              cd "$TARGET"
+              docker compose --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml build api crm-web
+              docker compose --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml up -d --no-deps api worker crm-web
+              ln -sfn "$TARGET" "$CURRENT"
+              echo "$ROLLBACK_SHA" > "$BASE/gopark-current-sha"
+              curl -fsS http://127.0.0.1:3000/api/health
+              ;;
+            *)
+              echo "Unsupported operation"
+              exit 2
+              ;;
+          esac
+REMOTE

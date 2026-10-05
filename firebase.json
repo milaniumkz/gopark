@@ -1,0 +1,24 @@
+{
+  "hosting": {
+    "site": "gopark-3da8f",
+    "public": "apps/crm-web/dist",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "api/**",
+        "run": {
+          "serviceId": "gopark-api",
+          "region": "us-central1"
+        }
+      },
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}
