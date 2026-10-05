@@ -72,4 +72,4 @@ jobs:
               exit 2
               ;;
           esac
-REMOTE
+          REMOTE
