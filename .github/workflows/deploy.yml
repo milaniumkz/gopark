@@ -61,7 +61,7 @@ jobs:
 
           mkdir -p "$RELEASES" "$BASE/backups"
           cd "$CONFIG_DIR"
-          docker compose --env-file .env -f docker-compose.server.yml ps >/dev/null
+          docker compose -p gopark --env-file .env -f docker-compose.server.yml ps >/dev/null
 
           docker exec gopark-postgres pg_dump -U gopark gopark | gzip > "$BASE/backups/gopark-ci-$SHA.sql.gz"
           tar -czf "$BASE/backups/gopark-env-$SHA.tgz" -C "$CONFIG_DIR" .env secrets 2>/dev/null || true
@@ -84,9 +84,9 @@ jobs:
           done
           cd "$RELEASE_DIR"
 
-          docker compose --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml build api crm-web
-          docker compose --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml run --rm api-migrate
-          docker compose --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml up -d --no-deps api worker crm-web
+          docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml build api crm-web
+          docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml run --rm api-migrate
+          docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml up -d --no-deps api worker crm-web
           curl -fsS http://127.0.0.1:3000/api/health
           ln -sfn "$RELEASE_DIR" "$BASE/gopark-current"
           echo "$SHA" > "$BASE/gopark-current-sha"

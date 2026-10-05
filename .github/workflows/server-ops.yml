@@ -41,19 +41,19 @@ jobs:
 
           case "$OPERATION" in
             status)
-              docker compose --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml ps
+              docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml ps
               cat "$BASE/gopark-current-sha" 2>/dev/null || true
               curl -fsS http://127.0.0.1:3000/api/health
               ;;
             logs)
-              docker compose --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml logs --tail=200 api worker crm-web | sed -E 's/(Authorization: Bearer )[A-Za-z0-9._-]+/\1[redacted]/g'
+              docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml logs --tail=200 api worker crm-web | sed -E 's/(Authorization: Bearer )[A-Za-z0-9._-]+/\1[redacted]/g'
               ;;
             restart)
-              docker compose --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml restart api worker crm-web
+              docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml restart api worker crm-web
               curl -fsS http://127.0.0.1:3000/api/health
               ;;
             redeploy)
-              docker compose --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml up -d --no-deps api worker crm-web
+              docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml up -d --no-deps api worker crm-web
               curl -fsS http://127.0.0.1:3000/api/health
               ;;
             rollback)
@@ -61,8 +61,8 @@ jobs:
               TARGET="$BASE/gopark-releases/$ROLLBACK_SHA"
               test -d "$TARGET"
               cd "$TARGET"
-              docker compose --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml build api crm-web
-              docker compose --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml up -d --no-deps api worker crm-web
+              docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml build api crm-web
+              docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml up -d --no-deps api worker crm-web
               ln -sfn "$TARGET" "$CURRENT"
               echo "$ROLLBACK_SHA" > "$BASE/gopark-current-sha"
               curl -fsS http://127.0.0.1:3000/api/health
