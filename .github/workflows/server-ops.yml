@@ -53,7 +53,7 @@ jobs:
               curl -fsS http://127.0.0.1:3000/api/health
               ;;
             redeploy)
-              docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml up -d --no-deps api worker crm-web
+              docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml up -d --no-deps --force-recreate api worker crm-web
               curl -fsS http://127.0.0.1:3000/api/health
               ;;
             rollback)
@@ -62,7 +62,7 @@ jobs:
               test -d "$TARGET"
               cd "$TARGET"
               docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml build api crm-web
-              docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml up -d --no-deps api worker crm-web
+              docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml up -d --no-deps --force-recreate api worker crm-web
               ln -sfn "$TARGET" "$CURRENT"
               echo "$ROLLBACK_SHA" > "$BASE/gopark-current-sha"
               curl -fsS http://127.0.0.1:3000/api/health

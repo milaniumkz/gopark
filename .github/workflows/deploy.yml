@@ -86,7 +86,7 @@ jobs:
 
           docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml build api crm-web
           docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml run --rm api-migrate
-          docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml up -d --no-deps api worker crm-web
+          docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml up -d --no-deps --force-recreate api worker crm-web
           curl -fsS http://127.0.0.1:3000/api/health
           ln -sfn "$RELEASE_DIR" "$BASE/gopark-current"
           echo "$SHA" > "$BASE/gopark-current-sha"
