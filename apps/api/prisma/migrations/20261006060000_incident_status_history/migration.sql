@@ -1,3 +1,5 @@
+BEGIN;
+SET LOCAL lock_timeout = '5s';
 -- Preserve every status/stage transition, including updates made outside mobile API.
 ALTER TABLE "incidents" ADD COLUMN "status_history" JSONB NOT NULL DEFAULT '[]'::jsonb;
 
@@ -24,3 +26,5 @@ CREATE TRIGGER incident_status_history
 BEFORE INSERT OR UPDATE ON "incidents"
 FOR EACH ROW EXECUTE FUNCTION record_incident_status_history();
 -- Existing rows keep empty history: past transition times cannot be reconstructed.
+
+COMMIT;

@@ -5194,8 +5194,6 @@ String _managerStatusLabel(String status) {
       return 'Штрафстоянка';
     case 'maintenance':
       return 'Ремонт';
-    case 'writeoff_requested':
-      return 'Заявка на списание';
     case 'written_off':
       return 'Списан';
     case 'writeoff_requested':
@@ -5260,6 +5258,8 @@ String _managerServiceStageLabel(String stage) {
       return 'В ремонте';
     case 'completed':
       return 'Завершено';
+    case 'writeoff_requested':
+      return 'Заявка на списание';
     case 'written_off':
       return 'Списан';
     case 'impound':

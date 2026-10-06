@@ -15,16 +15,26 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: '3.47.6'
           cache: true
+      - name: Resolve manager dependencies
+        working-directory: apps/manager-app
+        run: flutter pub get
+      - uses: actions/upload-artifact@v4
+        with:
+          name: manager-resolved-lockfile
+          path: apps/manager-app/pubspec.lock
+          if-no-files-found: error
       - name: Analyze and test manager app
         working-directory: apps/manager-app
         run: |
-          flutter pub get --enforce-lockfile
           flutter analyze
           flutter test
       - name: Build manager APK
         working-directory: apps/manager-app
-        run: flutter build apk --release --dart-define=API_BASE_URL=http://185.138.185.36/api --build-number=${{ github.run_number }}
+        run: |
+          build_number=$(( $(date +%s) / 60 ))
+          flutter build apk --release --dart-define=API_BASE_URL=http://185.138.185.36/api --build-number="$build_number"
       - uses: actions/upload-artifact@v4
         with:
           name: gopark-manager-apk
