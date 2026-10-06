@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { PrismaClient } from "@prisma/client";
+import { createRequire } from "node:module";
 import { ContractPrismaRepository } from "./contract.prisma.repository.js";
 import type { PrismaService } from "../prisma/prisma.service.js";
 
@@ -8,6 +8,7 @@ test("concurrent contract creation allocates consecutive numbers and failed save
   skip: process.env.CONTRACT_NUMBER_INTEGRATION !== "true",
 }, async () => {
   assert.equal(new URL(process.env.DATABASE_URL!).pathname, "/gopark_contract_test");
+  const { PrismaClient } = createRequire(import.meta.url)("@prisma/client");
   const client = new PrismaClient();
   const repository = new ContractPrismaRepository({ client } as unknown as PrismaService);
   try {
