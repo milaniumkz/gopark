@@ -74,6 +74,7 @@ apk/
 *.jpeg
 *.webp
 !apps/**/assets/**
+!apps/manager-app/android/app/src/main/res/mipmap/ic_launcher.png
 !apps/**/public/**
 !apps/**/web/**
 !docs/design/parkpro-audit/**
