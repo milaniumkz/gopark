@@ -153,7 +153,7 @@ export function ServicePage() {
   const [serviceCaseType, setServiceCaseType] = useState<"insurance" | "non_insurance">("non_insurance");
   const [servicePaymentStatus, setServicePaymentStatus] = useState<"paid" | "unpaid" | "not_required">("unpaid");
   const [servicePayer, setServicePayer] = useState<"insurance" | "driver" | "company" | "not_set">("company");
-  const [statusFilter, setStatusFilter] = useState<"all" | "awaiting_repair" | "in_repair" | "completed" | "written_off" | "archived">("awaiting_repair");
+  const [statusFilter, setStatusFilter] = useState<"active" | "all" | "awaiting_repair" | "in_repair" | "completed" | "written_off" | "archived">("active");
   const [caseTypeFilter, setCaseTypeFilter] = useState<"all" | "insurance" | "non_insurance">("all");
   const [paymentStateFilter, setPaymentStateFilter] = useState<"all" | "paid" | "unpaid">("all");
   const [payerFilter, setPayerFilter] = useState<"all" | "insurance" | "driver" | "company">("all");
@@ -196,7 +196,10 @@ export function ServicePage() {
         if (statusFilter === "archived" && item.status !== "archived") {
           return false;
         }
-        if (statusFilter !== "all" && statusFilter !== "archived" && stage !== statusFilter) {
+        if (statusFilter === "active" && !["awaiting_repair", "in_repair"].includes(stage)) {
+          return false;
+        }
+        if (statusFilter !== "active" && statusFilter !== "all" && statusFilter !== "archived" && stage !== statusFilter) {
           return false;
         }
         if (caseTypeFilter === "insurance" && (item.insuranceCompensationAmount ?? 0) <= 0) {
@@ -260,7 +263,7 @@ export function ServicePage() {
 
   function applyPresetView(view: "operations" | "insurance" | "archive"): void {
     if (view === "operations") {
-      setStatusFilter("awaiting_repair");
+      setStatusFilter("active");
       setCaseTypeFilter("all");
       setPaymentStateFilter("all");
       setPayerFilter("all");
@@ -270,7 +273,7 @@ export function ServicePage() {
       return;
     }
     if (view === "insurance") {
-      setStatusFilter("awaiting_repair");
+      setStatusFilter("active");
       setCaseTypeFilter("insurance");
       setPaymentStateFilter("all");
       setPayerFilter("insurance");
@@ -504,6 +507,7 @@ export function ServicePage() {
                 ))}
               </select>
               <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}>
+                <option value="active">Активные ремонты</option>
                 <option value="all">Все статусы</option>
                 <option value="awaiting_repair">Ожидает ремонт</option>
                 <option value="in_repair">В ремонте</option>

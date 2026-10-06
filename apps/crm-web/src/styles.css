@@ -6726,42 +6726,50 @@ a {
   font-size: clamp(27px, 1.9vw, 40px);
 }
 
-.dashboard-page .dashboard-summary-grid--parkpro {
+.dashboard-page .dashboard-summary-grid--parkpro,
+.payments-page .stats-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
 }
 
-.dashboard-page .dashboard-summary-grid--parkpro .metric-card {
+.dashboard-page .dashboard-summary-grid--parkpro .metric-card,
+.payments-page .stats-grid .metric-card {
   min-height: 76px;
   padding: 10px 12px;
   border-radius: 10px;
   box-shadow: 0 4px 10px rgba(15, 23, 42, 0.04);
 }
 
-.dashboard-page .dashboard-summary-grid--parkpro .metric-card__top {
+.dashboard-page .dashboard-summary-grid--parkpro .metric-card__top,
+.payments-page .stats-grid .metric-card__top {
   align-items: center;
   gap: 6px;
 }
 
-.dashboard-page .dashboard-summary-grid--parkpro .metric-card__icon {
+.dashboard-page .dashboard-summary-grid--parkpro .metric-card__icon,
+.payments-page .stats-grid .metric-card__icon {
   width: 26px;
   height: 26px;
   border-radius: 8px;
 }
 
-.dashboard-page .dashboard-summary-grid--parkpro .metric-card span {
+.dashboard-page .dashboard-summary-grid--parkpro .metric-card span,
+.payments-page .stats-grid .metric-card span {
   font-size: 12px;
   line-height: 1.1;
 }
 
-.dashboard-page .dashboard-summary-grid--parkpro .metric-card strong {
+.dashboard-page .dashboard-summary-grid--parkpro .metric-card strong,
+.payments-page .stats-grid .metric-card strong {
   margin-top: 5px;
   font-size: clamp(18px, 1.25vw, 24px);
   line-height: 1;
 }
 
 .dashboard-page .dashboard-summary-grid--parkpro .metric-card__sub,
-.dashboard-page .dashboard-summary-grid--parkpro .metric-card__meta {
+.payments-page .stats-grid .metric-card__sub,
+.dashboard-page .dashboard-summary-grid--parkpro .metric-card__meta,
+.payments-page .stats-grid .metric-card__meta {
   margin-top: 3px;
   font-size: 11px;
   line-height: 1.15;

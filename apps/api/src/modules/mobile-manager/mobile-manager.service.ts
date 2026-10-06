@@ -72,14 +72,13 @@ export class MobileManagerService {
   async getSummary(currentUser: RequestUser | null): Promise<ManagerDashboardSummary> {
     const scopedDrivers = await this.mobileAccessService.getScopedDrivers(currentUser);
     const [cars, alerts] = await Promise.all([
-      currentUser?.companyName ? this.carRepository.listByCompany(currentUser.companyName) : this.carRepository.list(),
+      this.getVehicles(currentUser),
       this.getScopedAlerts(currentUser),
     ]);
     const summarySnapshot = await this.driverMobileReadService.getManagerDriversSummary(
       scopedDrivers.map((driver) => driver.id),
       this.today(),
     );
-    const scopedDriverIds = new Set(scopedDrivers.map((driver) => driver.id));
 
     return {
       assignedDrivers: scopedDrivers.length,
@@ -87,7 +86,6 @@ export class MobileManagerService {
       paymentDueDrivers: summarySnapshot.paymentDueDrivers,
       activeCars: cars.filter((item) => (
         typeof item.assignedDriverId === "string"
-        && scopedDriverIds.has(item.assignedDriverId)
         && (item.status === "assigned" || item.status === "active_installment")
       )).length,
       incidentsOpen: summarySnapshot.openIncidents,
@@ -200,12 +198,11 @@ export class MobileManagerService {
 
   async getIdleVehicles(currentUser: RequestUser | null): Promise<ManagerIdleVehicleItem[]> {
     const [cars, drivers, users, incidents] = await Promise.all([
-      currentUser?.companyName ? this.carRepository.listByCompany(currentUser.companyName) : this.carRepository.list(),
+      this.getVehicles(currentUser),
       this.mobileAccessService.getScopedDrivers(currentUser),
       currentUser?.companyName ? this.userRepository.listAdminByCompany(currentUser.companyName) : this.userRepository.listAdmin(),
       currentUser?.companyName ? this.incidentRepository.listByCompany(currentUser.companyName) : this.incidentRepository.list(),
     ]);
-    const scopedDriverIds = new Set(drivers.map((driver) => driver.id));
     const driverById = new Map(drivers.map((driver) => [driver.id, driver]));
     const managerNameById = this.getManagerNameMap(users);
     const openIncidentByCarId = new Map(
@@ -225,9 +222,8 @@ export class MobileManagerService {
       const driver = ownerDriverId ? driverById.get(ownerDriverId) : null;
       const incident = openIncidentByCarId.get(car.id) ?? (ownerDriverId ? openIncidentByDriverId.get(ownerDriverId) : undefined);
       const category = this.resolveIdleVehicleCategory(car.status, incident);
-      const isAssignedToVisibleDriver = ownerDriverId ? scopedDriverIds.has(ownerDriverId) : this.canSeeAllCompanyVehicles(currentUser);
       const isIdle = !car.assignedDriverId || !["assigned", "active_installment"].includes(car.status) || Boolean(incident) || category !== "office";
-      if (!isAssignedToVisibleDriver || !isIdle) {
+      if (!isIdle) {
         continue;
       }
       idleVehicles.push({
@@ -240,8 +236,8 @@ export class MobileManagerService {
         reason: incident?.title ?? this.getIdleVehicleCategoryLabel(category),
         driverId: driver?.id ?? ownerDriverId,
         driverName: driver?.fullName ?? null,
-        managerId: driver?.managerId ?? null,
-        managerName: driver?.managerId ? managerNameById.get(driver.managerId) ?? null : null,
+        managerId: car.managerId ?? driver?.managerId ?? null,
+        managerName: car.managerName ?? (driver?.managerId ? managerNameById.get(driver.managerId) ?? null : null),
         incidentId: incident?.id ?? null,
         sinceDate: incident?.occurredAt ?? null,
       });
@@ -259,9 +255,15 @@ export class MobileManagerService {
     const scopedDriverIds = new Set(drivers.map((driver) => driver.id));
     const driverById = new Map(drivers.map((driver) => [driver.id, driver]));
     const managerNameById = this.getManagerNameMap(users);
+    const managerIds = currentUser?.role === "manager"
+      ? await this.userRepository.getManagerScopeIds(currentUser.id, currentUser.companyName ?? null)
+      : new Set<string>();
     const visibleCars = this.canSeeAllCompanyVehicles(currentUser)
       ? cars
       : cars.filter((car) => {
+        if (car.managerId) {
+          return managerIds.has(car.managerId);
+        }
         const ownerDriverId = car.assignedDriverId ?? car.lastAssignedDriverId ?? null;
         return ownerDriverId ? scopedDriverIds.has(ownerDriverId) : false;
       });
@@ -271,8 +273,8 @@ export class MobileManagerService {
       const driver = ownerDriverId ? driverById.get(ownerDriverId) : null;
       return {
         ...car,
-        managerId: driver?.managerId ?? null,
-        managerName: driver?.managerId ? managerNameById.get(driver.managerId) ?? null : null,
+        managerId: car.managerId ?? driver?.managerId ?? null,
+        managerName: car.managerName ?? (car.managerId ? managerNameById.get(car.managerId) ?? null : driver?.managerId ? managerNameById.get(driver.managerId) ?? null : null),
       };
     });
   }
@@ -286,17 +288,16 @@ export class MobileManagerService {
       return car;
     }
 
-    const drivers = await this.mobileAccessService.getScopedDrivers(currentUser);
-    const scopedDriverIds = new Set(drivers.map((driver) => driver.id));
-    const ownerDriverId = car.assignedDriverId ?? car.lastAssignedDriverId ?? null;
-    return ownerDriverId && scopedDriverIds.has(ownerDriverId) ? car : null;
+    const visibleCars = await this.getVehicles(currentUser);
+    return visibleCars.some((item) => item.id === vehicleId) ? car : null;
   }
 
   async getManagers(currentUser: RequestUser | null): Promise<ManagerTeamItem[]> {
-    const [drivers, users, idleVehicles] = await Promise.all([
+    const [drivers, users, idleVehicles, vehicles] = await Promise.all([
       this.mobileAccessService.getScopedDrivers(currentUser),
       currentUser?.companyName ? this.userRepository.listAdminByCompany(currentUser.companyName) : this.userRepository.listAdmin(),
       this.getIdleVehicles(currentUser),
+      this.getVehicles(currentUser),
     ]);
     const scopedManagerIds = currentUser?.role === "manager"
       ? await this.userRepository.getManagerScopeIds(currentUser.id, currentUser.companyName ?? null)
@@ -319,7 +320,7 @@ export class MobileManagerService {
             || ["accident", "maintenance", "idle", "force_majeure"].includes(driver.status)
             || (financeSnapshots[driver.id]?.overdueDebt ?? 0) > 0
           )).length,
-          carsTotal: managerDrivers.filter((driver) => driver.activeContractId).length,
+          carsTotal: vehicles.filter((car) => car.managerId === manager.managerProfileId || car.managerId === manager.id).length,
           idleCarsTotal: managerIdleVehicles.length,
           idleOfficeCars: managerIdleVehicles.filter((vehicle) => vehicle.category === "office").length,
           idleAccidentCars: managerIdleVehicles.filter((vehicle) => vehicle.category === "accident").length,
@@ -651,22 +652,30 @@ export class MobileManagerService {
     }
 
     if (action === "repair") {
-      await this.updateAssignedCarStatus(driverId, "maintenance");
+      const car = await this.carRepository.getAssignedByDriver(driverId);
+      if (!car) {
+        throw new BadRequestException("У водителя нет назначенной машины для отправки на СТО");
+      }
+      const manager = currentUser?.role === "manager"
+        ? await this.userRepository.getManagerProfile(currentUser.id, currentUser.companyName ?? null)
+        : null;
       const incident = await this.incidentRepository.create({
         title: `Ремонт: ${driver.fullName}`,
         incidentType: "repair",
         status: "open",
         priority: "high",
         driverId,
+        carId: car.id,
         occurredAt,
         description: note ?? "Автомобиль поставлен на ремонт бригадиром",
         repairNote: note,
-        managerLabel: currentUser?.id ?? null,
+        managerLabel: manager?.displayName ?? currentUser?.id ?? null,
         serviceStage: "in_repair",
-        serviceCaseType: "repair",
+        serviceCaseType: "non_insurance",
         servicePaymentStatus: "unpaid",
         servicePayer: "driver",
       });
+      await this.carRepository.update(car.id, { status: "maintenance" });
       await this.notificationsCreateService.createManagerDriverEvent(
         driverId,
         `Срочно: ремонт - ${driver.fullName}`,
