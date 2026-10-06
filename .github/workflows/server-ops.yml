@@ -4,12 +4,16 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: status, incident-schema, logs, restart, redeploy, rollback
+        description: status, incident-schema, dashboard-totals, logs, restart, redeploy, rollback, publish-manager-apk
         required: true
         default: status
       rollback_sha:
         description: Required only for rollback
         required: false
+
+permissions:
+  contents: read
+  actions: read
 
 concurrency:
   group: production-ops
@@ -26,7 +30,50 @@ jobs:
           printf '%s\n' "${{ secrets.PROD_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           printf '%s\n' "${{ secrets.PROD_SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+      - name: Download checked manager APK
+        if: github.event.inputs.operation == 'publish-manager-apk'
+        uses: actions/download-artifact@v4
+        with:
+          name: gopark-manager-apk
+          run-id: 37423081561
+          github-token: ${{ github.token }}
+          path: manager-apk
+      - name: Publish checked manager APK
+        if: github.event.inputs.operation == 'publish-manager-apk'
+        env:
+          PROD_SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+          PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          PROD_SSH_PORT: ${{ secrets.PROD_SSH_PORT }}
+        run: |
+          echo '23a0f5f6560df0a8a6b022fc711f5a45d8fd300f44732e55ac2d37e76c700f57  manager-apk/app-release.apk' | sha256sum --check
+          scp -i ~/.ssh/id_ed25519 -P "$PROD_SSH_PORT" manager-apk/app-release.apk "$PROD_SSH_USER@$PROD_SSH_HOST:/tmp/gopark-manager-checked.apk"
+          ssh -i ~/.ssh/id_ed25519 -p "$PROD_SSH_PORT" "$PROD_SSH_USER@$PROD_SSH_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          exec 9>/tmp/gopark-production-deploy.lock
+          flock -n 9 || { echo 'A deployment is running; publish later'; exit 1; }
+          echo '23a0f5f6560df0a8a6b022fc711f5a45d8fd300f44732e55ac2d37e76c700f57  /tmp/gopark-manager-checked.apk' | sha256sum --check
+          BASE=/home/client
+          APP_DIR=$(readlink -f "$BASE/gopark-current")
+          test -d "$APP_DIR"
+          BACKUP_DIR="$BASE/backups/manager-apk-$(date -u +%Y%m%dT%H%M%SZ)"
+          mkdir -p "$BACKUP_DIR"
+          chmod 700 "$BACKUP_DIR"
+          for target in "$APP_DIR" "$BASE/gopark"; do
+            if [ -f "$target/gopark-manager.apk" ]; then
+              cp -p "$target/gopark-manager.apk" "$BACKUP_DIR/$(basename "$target")-previous.apk"
+            fi
+            install -m 644 /tmp/gopark-manager-checked.apk "$target/gopark-manager.apk.pending"
+            mv "$target/gopark-manager.apk.pending" "$target/gopark-manager.apk"
+          done
+          docker cp /tmp/gopark-manager-checked.apk gopark-crm-web:/usr/share/nginx/html/gopark-manager.apk.pending
+          docker exec gopark-crm-web sh -c 'chmod 644 /usr/share/nginx/html/gopark-manager.apk.pending && mv /usr/share/nginx/html/gopark-manager.apk.pending /usr/share/nginx/html/gopark-manager.apk'
+          curl --max-time 60 -fsS http://127.0.0.1/gopark-manager.apk -o /tmp/gopark-manager-served.apk
+          echo '23a0f5f6560df0a8a6b022fc711f5a45d8fd300f44732e55ac2d37e76c700f57  /tmp/gopark-manager-served.apk' | sha256sum --check
+          curl --max-time 5 -fsS http://127.0.0.1/api/health
+          echo 'Published checked manager APK without restarting applications'
+          REMOTE
       - name: Run operation
+        if: github.event.inputs.operation != 'publish-manager-apk'
         env:
           OPERATION: ${{ github.event.inputs.operation }}
           ROLLBACK_SHA: ${{ github.event.inputs.rollback_sha }}
