@@ -774,13 +774,13 @@ export function VehiclesPage() {
     setNewDriverPassportNumber("");
     setNewDriverWeeklyDayOff("");
     setContractNumber("");
-    setPrincipalAmount("1000000");
-    setInstallmentAmount("2300");
+    setPrincipalAmount("");
+    setInstallmentAmount("");
     setMonthlyInsuranceAmount("");
     setMonthlyGpsAmount("");
     setInsuranceMode("monthly");
     setGpsMode("monthly");
-    setStartDate(new Date().toISOString().slice(0, 10));
+    setStartDate("");
     setEndDate("");
     setFormMessage(assignDriverId ? "Автомобиль добавлен, договор создан, машина выведена на линию." : "Автомобиль добавлен.");
     vinInputRef.current?.focus();
@@ -1110,7 +1110,7 @@ export function VehiclesPage() {
                 <div className="form-grid">
                   <input value={contractNumber} onChange={(e) => setContractNumber(e.target.value)} placeholder="Номер договора" />
                   <input value={principalAmount} onChange={(e) => setPrincipalAmount(e.target.value)} placeholder="Сумма договора" inputMode="numeric" />
-                  <input value={installmentAmount} onChange={(e) => setInstallmentAmount(e.target.value)} placeholder="Ежедневный платёж" inputMode="numeric" readOnly />
+                  <input value={installmentAmount} onChange={(e) => setInstallmentAmount(e.target.value)} placeholder="Ежедневный платёж" inputMode="numeric" />
                   <input value={monthlyInsuranceAmount} onChange={(e) => setMonthlyInsuranceAmount(e.target.value)} placeholder={insuranceMode === "daily" ? "Страховка в день" : "Страховка в месяц"} inputMode="numeric" />
                   <select value={insuranceMode} onChange={(e) => setInsuranceMode(e.target.value as "monthly" | "daily")}>
                     <option value="monthly">Страховка ежемесячно</option>

@@ -128,7 +128,7 @@ function toOptionalNumber(value: string): number | undefined {
 
 export function ContractsPage() {
   const { session } = useAuth();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState(searchParams.get("status") ?? "all");
   const [companyFilter, setCompanyFilter] = useState(session.companyName?.trim() || "all");
@@ -324,6 +324,7 @@ export function ContractsPage() {
     const principal = Number(principalAmount);
     const dailyPayment = Number(installmentAmount);
     if (!startDate || !Number.isFinite(principal) || !Number.isFinite(dailyPayment) || principal <= 0 || dailyPayment <= 0) {
+      setEndDate("");
       return;
     }
 
@@ -361,8 +362,8 @@ export function ContractsPage() {
     }
 
     const hasSelectedDriver = availableDrivers.some((item) => item.id === driverId);
-    if (!driverId || !hasSelectedDriver) {
-      setDriverId(availableDrivers[0].id);
+    if (driverId && !hasSelectedDriver) {
+      setDriverId("");
     }
   }, [availableDrivers, driverId]);
 
@@ -372,8 +373,8 @@ export function ContractsPage() {
     }
 
     const hasSelectedCar = contractCars.some((item) => item.id === carId);
-    if (!carId || !hasSelectedCar) {
-      setCarId(contractCars[0].id);
+    if (carId && !hasSelectedCar) {
+      setCarId("");
     }
   }, [contractCars, carId]);
 
@@ -517,13 +518,16 @@ export function ContractsPage() {
       startDate,
       endDate,
     });
-    await Promise.all([api.refetch(), drivers.refetch(), cars.refetch()]);
-
-    setDriverId(resolvedDriverId);
-    setCarId(resolvedCarId);
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.delete("driverId");
+    nextSearchParams.delete("carId");
+    setSearchParams(nextSearchParams, { replace: true });
+    setNewRecordCompanyName("");
+    setDriverId("");
+    setCarId("");
     setContractNumber("");
-    setPrincipalAmount("1000000");
-    setInstallmentAmount("2300");
+    setPrincipalAmount("");
+    setInstallmentAmount("");
     setMonthlyInsuranceAmount("");
     setMonthlyGpsAmount("");
     setInsuranceMode("monthly");
@@ -533,7 +537,7 @@ export function ContractsPage() {
     setOsagoStartDate("");
     setHasCasco(false);
     setCascoStartDate("");
-    setStartDate(new Date().toISOString().slice(0, 10));
+    setStartDate("");
     setEndDate("");
     if (driverMode === "new") {
       setNewDriverFirstName("");
@@ -558,6 +562,7 @@ export function ContractsPage() {
     }
     setFormMessage("Договор создан.");
     contractNumberInputRef.current?.focus();
+    await Promise.all([api.refetch(), drivers.refetch(), cars.refetch()]);
   }
 
   function toggleContractSelection(contractId: string): void {
@@ -802,7 +807,7 @@ export function ContractsPage() {
                   placeholder="Номер договора"
                 />
                 <input value={principalAmount} onChange={(e) => setPrincipalAmount(e.target.value)} placeholder="Сумма договора" inputMode="numeric" />
-                <input value={installmentAmount} onChange={(e) => setInstallmentAmount(e.target.value)} placeholder="Ежедневный платёж" inputMode="numeric" readOnly />
+                <input value={installmentAmount} onChange={(e) => setInstallmentAmount(e.target.value)} placeholder="Ежедневный платёж" inputMode="numeric" />
                 <input value={monthlyInsuranceAmount} onChange={(e) => setMonthlyInsuranceAmount(e.target.value)} placeholder={insuranceMode === "daily" ? "Страховка в день" : "Страховка в месяц"} inputMode="numeric" />
                 <select value={insuranceMode} onChange={(e) => setInsuranceMode(e.target.value as "monthly" | "daily")}>
                   <option value="monthly">Страховка ежемесячно</option>

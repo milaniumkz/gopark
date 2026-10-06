@@ -30,7 +30,10 @@ if [ -f "$BASE/gopark-current-sha" ]; then cp "$BASE/gopark-current-sha" "$BACKU
 printf '%s\n' "$PREVIOUS_DIR" > "$BACKUP_DIR/previous-directory"
 # Keep the actual running image versions for rollback, without replacing their tags.
 for service in api worker crm-web; do
-  docker inspect --format '{{.Image}}' "gopark-$service" > "$BACKUP_DIR/$service-image"
+  # Include recovered runtime files and pin rollback images before any build.
+  docker commit --pause=false "gopark-$service" "gopark-rollback-$service:$SHA" > /dev/null
+  docker image inspect "gopark-rollback-$service:$SHA" > /dev/null
+  printf 'gopark-rollback-%s:%s\n' "$service" "$SHA" > "$BACKUP_DIR/$service-image"
 done
 API_PREVIOUS=$(cat "$BACKUP_DIR/api-image")
 WORKER_PREVIOUS=$(cat "$BACKUP_DIR/worker-image")
@@ -54,6 +57,8 @@ printf 'services:\n  api:\n    image: gopark-api:%s\n  worker:\n    image: gopar
 cd "$RELEASE_DIR"
 compose=(docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml -f release-images.yml)
 "${compose[@]}" build api crm-web
+# Resolve all runtime contracts before replacing healthy application containers.
+"${compose[@]}" run --rm --no-deps --interactive=false -T api node --input-type=module -e 'await import("./apps/api/node_modules/@gopark/contracts/src/index.js"); await import("./apps/api/dist/apps/api/src/app.module.js"); console.log("Runtime module preflight OK")' < /dev/null
 # Apply migrations only. Never re-seed an existing production database.
 "${compose[@]}" run --rm --no-deps --interactive=false -T api-migrate node /app/node_modules/.pnpm/prisma@5.22.0/node_modules/prisma/build/index.js migrate deploy --schema apps/api/prisma/schema.prisma < /dev/null
 rollback() {
@@ -61,18 +66,18 @@ rollback() {
   trap - ERR
   echo 'Application update failed; restoring previous application images.'
   cd "$PREVIOUS_DIR"
-  docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml -f "$BACKUP_DIR/rollback.yml" up -d --no-deps --force-recreate api worker crm-web
+  docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml -f "$BACKUP_DIR/rollback.yml" up -d --no-deps --no-build --pull never --force-recreate api worker crm-web
   for attempt in $(seq 1 30); do
-    if curl -fsS http://127.0.0.1:3000/api/health; then break; fi
+    if curl --max-time 5 -fsS http://127.0.0.1:3000/api/health; then break; fi
     sleep 2
   done
   exit "$result"
 }
 trap rollback ERR
-"${compose[@]}" up -d --no-deps --force-recreate api worker crm-web
+"${compose[@]}" up -d --no-deps --no-build --pull never --force-recreate api worker crm-web
 healthy=false
 for attempt in $(seq 1 45); do
-  if curl -fsS http://127.0.0.1:3000/api/health > "$BACKUP_DIR/after-health.json"; then
+  if curl --max-time 5 -fsS http://127.0.0.1:3000/api/health > "$BACKUP_DIR/after-health.json"; then
     if docker exec -i gopark-api node -e 'const h=JSON.parse(require("fs").readFileSync(0,"utf8"));if(h.status!=="ok"||h.mode!=="prisma"||!h.redisQueueReady||!h.productionStartupSafe)process.exit(1)' < "$BACKUP_DIR/after-health.json"; then
       healthy=true
       break

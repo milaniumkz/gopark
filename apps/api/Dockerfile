@@ -35,6 +35,11 @@ COPY --from=build /app/apps/api/prisma ./apps/api/prisma
 COPY --from=build /app/apps/api/scripts ./apps/api/scripts
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/api/node_modules ./apps/api/node_modules
+# Runtime imports must resolve compiled JavaScript, including .js re-exports.
+COPY --from=build /app/apps/api/dist/packages/contracts/src ./packages/contracts/src
+RUN node -e 'const fs=require("fs");const file="packages/contracts/package.json";const p=JSON.parse(fs.readFileSync(file,"utf8"));p.main="./src/index.js";fs.writeFileSync(file,JSON.stringify(p))'
+RUN node --input-type=module -e 'await import("./apps/api/node_modules/@gopark/contracts/src/index.js"); await import("./apps/api/dist/apps/api/src/app.module.js")'
+
 
 EXPOSE 8080
 CMD ["node", "apps/api/dist/apps/api/src/runtime-entry.js"]

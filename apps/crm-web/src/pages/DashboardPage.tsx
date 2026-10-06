@@ -919,9 +919,10 @@ export function DashboardPage() {
       setQuickModel("");
       setQuickProductionYear("");
       setQuickMileage("");
+      setQuickCompanyName("");
       setQuickContractNumber("");
-      setQuickPrincipalAmount("1000000");
-      setQuickDailyPayment("2300");
+      setQuickPrincipalAmount("");
+      setQuickDailyPayment("");
       setQuickInsuranceAmount("");
       setQuickGpsAmount("");
       setQuickInsuranceMode("monthly");
@@ -930,7 +931,7 @@ export function DashboardPage() {
       setQuickOsagoStartDate("");
       setQuickHasCasco(false);
       setQuickCascoStartDate("");
-      setQuickStartDate(new Date().toISOString().slice(0, 10));
+      setQuickStartDate("");
       setQuickEndDate("");
     } catch (quickCreateError) {
       setQuickCreateMessage(quickCreateError instanceof Error ? quickCreateError.message : "Не удалось создать водителя, авто и договор.");
@@ -1354,7 +1355,7 @@ export function DashboardPage() {
               <div className="form-grid">
                 <input value={quickContractNumber} onChange={(event) => setQuickContractNumber(event.target.value)} placeholder="Номер договора" />
                 <input value={quickPrincipalAmount} onChange={(event) => setQuickPrincipalAmount(event.target.value)} placeholder="Сумма договора" inputMode="numeric" />
-                <input value={quickDailyPayment} onChange={(event) => setQuickDailyPayment(event.target.value)} placeholder="Ежедневный платёж" inputMode="numeric" readOnly />
+                <input value={quickDailyPayment} onChange={(event) => setQuickDailyPayment(event.target.value)} placeholder="Ежедневный платёж" inputMode="numeric" />
                 <input value={quickInsuranceAmount} onChange={(event) => setQuickInsuranceAmount(event.target.value)} placeholder={quickInsuranceMode === "daily" ? "Страховка в день" : "Страховка в месяц"} inputMode="numeric" />
                 <select value={quickInsuranceMode} onChange={(event) => setQuickInsuranceMode(event.target.value as "monthly" | "daily")}>
                   <option value="monthly">Страховка ежемесячно</option>
