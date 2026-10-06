@@ -17,6 +17,7 @@ apps/*/.flutter-plugins-dependencies
 !gopark-manager.apk
 *.tgz
 *.zip
+!gopark-manager.zip
 *.png
 *.jpg
 *.jpeg
