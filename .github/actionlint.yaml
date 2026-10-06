@@ -1,2 +1,6 @@
+---
 self-hosted-runner:
-  labels: [milanium-mac-arm64, milanium-linux-arm64, repo-gopark]
+  labels:
+  - milanium-mac-arm64
+  - milanium-linux-arm64
+  - repo-gopark
