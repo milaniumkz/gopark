@@ -74,8 +74,33 @@ jobs:
           curl --max-time 5 -fsS http://127.0.0.1/api/health
           echo 'Published checked manager APK without restarting applications'
           REMOTE
+      - uses: actions/checkout@v4
+        if: github.event.inputs.operation == 'publish-download-page'
+      - name: Publish manager download page
+        if: github.event.inputs.operation == 'publish-download-page'
+        env:
+          PROD_SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+          PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          PROD_SSH_PORT: ${{ secrets.PROD_SSH_PORT }}
+        run: |
+          scp -i ~/.ssh/id_ed25519 -P "$PROD_SSH_PORT" scripts/manager-download.html "$PROD_SSH_USER@$PROD_SSH_HOST:/tmp/gopark-manager-download.html"
+          ssh -i ~/.ssh/id_ed25519 -p "$PROD_SSH_PORT" "$PROD_SSH_USER@$PROD_SSH_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          exec 9>/tmp/gopark-production-deploy.lock
+          flock -n 9 || { echo 'A deployment is running'; exit 1; }
+          APP_DIR=$(readlink -f /home/client/gopark-current)
+          echo '23a0f5f6560df0a8a6b022fc711f5a45d8fd300f44732e55ac2d37e76c700f57  '"$APP_DIR/gopark-manager.apk" | sha256sum --check
+          install -m 644 /tmp/gopark-manager-download.html "$APP_DIR/manager-download.html"
+          python3 -c 'import sys,zipfile; z=zipfile.ZipFile(sys.argv[2],"w",zipfile.ZIP_DEFLATED); z.write(sys.argv[1],"gopark-manager.apk"); z.close()' "$APP_DIR/gopark-manager.apk" "$APP_DIR/gopark-manager.zip"
+          docker cp "$APP_DIR/manager-download.html" gopark-crm-web:/usr/share/nginx/html/manager-download.html
+          docker cp "$APP_DIR/gopark-manager.zip" gopark-crm-web:/usr/share/nginx/html/gopark-manager.zip.pending
+          docker exec gopark-crm-web sh -c 'chmod 644 /usr/share/nginx/html/manager-download.html /usr/share/nginx/html/gopark-manager.zip.pending && mv /usr/share/nginx/html/gopark-manager.zip.pending /usr/share/nginx/html/gopark-manager.zip'
+          curl --max-time 5 -fsS http://127.0.0.1/manager-download.html > /dev/null
+          curl --max-time 5 -fsSI http://127.0.0.1/gopark-manager.zip
+          curl --max-time 5 -fsS http://127.0.0.1/api/health
+          REMOTE
       - name: Run operation
-        if: github.event.inputs.operation != 'publish-manager-apk'
+        if: github.event.inputs.operation != 'publish-manager-apk' && github.event.inputs.operation != 'publish-download-page'
         env:
           OPERATION: ${{ github.event.inputs.operation }}
           ROLLBACK_SHA: ${{ github.event.inputs.rollback_sha }}
