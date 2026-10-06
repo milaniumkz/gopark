@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: ["**"]
+    branches-ignore: [codex/mac-ci-pilot]
   pull_request:
   workflow_call:
 
@@ -12,43 +12,85 @@ concurrency:
 
 jobs:
   web-and-api:
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && fromJSON('["milanium-mac-arm64", "repo-gopark"]') || fromJSON('["ubuntu-latest"]') }}
+    timeout-minutes: 30
+    env:
+      COREPACK_ENABLE_NETWORK: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '0' || '1' }}
+      DATABASE_URL: ''
+      CONTRACT_NUMBER_INTEGRATION: 'false' 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@v4
+        if: github.event_name != 'push' || github.ref != 'refs/heads/main'
         with:
           version: 9.12.2
       - uses: actions/setup-node@v4
+        if: github.event_name != 'push' || github.ref != 'refs/heads/main'
         with:
           node-version: 22
           cache: pnpm
+      - name: Select installed Mac Node 22
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          echo /opt/homebrew/opt/node@22/bin >> "$GITHUB_PATH"
+          test "$(/opt/homebrew/opt/node@22/bin/node -p 'process.versions.node.split(".")[0]')" = 22
       - run: corepack enable
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @gopark/contracts build
-      - run: pnpm --filter @gopark/api typecheck
+        if: github.event_name != 'push' || github.ref != 'refs/heads/main' 
+      - run: corepack pnpm install --frozen-lockfile
+      - run: corepack pnpm --filter @gopark/contracts build
+      - run: corepack pnpm --filter @gopark/api typecheck
       - name: Verify dashboard repayment totals
-        run: pnpm --filter @gopark/api exec node --loader ts-node/esm --test src/infrastructure/repositories/obligation.prisma.repository.test.ts src/modules/dashboard/dashboard.service.test.ts src/common/repositories/contract-number.test.ts src/modules/mobile-manager/mobile-manager.service.test.ts
-      - run: pnpm --filter @gopark/crm-web typecheck
-      - run: pnpm --filter @gopark/crm-web build
+        run: corepack pnpm --filter @gopark/api exec node --loader ts-node/esm --test src/infrastructure/repositories/obligation.prisma.repository.test.ts src/modules/dashboard/dashboard.service.test.ts src/common/repositories/contract-number.test.ts src/modules/mobile-manager/mobile-manager.service.test.ts
+      - run: corepack pnpm --filter @gopark/crm-web typecheck
+      - run: corepack pnpm --filter @gopark/crm-web build
 
   flutter:
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && fromJSON('["milanium-mac-arm64", "repo-gopark"]') || fromJSON('["ubuntu-latest"]') }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: subosito/flutter-action@v2
+        if: github.event_name != 'push' || github.ref != 'refs/heads/main'
         with:
           channel: stable
           flutter-version: '3.47.6'
       - name: Driver app analyze
+        if: github.event_name != 'push' || github.ref != 'refs/heads/main'
         working-directory: apps/driver-app
         run: |
           flutter pub get
           flutter analyze
       - name: Manager app analyze
+        if: github.event_name != 'push' || github.ref != 'refs/heads/main'
         working-directory: apps/manager-app
         run: |
           flutter pub get --enforce-lockfile
           flutter analyze
+
+      - name: Native driver-app locked dependencies and committed analyzer config
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        working-directory: apps/driver-app
+        run: |
+          /Users/dmitriyshtrakhov/flutter-sdk/flutter/bin/flutter --version --machine | python3 -c 'import json,sys; assert json.load(sys.stdin)["frameworkVersion"] == "3.44.1"'
+          /Users/dmitriyshtrakhov/flutter-sdk/flutter/bin/flutter pub get --enforce-lockfile
+          git diff --exit-code -- pubspec.lock pubspec.yaml
+          # Flutter can migrate platform exclusions; check the committed config.
+          git restore -- analysis_options.yaml
+          /Users/dmitriyshtrakhov/flutter-sdk/flutter/bin/dart analyze
+      - name: Native manager-app locked dependencies and committed analyzer config
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        working-directory: apps/manager-app
+        run: |
+          /Users/dmitriyshtrakhov/Documents/Codex/2026-10-06/task/toolchains/flutter-3.47.6/bin/flutter --version --machine | python3 -c 'import json,sys; assert json.load(sys.stdin)["frameworkVersion"] == "3.47.6"'
+          /Users/dmitriyshtrakhov/Documents/Codex/2026-10-06/task/toolchains/flutter-3.47.6/bin/flutter pub get --enforce-lockfile
+          git diff --exit-code -- pubspec.lock pubspec.yaml
+          # Flutter can migrate platform exclusions; check the committed config.
+          git restore -- analysis_options.yaml
+          /Users/dmitriyshtrakhov/Documents/Codex/2026-10-06/task/toolchains/flutter-3.47.6/bin/dart analyze
 
   api-image:
     runs-on: ubuntu-latest
