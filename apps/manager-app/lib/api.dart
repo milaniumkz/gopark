@@ -437,6 +437,33 @@ class ManagerRiskStatusReviewDto {
   final String? reviewedAt;
 }
 
+class ManagerIncidentStatusHistoryDto {
+  const ManagerIncidentStatusHistoryDto({
+    required this.status,
+    required this.serviceStage,
+    required this.changedAt,
+  });
+
+  factory ManagerIncidentStatusHistoryDto.fromJson(Map<String, dynamic> json) {
+    return ManagerIncidentStatusHistoryDto(
+      status: json['status'] as String,
+      serviceStage: json['serviceStage'] as String?,
+      changedAt: json['changedAt'] as String,
+    );
+  }
+
+  final String status;
+  final String? serviceStage;
+  final String changedAt;
+}
+
+List<ManagerIncidentStatusHistoryDto> _incidentStatusHistory(dynamic value) {
+  return (value as List? ?? const [])
+      .map((item) => ManagerIncidentStatusHistoryDto.fromJson(
+          item as Map<String, dynamic>))
+      .toList();
+}
+
 class ManagerDriverIncidentDto {
   const ManagerDriverIncidentDto({
     required this.id,
@@ -446,6 +473,7 @@ class ManagerDriverIncidentDto {
     required this.status,
     required this.occurredAt,
     required this.periodLabel,
+    this.statusHistory = const [],
     required this.serviceStage,
     required this.serviceCaseType,
     required this.repairNote,
@@ -461,6 +489,7 @@ class ManagerDriverIncidentDto {
       status: json['status'] as String,
       occurredAt: json['occurredAt'] as String?,
       periodLabel: json['periodLabel'] as String?,
+      statusHistory: _incidentStatusHistory(json['statusHistory']),
       serviceStage: json['serviceStage'] as String?,
       serviceCaseType: json['serviceCaseType'] as String?,
       repairNote: json['repairNote'] as String?,
@@ -475,6 +504,7 @@ class ManagerDriverIncidentDto {
   final String status;
   final String? occurredAt;
   final String? periodLabel;
+  final List<ManagerIncidentStatusHistoryDto> statusHistory;
   final String? serviceStage;
   final String? serviceCaseType;
   final String? repairNote;
@@ -673,6 +703,7 @@ class ManagerIncidentDto {
     required this.carId,
     required this.occurredAt,
     required this.periodLabel,
+    this.statusHistory = const [],
     required this.serviceStage,
     required this.serviceCaseType,
     required this.repairNote,
@@ -690,6 +721,7 @@ class ManagerIncidentDto {
       carId: json['carId'] as String?,
       occurredAt: json['occurredAt'] as String?,
       periodLabel: json['periodLabel'] as String?,
+      statusHistory: _incidentStatusHistory(json['statusHistory']),
       serviceStage: json['serviceStage'] as String?,
       serviceCaseType: json['serviceCaseType'] as String?,
       repairNote: json['repairNote'] as String?,
@@ -706,6 +738,7 @@ class ManagerIncidentDto {
   final String? carId;
   final String? occurredAt;
   final String? periodLabel;
+  final List<ManagerIncidentStatusHistoryDto> statusHistory;
   final String? serviceStage;
   final String? serviceCaseType;
   final String? repairNote;

@@ -641,6 +641,7 @@ model Incident {
   repairNote   String?  @map("repair_note")
   locationNote String?  @map("location_note")
   managerLabel String?  @map("manager_label")
+  statusHistory Json @default("[]") @map("status_history")
   serviceStage String?  @map("service_stage")
   serviceCaseType String? @map("service_case_type")
   servicePaymentStatus String? @map("service_payment_status")

@@ -1,3 +1,4 @@
+import { nextIncidentStatusHistory } from "../../common/repositories/incident-history.js";
 import type { ManagerIncidentItem } from "@gopark/contracts";
 import type { CreateIncidentRecord, IncidentRepository, UpdateIncidentRecord } from "../../common/repositories/index.js";
 import { seedCars, seedDrivers, seedManagerIncidents } from "../../data/seed.js";
@@ -34,6 +35,7 @@ function mapIncidentRecord(incident: any): ManagerIncidentItem {
     repairNote: incident.repairNote ?? null,
     locationNote: incident.locationNote ?? null,
     managerLabel: incident.managerLabel ?? null,
+    statusHistory: incident.statusHistory ?? [],
     serviceStage: incident.serviceStage ?? null,
     serviceCaseType: incident.serviceCaseType ?? null,
     servicePaymentStatus: incident.servicePaymentStatus ?? null,
@@ -61,6 +63,7 @@ const incidentSelect = {
   repairNote: true,
   locationNote: true,
   managerLabel: true,
+  statusHistory: true,
   serviceStage: true,
   serviceCaseType: true,
   servicePaymentStatus: true,
@@ -236,6 +239,7 @@ export class IncidentPrismaRepository implements IncidentRepository {
       repairNote: input.repairNote ?? null,
       locationNote: input.locationNote ?? null,
       managerLabel: input.managerLabel ?? null,
+      statusHistory: [{ status: input.status, serviceStage: input.serviceStage ?? null, changedAt: new Date().toISOString() }],
       serviceStage: input.serviceStage ?? null,
       serviceCaseType: input.serviceCaseType ?? null,
       servicePaymentStatus: input.servicePaymentStatus ?? null,
@@ -294,6 +298,7 @@ export class IncidentPrismaRepository implements IncidentRepository {
     }
 
     Object.assign(incident, {
+      statusHistory: nextIncidentStatusHistory(incident, input),
       ...(input.title !== undefined ? { title: input.title } : {}),
       ...(input.incidentType !== undefined ? { incidentType: input.incidentType } : {}),
       ...(input.status !== undefined ? { status: input.status } : {}),

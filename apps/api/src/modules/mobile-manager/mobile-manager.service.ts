@@ -390,6 +390,7 @@ export class MobileManagerService {
           priority: item.priority,
           status: item.status,
           occurredAt: item.occurredAt ?? null,
+          statusHistory: item.statusHistory ?? [],
           serviceStage: item.serviceStage ?? null,
           serviceCaseType: item.serviceCaseType ?? null,
           repairNote: item.repairNote ?? null,
