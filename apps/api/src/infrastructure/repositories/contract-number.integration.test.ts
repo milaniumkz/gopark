@@ -17,7 +17,7 @@ test("concurrent contract creation allocates consecutive numbers and failed save
       await client.contract.create({ data: { contractNumber, driverId: driver.id, carId: car.id, status: "terminated", principalAmount: 100, financedAmount: 100, installmentAmount: 100, installmentDay: 1, termMonths: 1, startDate: new Date("2026-10-06") } });
     }
     assert.equal(await repository.getNextNumber(), "56");
-    const input = { driverId: driver.id, carId: car.id, principalAmount: 200, financedAmount: 200, installmentAmount: 100, startDate: "2026-10-06", endDate: "2026-10-07" };
+    const input = { driverId: driver.id, carId: car.id, principalAmount: 200, financedAmount: 200, installmentAmount: 100, termMonths: 1, startDate: "2026-10-06", endDate: "2026-10-07" };
     await assert.rejects(repository.create({ ...input, carId: "00000000-0000-0000-0000-000000000001" }));
     assert.equal(await repository.getNextNumber(), "56");
     const inputs = [];
