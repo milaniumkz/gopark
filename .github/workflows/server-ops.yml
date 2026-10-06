@@ -17,6 +17,7 @@ concurrency:
 
 jobs:
   ops:
+    if: github.event.inputs.operation != 'test-manager-apk'
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -111,3 +112,39 @@ jobs:
               ;;
           esac
           REMOTE
+
+  manager-startup:
+    if: github.event.inputs.operation == 'test-manager-apk'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: gopark-manager-apk
+          run-id: 37423081561
+          github-token: ${{ github.token }}
+          path: manager-apk
+      - name: Enable emulator acceleration
+        run: |
+          sudo chmod 666 /dev/kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          script: |
+            adb install manager-apk/app-release.apk
+            adb logcat -c
+            adb shell am start -W -n com.milanium.goparkmanager/.MainActivity
+            sleep 15
+            adb logcat -d > manager-startup-logcat.txt
+            adb shell screencap -p /sdcard/manager-startup.png
+            adb pull /sdcard/manager-startup.png .
+            adb shell pidof com.milanium.goparkmanager
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: manager-startup-diagnostics
+          path: |
+            manager-startup-logcat.txt
+            manager-startup.png
