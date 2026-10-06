@@ -47,3 +47,10 @@ jobs:
         run: |
           flutter pub get --enforce-lockfile
           flutter analyze
+
+  api-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and validate production API runtime
+        run: docker build -f apps/api/Dockerfile -t gopark-api:ci .
