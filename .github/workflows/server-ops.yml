@@ -61,6 +61,26 @@ jobs:
             logs)
               compose logs --tail=200 api worker crm-web | sed -E 's/(Authorization: Bearer )[A-Za-z0-9._-]+/\1[redacted]/g'
               ;;
+            recover-contract-runtime)
+              # Restore only compiled module files in the existing application containers.
+              # Database, Redis, configuration and volumes are untouched.
+              RECOVERY_DIR=$(mktemp -d /tmp/gopark-contract-runtime.XXXXXX)
+              docker cp gopark-api:/app/apps/api/dist/packages/contracts/src/. "$RECOVERY_DIR/"
+              test -f "$RECOVERY_DIR/platform.js"
+              for container in gopark-api gopark-worker; do
+                docker cp "$RECOVERY_DIR/." "$container:/app/packages/contracts/src/"
+              done
+              docker restart gopark-api gopark-worker
+              docker restart gopark-crm-web
+              for attempt in $(seq 1 30); do
+                if curl --max-time 5 -fsS http://127.0.0.1:3000/api/health; then
+                  echo 'Recovered application health'
+                  exit 0
+                fi
+                sleep 2
+              done
+              exit 1
+              ;;
             restart)
               compose restart api worker crm-web
               curl -fsS http://127.0.0.1:3000/api/health
