@@ -45,6 +45,9 @@ jobs:
           }
 
           case "$OPERATION" in
+            contract-numbers)
+              docker exec gopark-postgres psql -U gopark -d gopark -v ON_ERROR_STOP=1 -c 'SELECT contract_number, status FROM contracts ORDER BY created_at;'
+              ;;
             status)
               compose ps
               cat "$BASE/gopark-current-sha" 2>/dev/null || true
