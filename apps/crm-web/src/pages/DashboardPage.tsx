@@ -919,6 +919,7 @@ export function DashboardPage() {
       setQuickModel("");
       setQuickProductionYear("");
       setQuickMileage("");
+      setQuickCompanyName("");
       setQuickContractNumber("");
       setQuickPrincipalAmount("");
       setQuickDailyPayment("");

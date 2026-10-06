@@ -58,7 +58,7 @@ cd "$RELEASE_DIR"
 compose=(docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml -f release-images.yml)
 "${compose[@]}" build api crm-web
 # Resolve all runtime contracts before replacing healthy application containers.
-"${compose[@]}" run --rm --no-deps --interactive=false -T api node --input-type=module -e 'await import("./apps/api/node_modules/@gopark/contracts/src/index.js"); console.log("Runtime module preflight OK")' < /dev/null
+"${compose[@]}" run --rm --no-deps --interactive=false -T api node --input-type=module -e 'await import("./apps/api/node_modules/@gopark/contracts/src/index.js"); await import("./apps/api/dist/apps/api/src/app.module.js"); console.log("Runtime module preflight OK")' < /dev/null
 # Apply migrations only. Never re-seed an existing production database.
 "${compose[@]}" run --rm --no-deps --interactive=false -T api-migrate node /app/node_modules/.pnpm/prisma@5.22.0/node_modules/prisma/build/index.js migrate deploy --schema apps/api/prisma/schema.prisma < /dev/null
 rollback() {
