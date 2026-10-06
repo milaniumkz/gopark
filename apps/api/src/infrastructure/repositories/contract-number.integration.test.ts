@@ -11,9 +11,13 @@ test("concurrent contract creation allocates consecutive numbers and failed save
   const { PrismaClient } = createRequire(import.meta.url)("@prisma/client");
   const client = new PrismaClient();
   const repository = new ContractPrismaRepository({ client } as unknown as PrismaService);
+  const driverIds: string[] = [];
+  const carIds: string[] = [];
   try {
     const driver = await client.driver.create({ data: { firstName: "Test", lastName: "Seed", phone: "number-test-seed" } });
+    driverIds.push(driver.id);
     const car = await client.car.create({ data: { vin: "NUMBER-TEST-SEED", plateNumber: "NUMBER-SEED", make: "Test", model: "Test" } });
+    carIds.push(car.id);
     for (const contractNumber of ["GP-2025-0002", "1", "6", "55"]) {
       await client.contract.create({ data: { contractNumber, driverId: driver.id, carId: car.id, status: "terminated", principalAmount: 100, financedAmount: 100, installmentAmount: 100, installmentDay: 1, termMonths: 1, startDate: new Date("2026-10-06") } });
     }
@@ -24,7 +28,9 @@ test("concurrent contract creation allocates consecutive numbers and failed save
     const inputs = [];
     for (let i = 0; i < 8; i++) {
       const d = await client.driver.create({ data: { firstName: "Test", lastName: "Concurrent", phone: `number-test-${i}` } });
+      driverIds.push(d.id);
       const c = await client.car.create({ data: { vin: `NUMBER-TEST-${i}`, plateNumber: `NUMBER-${i}`, make: "Test", model: "Test" } });
+      carIds.push(c.id);
       inputs.push({ ...input, driverId: d.id, carId: c.id, contractNumber: "9999" });
     }
     const contracts = await Promise.all(inputs.map((item) => repository.create(item)));
@@ -32,6 +38,16 @@ test("concurrent contract creation allocates consecutive numbers and failed save
     assert.equal(await repository.getNextNumber(), "64");
     assert.equal(await client.contract.count({ where: { contractNumber: "9999" } }), 0);
   } finally {
-    await client.$disconnect();
+    try {
+      if (driverIds.length > 0) {
+        await client.obligation.deleteMany({ where: { driverId: { in: driverIds } } });
+        await client.carAssignment.deleteMany({ where: { driverId: { in: driverIds } } });
+        await client.contract.deleteMany({ where: { driverId: { in: driverIds } } });
+        await client.driver.deleteMany({ where: { id: { in: driverIds } } });
+      }
+      if (carIds.length > 0) await client.car.deleteMany({ where: { id: { in: carIds } } });
+    } finally {
+      await client.$disconnect();
+    }
   }
 });
