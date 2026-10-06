@@ -130,7 +130,7 @@ export function ContractsPage() {
   const { session } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState(searchParams.get("status") ?? "all");
+  const [statusFilter, setStatusFilter] = useState(searchParams.get("status") ?? "active");
   const [companyFilter, setCompanyFilter] = useState(session.companyName?.trim() || "all");
   const [driverId, setDriverId] = useState("");
   const [carId, setCarId] = useState("");
