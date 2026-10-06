@@ -111,6 +111,8 @@ jobs:
     - repo-gopark
     steps:
     - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
     - name: Build and validate production API runtime
       run: docker build --platform linux/arm64 -f apps/api/Dockerfile -t gopark-api:ci
         .
