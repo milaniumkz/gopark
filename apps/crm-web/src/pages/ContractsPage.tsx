@@ -152,7 +152,8 @@ export function ContractsPage() {
   const [newCarMileage, setNewCarMileage] = useState("");
   const [newCarColor, setNewCarColor] = useState("");
   const [newRecordCompanyName, setNewRecordCompanyName] = useState(session.companyName?.trim() || "");
-  const [contractNumber, setContractNumber] = useState("");
+  const nextContractNumber = useApiQuery<{ contractNumber: string }>("contracts/next-number");
+  const contractNumber = nextContractNumber.data?.contractNumber ?? "";
   const [principalAmount, setPrincipalAmount] = useState("1000000");
   const [installmentAmount, setInstallmentAmount] = useState("2300");
   const [monthlyInsuranceAmount, setMonthlyInsuranceAmount] = useState("");
@@ -212,7 +213,6 @@ export function ContractsPage() {
     {
       driverId: string;
       carId: string;
-      contractNumber: string;
       principalAmount: number;
       financedAmount: number;
       installmentAmount: number;
@@ -417,12 +417,6 @@ export function ContractsPage() {
   }
 
   async function handleCreateContract(): Promise<void> {
-    if (!contractNumber.trim()) {
-      setFormMessage("Укажите номер договора.");
-      quickFormRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      contractNumberInputRef.current?.focus();
-      return;
-    }
 
     if (driverMode === "existing" && !driverId) {
       setFormMessage("Выберите водителя или включите создание нового водителя.");
@@ -500,7 +494,6 @@ export function ContractsPage() {
     await createContract.mutate({
       driverId: resolvedDriverId,
       carId: resolvedCarId,
-      contractNumber: contractNumber.trim(),
       principalAmount: Number(principalAmount),
       financedAmount: Number(principalAmount),
       installmentAmount: Number(installmentAmount),
@@ -525,7 +518,7 @@ export function ContractsPage() {
     setNewRecordCompanyName("");
     setDriverId("");
     setCarId("");
-    setContractNumber("");
+    void nextContractNumber.refetch({ silent: true }).catch(() => undefined);
     setPrincipalAmount("");
     setInstallmentAmount("");
     setMonthlyInsuranceAmount("");
@@ -803,7 +796,7 @@ export function ContractsPage() {
                 <input
                   ref={contractNumberInputRef}
                   value={contractNumber}
-                  onChange={(e) => setContractNumber(e.target.value)}
+                  readOnly title="Номер назначается автоматически при сохранении"
                   placeholder="Номер договора"
                 />
                 <input value={principalAmount} onChange={(e) => setPrincipalAmount(e.target.value)} placeholder="Сумма договора" inputMode="numeric" />

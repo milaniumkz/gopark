@@ -27,7 +27,7 @@ jobs:
       - run: pnpm --filter @gopark/contracts build
       - run: pnpm --filter @gopark/api typecheck
       - name: Verify dashboard repayment totals
-        run: pnpm --filter @gopark/api exec node --loader ts-node/esm --test src/infrastructure/repositories/obligation.prisma.repository.test.ts src/modules/dashboard/dashboard.service.test.ts
+        run: pnpm --filter @gopark/api exec node --loader ts-node/esm --test src/infrastructure/repositories/obligation.prisma.repository.test.ts src/modules/dashboard/dashboard.service.test.ts src/common/repositories/contract-number.test.ts
       - run: pnpm --filter @gopark/crm-web typecheck
       - run: pnpm --filter @gopark/crm-web build
 
@@ -56,3 +56,36 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build and validate production API runtime
         run: docker build -f apps/api/Dockerfile -t gopark-api:ci .
+
+  contract-numbers:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: gopark_contract_test
+          POSTGRES_USER: gopark_test
+          POSTGRES_PASSWORD: isolated-test-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gopark_test -d gopark_contract_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://gopark_test:isolated-test-password@localhost:5432/gopark_contract_test
+      CONTRACT_NUMBER_INTEGRATION: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @gopark/api db:generate
+      - name: Create isolated test schema
+        run: pnpm --filter @gopark/api exec prisma db push --skip-generate
+      - name: Verify concurrent numbering and rollback on real PostgreSQL
+        run: pnpm --filter @gopark/api exec node --loader ts-node/esm --test src/infrastructure/repositories/contract-number.integration.test.ts

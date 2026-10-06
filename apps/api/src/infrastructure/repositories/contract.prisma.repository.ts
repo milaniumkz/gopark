@@ -1,3 +1,4 @@
+import { nextContractNumber } from "../../common/repositories/contract-number.js";
 import type { ContractDetail, ContractListItem } from "@gopark/contracts";
 import type { CreateContractDto } from "../../modules/contracts/dto/create-contract.dto.js";
 import type { UpdateContractDto } from "../../modules/contracts/dto/update-contract.dto.js";
@@ -509,6 +510,14 @@ export class ContractPrismaRepository implements ContractRepository {
       .reduce((max, item) => Math.max(max, item.financedAmount), 0);
   }
 
+  async getNextNumber(): Promise<string> {
+    const client = this.prisma.client;
+    const contracts = client
+      ? await client.contract.findMany({ select: { contractNumber: true } })
+      : seedContracts;
+    return nextContractNumber(contracts.map((item: { contractNumber: string }) => item.contractNumber));
+  }
+
   async create(input: CreateContractDto): Promise<ContractListItem> {
     const prisma = this.prisma.client;
     const installmentDay = input.installmentDay ?? (new Date(`${input.endDate}T00:00:00.000Z`).getUTCDate() || 15);
@@ -549,6 +558,10 @@ export class ContractPrismaRepository implements ContractRepository {
       const osagoEndDate = addOneYearDateOnly(input.osagoStartDate);
       const cascoEndDate = addOneYearDateOnly(input.cascoStartDate);
       const contract = await prisma.$transaction(async (tx: any) => {
+        // Serialize allocation until commit so concurrent saves cannot share a number.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(2036548157)`;
+        const existingNumbers = await tx.contract.findMany({ select: { contractNumber: true } });
+        const contractNumber = nextContractNumber(existingNumbers.map((item: { contractNumber: string }) => item.contractNumber));
         const previousDriverAssignments = await tx.carAssignment.findMany({
           where: {
             driverId: input.driverId,
@@ -567,7 +580,7 @@ export class ContractPrismaRepository implements ContractRepository {
             driverId: input.driverId,
             carId: input.carId,
             status: "active",
-            contractNumber: input.contractNumber,
+            contractNumber,
             principalAmount: input.principalAmount,
             financedAmount: input.financedAmount,
             installmentAmount: equalInstallmentAmount,
@@ -715,12 +728,12 @@ export class ContractPrismaRepository implements ContractRepository {
     const schedule = buildInstallmentSchedule(dueDates, input.financedAmount, input.installmentAmount);
     const contractId = crypto.randomUUID();
     const contractStatus: ContractListItem["status"] = "active";
-    return {
+    const result: ContractListItem = {
       id: contractId,
       driverId: input.driverId,
       carId: input.carId,
       status: contractStatus,
-      contractNumber: input.contractNumber,
+      contractNumber: nextContractNumber(seedContracts.map((item) => item.contractNumber)),
       financedAmount: input.financedAmount,
       installmentAmount: input.installmentAmount,
       monthlyInsuranceAmount: input.monthlyInsuranceAmount ?? null,
@@ -733,6 +746,8 @@ export class ContractPrismaRepository implements ContractRepository {
       nextDueAmount: schedule[0]?.amount ?? 0,
       hasDeferredPayment: false,
     };
+    seedContracts.push(result);
+    return result;
   }
 
   async update(contractId: string, input: UpdateContractDto): Promise<ContractDetail | null> {

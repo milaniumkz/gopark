@@ -306,7 +306,8 @@ export function DashboardPage() {
   const [quickCompanyName, setQuickCompanyName] = useState(session.companyName?.trim() || "");
   const [quickProductionYear, setQuickProductionYear] = useState("");
   const [quickMileage, setQuickMileage] = useState("");
-  const [quickContractNumber, setQuickContractNumber] = useState("");
+  const nextContractNumber = useApiQuery<{ contractNumber: string }>("contracts/next-number");
+  const quickContractNumber = nextContractNumber.data?.contractNumber ?? "";
   const [quickPrincipalAmount, setQuickPrincipalAmount] = useState("1000000");
   const [quickDailyPayment, setQuickDailyPayment] = useState("2300");
   const [quickInsuranceAmount, setQuickInsuranceAmount] = useState("");
@@ -785,10 +786,6 @@ export function DashboardPage() {
       return;
     }
 
-    if (!quickContractNumber.trim()) {
-      setQuickCreateMessage("Введите номер договора вручную.");
-      return;
-    }
 
     const normalizedPhone = normalizePhoneValue(quickDriverPhone);
     const existingDriver = (driversApi.data ?? []).find((driver) => normalizePhoneValue(driver.phone) === normalizedPhone);
@@ -803,13 +800,6 @@ export function DashboardPage() {
       return;
     }
 
-    const resolvedContractNumber = quickContractNumber.trim();
-    const normalizedContractNumber = normalizeComparableValue(resolvedContractNumber);
-    const existingContract = (contractsApi.data ?? []).find((contract) => normalizeComparableValue(contract.contractNumber) === normalizedContractNumber);
-    if (existingContract) {
-      setQuickCreateMessage(`Договор с номером ${resolvedContractNumber} уже существует. Укажите другой номер договора.`);
-      return;
-    }
 
     setQuickCreateLoading(true);
     setQuickCreateMessage(null);
@@ -857,8 +847,7 @@ export function DashboardPage() {
       const contract = await postJson<ContractListItem, {
         driverId: string;
         carId: string;
-        contractNumber: string;
-        principalAmount: number;
+          principalAmount: number;
         financedAmount: number;
         installmentAmount: number;
         monthlyInsuranceAmount?: number;
@@ -877,7 +866,6 @@ export function DashboardPage() {
       }>("contracts", {
         driverId: driver.id,
         carId: car.id,
-        contractNumber: resolvedContractNumber,
         principalAmount: Number(quickPrincipalAmount),
         financedAmount: Number(quickPrincipalAmount),
         installmentAmount: Number(quickDailyPayment),
@@ -920,7 +908,7 @@ export function DashboardPage() {
       setQuickProductionYear("");
       setQuickMileage("");
       setQuickCompanyName("");
-      setQuickContractNumber("");
+      void nextContractNumber.refetch({ silent: true }).catch(() => undefined);
       setQuickPrincipalAmount("");
       setQuickDailyPayment("");
       setQuickInsuranceAmount("");
@@ -1353,7 +1341,7 @@ export function DashboardPage() {
               </div>
               <p className="quick-form__title">Договор</p>
               <div className="form-grid">
-                <input value={quickContractNumber} onChange={(event) => setQuickContractNumber(event.target.value)} placeholder="Номер договора" />
+                <input value={quickContractNumber} readOnly title="Номер назначается автоматически при сохранении" placeholder="Номер договора" />
                 <input value={quickPrincipalAmount} onChange={(event) => setQuickPrincipalAmount(event.target.value)} placeholder="Сумма договора" inputMode="numeric" />
                 <input value={quickDailyPayment} onChange={(event) => setQuickDailyPayment(event.target.value)} placeholder="Ежедневный платёж" inputMode="numeric" />
                 <input value={quickInsuranceAmount} onChange={(event) => setQuickInsuranceAmount(event.target.value)} placeholder={quickInsuranceMode === "daily" ? "Страховка в день" : "Страховка в месяц"} inputMode="numeric" />

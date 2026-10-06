@@ -45,6 +45,10 @@ jobs:
           }
 
           case "$OPERATION" in
+            contract-numbers)
+              docker exec gopark-postgres psql -U gopark -d gopark -v ON_ERROR_STOP=1 -c 'SELECT contract_number, status FROM contracts ORDER BY created_at;'
+              docker exec gopark-api node --input-type=module -e 'const {PrismaClient}=await import("./apps/api/node_modules/@prisma/client/default.js");const {ContractPrismaRepository}=await import("./apps/api/dist/apps/api/src/infrastructure/repositories/contract.prisma.repository.js");const client=new PrismaClient();try{console.log(JSON.stringify({nextContractNumber:await new ContractPrismaRepository({client}).getNextNumber()}))}finally{await client.$disconnect()}'
+              ;;
             status)
               compose ps
               cat "$BASE/gopark-current-sha" 2>/dev/null || true
