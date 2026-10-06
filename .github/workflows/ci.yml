@@ -26,6 +26,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @gopark/contracts build
       - run: pnpm --filter @gopark/api typecheck
+      - name: Verify dashboard repayment totals
+        run: pnpm --filter @gopark/api exec node --loader ts-node/esm --test src/infrastructure/repositories/obligation.prisma.repository.test.ts src/modules/dashboard/dashboard.service.test.ts
       - run: pnpm --filter @gopark/crm-web typecheck
       - run: pnpm --filter @gopark/crm-web build
 

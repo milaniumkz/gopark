@@ -69,10 +69,13 @@ export class DashboardService {
     );
     const periodRange = this.getPeriodRange(period, startDate, endDate);
     const scopedDriverIds = scopedDrivers.map((driver) => driver.id);
-    const [debtBase, payments, paidObligationsCount, unpaidObligationsCount] = await Promise.all([
+    const [debtBase, plannedPaymentBase, payments, paidObligationsCount, unpaidObligationsCount] = await Promise.all([
       companyName
         ? this.obligationRepository.getOpenDueByCompanyInPeriod(companyName, periodRange.startDate, periodRange.endDate)
         : this.obligationRepository.getOpenDueByDriversInPeriod(scopedDriverIds, periodRange.startDate, periodRange.endDate),
+      companyName
+        ? this.obligationRepository.getTotalDueByCompanyInPeriod(companyName, periodRange.startDate, periodRange.endDate)
+        : this.obligationRepository.getTotalDueByDriversInPeriod(scopedDriverIds, periodRange.startDate, periodRange.endDate),
       companyName ? this.paymentRepository.listByCompany(companyName) : this.paymentRepository.list(),
       companyName ? this.obligationRepository.countPaidByCompany(companyName) : this.obligationRepository.countPaidByDrivers(scopedDriverIds),
       companyName ? this.obligationRepository.countUnpaidByCompany(companyName) : this.obligationRepository.countUnpaidByDrivers(scopedDriverIds),
@@ -99,10 +102,10 @@ export class DashboardService {
     );
 
     return {
-      plannedPayment: debtBase,
+      plannedPayment: plannedPaymentBase,
       actualPayment: actualPaymentBase,
       debt: debtBase,
-      overpayment: Math.max(actualPaymentBase - debtBase, 0),
+      overpayment: Math.max(actualPaymentBase - plannedPaymentBase, 0),
       drivers: {
         total: scopedDrivers.length,
         active: driverStatusCounts.active ?? 0,
