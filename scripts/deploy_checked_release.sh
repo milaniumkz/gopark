@@ -44,7 +44,7 @@ echo "Verified backup: $BACKUP_DIR"
 if [ -e "$RELEASE_DIR" ]; then echo 'Release directory already exists; refusing overwrite'; exit 1; fi
 mkdir -p "$RELEASE_DIR"
 tar -xzf "$ARCHIVE" -C "$RELEASE_DIR"
-for artifact in apps/driver-app/build/web apps/manager-app/build/web apk gopark-manager.apk gopark-driver.apk; do
+for artifact in apps/driver-app/build/web apps/manager-app/build/web apk gopark-manager.apk gopark-driver.apk manager-download.html gopark-manager.zip; do
   if [ -e "$PREVIOUS_DIR/$artifact" ]; then
     mkdir -p "$RELEASE_DIR/$(dirname "$artifact")"
     cp -a "$PREVIOUS_DIR/$artifact" "$RELEASE_DIR/$artifact"
