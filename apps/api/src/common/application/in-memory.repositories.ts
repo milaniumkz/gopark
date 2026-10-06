@@ -1,3 +1,4 @@
+import { nextContractNumber } from "../repositories/contract-number.js";
 import { nextIncidentStatusHistory } from "../repositories/incident-history.js";
 import type {
   AuthRateLimitRepository,
@@ -621,6 +622,10 @@ export class InMemoryContractRepository implements ContractRepository {
       .reduce((max, item) => Math.max(max, item.financedAmount), 0);
   }
 
+  async getNextNumber(): Promise<string> {
+    return nextContractNumber(seedContracts.map((item) => item.contractNumber));
+  }
+
   async create(input: CreateContractDto) {
     const installmentDay = input.installmentDay ?? (new Date(`${input.endDate}T00:00:00.000Z`).getUTCDate() || 15);
     const termMonths = calculateTermMonthsFromDates(input.startDate, input.endDate);
@@ -645,7 +650,7 @@ export class InMemoryContractRepository implements ContractRepository {
       driverId: input.driverId,
       carId: input.carId,
       status: "active" as const,
-      contractNumber: input.contractNumber,
+      contractNumber: nextContractNumber(seedContracts.map((item) => item.contractNumber)),
       financedAmount: input.financedAmount,
       installmentAmount: equalInstallmentAmount,
       monthlyInsuranceAmount,

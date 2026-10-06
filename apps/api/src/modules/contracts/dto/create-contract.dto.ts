@@ -1,7 +1,7 @@
 export interface CreateContractDto {
   driverId: string;
   carId: string;
-  contractNumber: string;
+  contractNumber?: string;
   principalAmount: number;
   financedAmount: number;
   installmentAmount: number;

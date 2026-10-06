@@ -52,6 +52,10 @@ export class ContractsService {
     return this.repository.getById(contractId);
   }
 
+  getNextNumber(): Promise<string> {
+    return this.repository.getNextNumber();
+  }
+
   async create(input: CreateContractDto, currentUser?: RequestUser | null): Promise<ContractListItem> {
     assertReasonableContractDate(input.startDate, "Дата начала договора");
     assertReasonableContractDate(input.endDate, "Дата окончания договора");

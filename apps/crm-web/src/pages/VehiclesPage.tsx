@@ -194,7 +194,8 @@ export function VehiclesPage() {
   const [newDriverLicenseNumber, setNewDriverLicenseNumber] = useState("");
   const [newDriverPassportNumber, setNewDriverPassportNumber] = useState("");
   const [newDriverWeeklyDayOff, setNewDriverWeeklyDayOff] = useState("");
-  const [contractNumber, setContractNumber] = useState("");
+  const nextContractNumber = useApiQuery<{ contractNumber: string }>("contracts/next-number");
+  const contractNumber = nextContractNumber.data?.contractNumber ?? "";
   const [principalAmount, setPrincipalAmount] = useState("1000000");
   const [installmentAmount, setInstallmentAmount] = useState("2300");
   const [monthlyInsuranceAmount, setMonthlyInsuranceAmount] = useState("");
@@ -240,7 +241,6 @@ export function VehiclesPage() {
     {
       driverId: string;
       carId: string;
-      contractNumber: string;
       principalAmount: number;
       financedAmount: number;
       installmentAmount: number;
@@ -649,12 +649,6 @@ export function VehiclesPage() {
         return;
       }
 
-      if (!contractNumber.trim()) {
-        setFormMessage("Введите номер договора вручную.");
-        quickFormRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-        vinInputRef.current?.focus();
-        return;
-      }
 
       if (
         !startDate ||
@@ -663,7 +657,7 @@ export function VehiclesPage() {
         Number(installmentAmount) <= 0 ||
         calculatedTermMonths <= 0
       ) {
-        setFormMessage("Для вывода авто на линию заполните номер договора, суммы, дату взятия авто и дату выплаты.");
+        setFormMessage("Для вывода авто на линию заполните суммы, дату взятия авто и дату выплаты.");
         quickFormRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
         vinInputRef.current?.focus();
         return;
@@ -700,11 +694,9 @@ export function VehiclesPage() {
           })
         : null;
       const resolvedDriverId = assignedDriver?.id ?? assignDriverId;
-      const resolvedContractNumber = contractNumber.trim();
       const createdContract = await createContract.mutate({
         driverId: resolvedDriverId,
         carId: createdCar.id,
-        contractNumber: resolvedContractNumber,
         principalAmount: Number(principalAmount),
         financedAmount: Number(principalAmount),
         installmentAmount: Number(installmentAmount),
@@ -773,7 +765,7 @@ export function VehiclesPage() {
     setNewDriverLicenseNumber("");
     setNewDriverPassportNumber("");
     setNewDriverWeeklyDayOff("");
-    setContractNumber("");
+    void nextContractNumber.refetch({ silent: true }).catch(() => undefined);
     setPrincipalAmount("");
     setInstallmentAmount("");
     setMonthlyInsuranceAmount("");
@@ -1108,7 +1100,7 @@ export function VehiclesPage() {
               ) : null}
               {assignDriverId ? (
                 <div className="form-grid">
-                  <input value={contractNumber} onChange={(e) => setContractNumber(e.target.value)} placeholder="Номер договора" />
+                  <input value={contractNumber} readOnly title="Номер назначается автоматически при сохранении" placeholder="Номер договора" />
                   <input value={principalAmount} onChange={(e) => setPrincipalAmount(e.target.value)} placeholder="Сумма договора" inputMode="numeric" />
                   <input value={installmentAmount} onChange={(e) => setInstallmentAmount(e.target.value)} placeholder="Ежедневный платёж" inputMode="numeric" />
                   <input value={monthlyInsuranceAmount} onChange={(e) => setMonthlyInsuranceAmount(e.target.value)} placeholder={insuranceMode === "daily" ? "Страховка в день" : "Страховка в месяц"} inputMode="numeric" />

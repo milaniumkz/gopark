@@ -8,6 +8,7 @@ export interface ContractRepository {
   getById(contractId: string): Promise<ContractDetail | null>;
   getActiveByDriver(driverId: string): Promise<ContractDetail | null>;
   getMaxIssuedAmountByCar(carId: string): Promise<number>;
+  getNextNumber(): Promise<string>;
   create(input: CreateContractDto): Promise<ContractListItem>;
   update(contractId: string, input: UpdateContractDto): Promise<ContractDetail | null>;
   updateStatus(contractId: string, status: ContractListItem["status"]): Promise<ContractDetail | null>;

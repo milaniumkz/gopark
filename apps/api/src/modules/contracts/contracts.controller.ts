@@ -50,6 +50,12 @@ export class ContractsController {
     return this.contractsService.list();
   }
 
+  @Get("next-number")
+  @Roles("owner", "admin", "finance", "manager", "auditor", "operator")
+  async getNextNumber(): Promise<{ contractNumber: string }> {
+    return { contractNumber: await this.contractsService.getNextNumber() };
+  }
+
   @Get(":contractId")
   @Roles("owner", "admin", "finance", "auditor", "manager")
   async getContract(
