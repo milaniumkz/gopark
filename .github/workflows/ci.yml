@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches-ignore: [codex/mac-ci-pilot, codex/ci-split-pilot]
+    branches-ignore: [codex/mac-ci-pilot, codex/ci-split-pilot, codex/linux-ci-pilot]
   pull_request:
   workflow_call:
 
