@@ -46,7 +46,9 @@ jobs:
           PROD_SSH_PORT: ${{ secrets.PROD_SSH_PORT }}
         run: |
           echo '23a0f5f6560df0a8a6b022fc711f5a45d8fd300f44732e55ac2d37e76c700f57  manager-apk/app-release.apk' | sha256sum --check
-          scp -i ~/.ssh/id_ed25519 -P "$PROD_SSH_PORT" manager-apk/app-release.apk "$PROD_SSH_USER@$PROD_SSH_HOST:/tmp/gopark-manager-checked.apk"
+          if ! ssh -i ~/.ssh/id_ed25519 -p "$PROD_SSH_PORT" "$PROD_SSH_USER@$PROD_SSH_HOST" 'echo "23a0f5f6560df0a8a6b022fc711f5a45d8fd300f44732e55ac2d37e76c700f57  /tmp/gopark-manager-checked.apk" | sha256sum --check'; then
+            scp -i ~/.ssh/id_ed25519 -P "$PROD_SSH_PORT" manager-apk/app-release.apk "$PROD_SSH_USER@$PROD_SSH_HOST:/tmp/gopark-manager-checked.apk"
+          fi
           ssh -i ~/.ssh/id_ed25519 -p "$PROD_SSH_PORT" "$PROD_SSH_USER@$PROD_SSH_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           exec 9>/tmp/gopark-production-deploy.lock
@@ -58,7 +60,7 @@ jobs:
           BACKUP_DIR="$BASE/backups/manager-apk-$(date -u +%Y%m%dT%H%M%SZ)"
           mkdir -p "$BACKUP_DIR"
           chmod 700 "$BACKUP_DIR"
-          for target in "$APP_DIR" "$BASE/gopark"; do
+          for target in "$APP_DIR"; do
             if [ -f "$target/gopark-manager.apk" ]; then
               cp -p "$target/gopark-manager.apk" "$BACKUP_DIR/$(basename "$target")-previous.apk"
             fi
