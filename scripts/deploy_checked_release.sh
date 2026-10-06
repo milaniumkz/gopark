@@ -55,7 +55,7 @@ cd "$RELEASE_DIR"
 compose=(docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml -f release-images.yml)
 "${compose[@]}" build api crm-web
 # Apply migrations only. Never re-seed an existing production database.
-"${compose[@]}" run --rm --no-deps api-migrate node /app/node_modules/.pnpm/prisma@5.22.0/node_modules/prisma/build/index.js migrate deploy --schema apps/api/prisma/schema.prisma
+"${compose[@]}" run --rm --no-deps --interactive=false -T api-migrate node /app/node_modules/.pnpm/prisma@5.22.0/node_modules/prisma/build/index.js migrate deploy --schema apps/api/prisma/schema.prisma < /dev/null
 rollback() {
   result=$?
   trap - ERR

@@ -3,6 +3,16 @@ name: deploy-production
 on:
   push:
     branches: [main]
+    paths:
+      - 'apps/api/**'
+      - 'apps/crm-web/**'
+      - 'packages/contracts/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'tsconfig.base.json'
+      - 'docker-compose.server.yml'
+      - 'scripts/deploy_checked_release.sh'
   workflow_dispatch:
     inputs:
       ref:
@@ -46,4 +56,5 @@ jobs:
         env:
           SHA: ${{ steps.rev.outputs.sha }}
         run: |
-          ssh -i ~/.ssh/id_ed25519 -p "${{ secrets.PROD_SSH_PORT }}" "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}" "SHA='$SHA' bash -s" < scripts/deploy_checked_release.sh
+          scp -i ~/.ssh/id_ed25519 -P "${{ secrets.PROD_SSH_PORT }}" scripts/deploy_checked_release.sh "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}:/tmp/gopark-deploy-$SHA.sh"
+          ssh -i ~/.ssh/id_ed25519 -p "${{ secrets.PROD_SSH_PORT }}" "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}" "SHA='$SHA' bash /tmp/gopark-deploy-$SHA.sh"
