@@ -11,6 +11,10 @@ on:
         description: Required only for rollback
         required: false
 
+permissions:
+  contents: read
+  actions: read
+
 concurrency:
   group: production-ops
   cancel-in-progress: false
