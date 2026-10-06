@@ -89,3 +89,6 @@ apk/
 !apps/**/README.md
 !apps/api/docs/**/*.md
 !apps/api/src/**/README*.md
+
+# Versioned database migrations
+!apps/api/prisma/migrations/**/*.sql

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: status, logs, restart, redeploy, rollback
+        description: status, incident-schema, logs, restart, redeploy, rollback
         required: true
         default: status
       rollback_sha:
@@ -38,22 +38,35 @@ jobs:
           CURRENT="${BASE}/gopark-current"
           if [ -L "$CURRENT" ]; then APP_DIR="$(readlink -f "$CURRENT")"; else APP_DIR="$CONFIG_DIR"; fi
           cd "$APP_DIR"
+          compose() {
+            local args=(-p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml)
+            if [ -f release-images.yml ]; then args+=(-f release-images.yml); fi
+            docker compose "${args[@]}" "$@"
+          }
 
           case "$OPERATION" in
             status)
-              docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml ps
+              compose ps
               cat "$BASE/gopark-current-sha" 2>/dev/null || true
               curl -fsS http://127.0.0.1:3000/api/health
               ;;
+            incident-schema)
+              cat "$BASE/gopark-current-sha" 2>/dev/null || true
+              find "$APP_DIR/apps/api/prisma/migrations" -maxdepth 2 -type f -name migration.sql -printf '%P\n' 2>/dev/null || true
+              docker exec gopark-postgres psql -U gopark -d gopark -v ON_ERROR_STOP=1 -c "SELECT to_regclass('public._prisma_migrations') AS migration_table; SELECT column_name, data_type FROM information_schema.columns WHERE table_schema='public' AND table_name='incidents' ORDER BY ordinal_position;"
+              if docker exec gopark-postgres psql -U gopark -d gopark -Atc "SELECT to_regclass('public._prisma_migrations') IS NOT NULL" | grep -q '^t$'; then
+                docker exec gopark-postgres psql -U gopark -d gopark -c 'SELECT migration_name, finished_at, rolled_back_at FROM _prisma_migrations ORDER BY started_at;'
+              fi
+              ;;
             logs)
-              docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml logs --tail=200 api worker crm-web | sed -E 's/(Authorization: Bearer )[A-Za-z0-9._-]+/\1[redacted]/g'
+              compose logs --tail=200 api worker crm-web | sed -E 's/(Authorization: Bearer )[A-Za-z0-9._-]+/\1[redacted]/g'
               ;;
             restart)
-              docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml restart api worker crm-web
+              compose restart api worker crm-web
               curl -fsS http://127.0.0.1:3000/api/health
               ;;
             redeploy)
-              docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml up -d --no-deps --force-recreate api worker crm-web
+              compose up -d --no-deps --force-recreate api worker crm-web
               curl -fsS http://127.0.0.1:3000/api/health
               ;;
             rollback)
@@ -61,8 +74,8 @@ jobs:
               TARGET="$BASE/gopark-releases/$ROLLBACK_SHA"
               test -d "$TARGET"
               cd "$TARGET"
-              docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml build api crm-web
-              docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml up -d --no-deps --force-recreate api worker crm-web
+              compose build api crm-web
+              compose up -d --no-deps --force-recreate api worker crm-web
               ln -sfn "$TARGET" "$CURRENT"
               echo "$ROLLBACK_SHA" > "$BASE/gopark-current-sha"
               curl -fsS http://127.0.0.1:3000/api/health

@@ -1,3 +1,4 @@
+import { nextIncidentStatusHistory } from "../repositories/incident-history.js";
 import type {
   AuthRateLimitRepository,
   AuditRepository,
@@ -1819,6 +1820,7 @@ export class InMemoryIncidentRepository implements IncidentRepository {
       repairNote: input.repairNote ?? null,
       locationNote: input.locationNote ?? null,
       managerLabel: input.managerLabel ?? null,
+      statusHistory: [{ status: input.status, serviceStage: input.serviceStage ?? null, changedAt: new Date().toISOString() }],
       serviceStage: input.serviceStage ?? null,
       serviceCaseType: input.serviceCaseType ?? null,
       servicePaymentStatus: input.servicePaymentStatus ?? null,
@@ -1836,6 +1838,7 @@ export class InMemoryIncidentRepository implements IncidentRepository {
     }
 
     Object.assign(incident, {
+      statusHistory: nextIncidentStatusHistory(incident, input),
       ...(input.title !== undefined ? { title: input.title } : {}),
       ...(input.incidentType !== undefined ? { incidentType: input.incidentType } : {}),
       ...(input.status !== undefined ? { status: input.status } : {}),

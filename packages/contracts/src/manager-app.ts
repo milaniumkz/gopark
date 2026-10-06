@@ -105,6 +105,7 @@ export interface ManagerDriverDetail {
     priority: string;
     status: string;
     occurredAt?: string | null;
+    statusHistory?: IncidentStatusHistoryEntry[];
     serviceStage?: string | null;
     serviceCaseType?: string | null;
     repairNote?: string | null;
@@ -180,6 +181,12 @@ export interface ManagerExecuteActionResult {
   executedAt: string;
 }
 
+export interface IncidentStatusHistoryEntry {
+  status: string;
+  serviceStage: string | null;
+  changedAt: string;
+}
+
 export interface ManagerIncidentItem {
   id: string;
   title: string;
@@ -201,6 +208,7 @@ export interface ManagerIncidentItem {
   repairNote?: string | null;
   locationNote?: string | null;
   managerLabel?: string | null;
+  statusHistory?: IncidentStatusHistoryEntry[];
   serviceStage?: string | null;
   serviceCaseType?: string | null;
   servicePaymentStatus?: string | null;

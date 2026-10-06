@@ -1,0 +1,76 @@
+name: manager-apk
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/incident-history-release]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.6'
+          cache: true
+      - name: Preserve existing Android signing key when available
+        env:
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          PROD_SSH_KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
+          PROD_SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+          PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          PROD_SSH_PORT: ${{ secrets.PROD_SSH_PORT }}
+        run: |
+          mkdir -p ~/.ssh ~/.android
+          printf '%s\n' "$PROD_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$PROD_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          key_path=$(ssh -i ~/.ssh/id_ed25519 -p "$PROD_SSH_PORT" "$PROD_SSH_USER@$PROD_SSH_HOST" 'for path in "$HOME/.android/debug.keystore" /home/client/.android/debug.keystore /home/client/gopark/secrets/debug.keystore; do if [ -r "$path" ]; then printf "%s\n" "$path"; break; fi; done')
+          if [ -n "$key_path" ]; then
+            scp -i ~/.ssh/id_ed25519 -P "$PROD_SSH_PORT" "$PROD_SSH_USER@$PROD_SSH_HOST:$key_path" ~/.android/debug.keystore
+            chmod 600 ~/.android/debug.keystore
+            echo 'Reusing existing Android debug signing key.'
+          else
+            echo '::warning::Existing Android debug signing key was not found on the server; signature compatibility must be checked.'
+          fi
+          scp -i ~/.ssh/id_ed25519 -P "$PROD_SSH_PORT" "$PROD_SSH_USER@$PROD_SSH_HOST:/home/client/gopark-current/gopark-manager.apk" /tmp/previous-manager.apk
+      - name: Resolve manager dependencies
+        working-directory: apps/manager-app
+        run: flutter pub get --enforce-lockfile
+      - uses: actions/upload-artifact@v4
+        with:
+          name: manager-resolved-lockfile
+          path: apps/manager-app/pubspec.lock
+          if-no-files-found: error
+      - name: Analyze and test manager app
+        working-directory: apps/manager-app
+        run: |
+          flutter analyze
+          flutter test
+      - name: Build manager APK
+        working-directory: apps/manager-app
+        run: |
+          build_number=$(( $(date +%s) / 60 ))
+          flutter build apk --release --dart-define=API_BASE_URL=http://185.138.185.36/api --build-number="$build_number"
+      - name: Verify APK and compare signing certificate
+        run: |
+          apksigner=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
+          "$apksigner" verify --verbose --print-certs apps/manager-app/build/app/outputs/flutter-apk/app-release.apk > /tmp/new-manager-cert.txt
+          "$apksigner" verify --verbose --print-certs /tmp/previous-manager.apk > /tmp/old-manager-cert.txt
+          old_cert=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' /tmp/old-manager-cert.txt)
+          new_cert=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' /tmp/new-manager-cert.txt)
+          if [ -n "$old_cert" ] && [ "$old_cert" = "$new_cert" ]; then
+            echo 'APK signing certificate matches the existing manager APK.'
+          else
+            echo '::warning::APK signing certificate differs; installation over the old APK requires the original signing key.'
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gopark-manager-apk
+          path: apps/manager-app/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error

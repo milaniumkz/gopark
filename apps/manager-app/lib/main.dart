@@ -2284,6 +2284,7 @@ class _ManagerAlertsPageState extends State<ManagerAlertsPage> {
   late ManagerAlertsSection _selectedSection;
   String? _reviewingRequestId;
   String? _reviewingRiskRequestId;
+  bool _showIncidentArchive = false;
 
   @override
   void initState() {
@@ -2506,6 +2507,14 @@ class _ManagerAlertsPageState extends State<ManagerAlertsPage> {
                   future: _incidentsFuture,
                   builder: (context, incidentsSnapshot) {
                     final incidents = incidentsSnapshot.data ?? const [];
+                    final activeIncidents = incidents
+                        .where((item) => !_managerIncidentIsArchived(item.status))
+                        .toList();
+                    final visibleIncidents = _showIncidentArchive
+                        ? incidents
+                            .where((item) => _managerIncidentIsArchived(item.status))
+                            .toList()
+                        : activeIncidents;
 
                     return ListView(
                       padding: const EdgeInsets.all(8),
@@ -2545,7 +2554,7 @@ class _ManagerAlertsPageState extends State<ManagerAlertsPage> {
                             ),
                             ManagerMetric(
                               title: 'Инциденты',
-                              value: '${incidents.length}',
+                              value: '${activeIncidents.length}',
                               icon: Icons.report_gmailerrorred_rounded,
                               colorA: _managerOrange,
                               colorB: const Color(0xFFEF4444),
@@ -2756,16 +2765,27 @@ class _ManagerAlertsPageState extends State<ManagerAlertsPage> {
                             ManagerAlertsSection.incidents)) ...[
                           const _SectionTitle('Инциденты'),
                           const SizedBox(height: 6),
-                          if (incidents.isEmpty)
-                            const ManagerInfoCard(
+                          _ManagerIncidentArchiveToggle(
+                            showArchive: _showIncidentArchive,
+                            onChanged: (value) => setState(
+                                () => _showIncidentArchive = value),
+                          ),
+                          const SizedBox(height: 6),
+                          if (visibleIncidents.isEmpty)
+                            ManagerInfoCard(
                               title: 'Нет инцидентов',
-                              lines: ['Инцидентов пока нет'],
+                              lines: [
+                                _showIncidentArchive
+                                    ? 'Архив инцидентов пуст'
+                                    : 'Активных инцидентов нет',
+                              ],
                               icon: Icons.verified_outlined,
                             ),
-                          ...incidents.map(
+                          ...visibleIncidents.map(
                             (item) => Padding(
                               padding: const EdgeInsets.only(bottom: 6),
                               child: ManagerSignalCard(
+                                showAllDetails: true,
                                 title: item.driverName?.isNotEmpty == true
                                     ? item.driverName!
                                     : item.title,
@@ -2782,7 +2802,8 @@ class _ManagerAlertsPageState extends State<ManagerAlertsPage> {
                                     item.repairNote!,
                                   if (item.carId != null)
                                     'Есть привязанное авто',
-                                ].join(' • '),
+                                  ..._managerIncidentHistoryLines(item.statusHistory),
+                                ].join('\n'),
                                 badge: _managerIncidentTypeLabel(
                                     item.incidentType),
                                 accent: item.priority == 'high'
@@ -2825,6 +2846,7 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
   late Future<ManagerDriverDetailDto?> _detailFuture;
   String? _pendingAction;
   int _selectedTab = 0;
+  bool _showIncidentArchive = false;
 
   @override
   void initState() {
@@ -2895,6 +2917,9 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
     String action,
     String successText,
   ) async {
+    if (_managerIncidentIsArchived(incident.status)) {
+      return;
+    }
     String? note;
     if (action == 'written_off') {
       final details = await _showManagerRequiredNoteDialog(
@@ -3279,19 +3304,34 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
                   ] else if (_selectedTab == 2) ...[
                     const _SectionTitle('Инциденты'),
                     const SizedBox(height: 6),
-                    if (data.openIncidents.isEmpty)
-                      const ManagerInfoCard(
+                    _ManagerIncidentArchiveToggle(
+                      showArchive: _showIncidentArchive,
+                      onChanged: (value) =>
+                          setState(() => _showIncidentArchive = value),
+                    ),
+                    const SizedBox(height: 6),
+                    if (!data.openIncidents.any((item) =>
+                        _managerIncidentIsArchived(item.status) ==
+                        _showIncidentArchive))
+                      ManagerInfoCard(
                         title: 'Нет инцидентов',
-                        lines: ['По водителю инцидентов нет'],
+                        lines: [
+                          _showIncidentArchive
+                              ? 'Архив инцидентов пуст'
+                              : 'Активных инцидентов нет',
+                        ],
                         icon: Icons.verified_outlined,
                       ),
-                    ...data.openIncidents.map(
+                    ...data.openIncidents.where((item) =>
+                        _managerIncidentIsArchived(item.status) ==
+                        _showIncidentArchive).map(
                       (item) => Padding(
                         padding: const EdgeInsets.only(bottom: 6),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             ManagerSignalCard(
+                              showAllDetails: true,
                               title: item.title,
                               subtitle: [
                                 item.incidentType == 'repair'
@@ -3306,77 +3346,80 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
                                   _managerServiceCaseTypeLabel(
                                     item.serviceCaseType!,
                                   ),
-                              ].join(' • '),
+                                ..._managerIncidentHistoryLines(item.statusHistory),
+                              ].join('\n'),
                               badge: _managerPriorityLabel(item.priority),
                               accent: item.priority == 'high'
                                   ? _managerOrange
                                   : _managerPurple,
                               icon: Icons.report_problem_outlined,
                             ),
-                            const SizedBox(height: 6),
-                            Wrap(
-                              spacing: 6,
-                              runSpacing: 6,
-                              children: [
-                                OutlinedButton(
-                                  onPressed: _pendingAction == null
-                                      ? () => _updateIncidentAction(
-                                            item,
-                                            'awaiting_repair',
-                                            'Кейс переведен в ожидание ремонта',
-                                          )
-                                      : null,
-                                  child: const Text('Ожидает ремонт'),
-                                ),
-                                FilledButton(
-                                  onPressed: _pendingAction == null
-                                      ? () => _updateIncidentAction(
-                                            item,
-                                            'in_repair',
-                                            'Кейс переведен в ремонт',
-                                          )
-                                      : null,
-                                  child: const Text('В ремонте'),
-                                ),
-                                OutlinedButton(
-                                  onPressed: _pendingAction == null
-                                      ? () => _updateIncidentAction(
-                                            item,
-                                            'completed',
-                                            item.serviceCaseType == 'inspection'
-                                                ? 'Осмотр завершен'
-                                                : 'Ремонт завершен',
-                                          )
-                                      : null,
-                                  child: const Text('Завершить'),
-                                ),
-                                if (item.incidentType == 'accident' ||
-                                    item.incidentType == 'repair' ||
-                                    item.serviceCaseType == 'repair')
+                            if (!_managerIncidentIsArchived(item.status)) ...[
+                              const SizedBox(height: 6),
+                              Wrap(
+                                spacing: 6,
+                                runSpacing: 6,
+                                children: [
                                   OutlinedButton(
                                     onPressed: _pendingAction == null
                                         ? () => _updateIncidentAction(
                                               item,
-                                              'written_off',
-                                              'Заявка на списание отправлена',
+                                              'awaiting_repair',
+                                              'Кейс переведен в ожидание ремонта',
                                             )
                                         : null,
-                                    child: const Text(
-                                      'Не подлежит восстановлению',
-                                    ),
+                                    child: const Text('Ожидает ремонт'),
                                   ),
-                                TextButton(
-                                  onPressed: _pendingAction == null
-                                      ? () => _updateIncidentAction(
-                                            item,
-                                            'closed',
-                                            'Кейс закрыт',
-                                          )
-                                      : null,
-                                  child: const Text('Закрыть'),
-                                ),
-                              ],
-                            ),
+                                  FilledButton(
+                                    onPressed: _pendingAction == null
+                                        ? () => _updateIncidentAction(
+                                              item,
+                                              'in_repair',
+                                              'Кейс переведен в ремонт',
+                                            )
+                                        : null,
+                                    child: const Text('В ремонте'),
+                                  ),
+                                  OutlinedButton(
+                                    onPressed: _pendingAction == null
+                                        ? () => _updateIncidentAction(
+                                              item,
+                                              'completed',
+                                              item.serviceCaseType == 'inspection'
+                                                  ? 'Осмотр завершен'
+                                                  : 'Ремонт завершен',
+                                            )
+                                        : null,
+                                    child: const Text('Завершить'),
+                                  ),
+                                  if (item.incidentType == 'accident' ||
+                                      item.incidentType == 'repair' ||
+                                      item.serviceCaseType == 'repair')
+                                    OutlinedButton(
+                                      onPressed: _pendingAction == null
+                                          ? () => _updateIncidentAction(
+                                                item,
+                                                'written_off',
+                                                'Заявка на списание отправлена',
+                                              )
+                                          : null,
+                                      child: const Text(
+                                        'Не подлежит восстановлению',
+                                      ),
+                                    ),
+                                  TextButton(
+                                    onPressed: _pendingAction == null
+                                        ? () => _updateIncidentAction(
+                                              item,
+                                              'closed',
+                                              'Кейс закрыт',
+                                            )
+                                        : null,
+                                    child: const Text('Закрыть'),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ],
                         ),
                       ),
@@ -4709,6 +4752,7 @@ class ManagerSignalCard extends StatelessWidget {
     required this.accent,
     required this.icon,
     this.onTap,
+    this.showAllDetails = false,
   });
 
   final String title;
@@ -4717,11 +4761,12 @@ class ManagerSignalCard extends StatelessWidget {
   final Color accent;
   final IconData icon;
   final VoidCallback? onTap;
+  final bool showAllDetails;
 
   @override
   Widget build(BuildContext context) {
     final detailLines = subtitle
-        .split(' • ')
+        .split(RegExp(r' • |\n'))
         .map((item) => item.trim())
         .where((item) => item.isNotEmpty)
         .toList();
@@ -4771,13 +4816,15 @@ class ManagerSignalCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 2),
-                    ...detailLines.take(4).map(
+                    ...detailLines.take(showAllDetails ? detailLines.length : 4).map(
                           (line) => Padding(
                             padding: const EdgeInsets.only(bottom: 1),
                             child: Text(
                               line,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                              maxLines: showAllDetails ? null : 1,
+                              overflow: showAllDetails
+                                  ? TextOverflow.visible
+                                  : TextOverflow.ellipsis,
                               style: const TextStyle(
                                 color: _managerMuted,
                                 height: 1.12,
@@ -5110,6 +5157,8 @@ String _managerIncidentTypeLabel(String? incidentType) {
       return 'Ремонт';
     case 'inspection':
       return 'Осмотр';
+    case 'impound':
+      return 'Штрафстоянка';
     default:
       return 'Инцидент';
   }
@@ -5209,6 +5258,8 @@ String _managerServiceStageLabel(String stage) {
       return 'В ремонте';
     case 'completed':
       return 'Завершено';
+    case 'writeoff_requested':
+      return 'Заявка на списание';
     case 'written_off':
       return 'Списан';
     case 'impound':
@@ -5906,4 +5957,56 @@ String _managerUserError(Object error) {
   return message.isEmpty
       ? 'Не удалось выполнить действие. Попробуйте ещё раз.'
       : message;
+}
+
+// Completed incidents remain available as read-only history.
+bool _managerIncidentIsArchived(String status) =>
+    const {'closed', 'resolved', 'archived'}.contains(status);
+
+class _ManagerIncidentArchiveToggle extends StatelessWidget {
+  const _ManagerIncidentArchiveToggle({
+    required this.showArchive,
+    required this.onChanged,
+  });
+
+  final bool showArchive;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 6,
+      children: [
+        ChoiceChip(
+          label: const Text('Активные'),
+          selected: !showArchive,
+          onSelected: (_) => onChanged(false),
+        ),
+        ChoiceChip(
+          label: const Text('Архив'),
+          selected: showArchive,
+          onSelected: (_) => onChanged(true),
+        ),
+      ],
+    );
+  }
+}
+
+List<String> _managerIncidentHistoryLines(
+  List<ManagerIncidentStatusHistoryDto> history,
+) {
+  if (history.isEmpty) {
+    return const ['История смены статусов не записана'];
+  }
+  return [
+    'История статусов:',
+    ...history.map((entry) {
+      final stage = entry.serviceStage;
+      final label = [
+        _managerStatusLabel(entry.status),
+        if (stage != null && stage.isNotEmpty) _managerServiceStageLabel(stage),
+      ].join(' / ');
+      return '$label: ${_managerDateTimeLabel(entry.changedAt)}';
+    }),
+  ];
 }
