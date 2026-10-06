@@ -77,6 +77,7 @@ export class ObligationPrismaRepository implements ObligationRepository {
         where: {
           driverId: { in: driverIds },
           contract: { status: "active" },
+          type: "installment",
         },
         orderBy: { dueDate: "asc" },
         select: {
@@ -145,7 +146,7 @@ export class ObligationPrismaRepository implements ObligationRepository {
     }
 
     for (const item of seedObligations) {
-      if (!ids.has(item.driverId)) {
+      if (item.type !== "installment" || !ids.has(item.driverId)) {
         continue;
       }
 
@@ -241,6 +242,7 @@ export class ObligationPrismaRepository implements ObligationRepository {
         where: {
           driverId: { in: driverIds },
           contract: { status: "active" },
+          type: "installment",
           dueDate: {
             gte: new Date(`${startDate}T00:00:00.000Z`),
             lte: new Date(`${endDate}T00:00:00.000Z`),
@@ -257,7 +259,7 @@ export class ObligationPrismaRepository implements ObligationRepository {
 
     const ids = new Set(driverIds);
     return seedObligations
-      .filter((item) => ids.has(item.driverId) && item.dueDate >= startDate && item.dueDate <= endDate)
+      .filter((item) => item.type === "installment" && ids.has(item.driverId) && item.dueDate >= startDate && item.dueDate <= endDate)
       .reduce((sum, item) => sum + item.amount, 0);
   }
 
@@ -268,6 +270,7 @@ export class ObligationPrismaRepository implements ObligationRepository {
         where: {
           driver: { companyName },
           contract: { status: "active" },
+          type: "installment",
           dueDate: {
             gte: new Date(`${startDate}T00:00:00.000Z`),
             lte: new Date(`${endDate}T00:00:00.000Z`),
@@ -296,6 +299,7 @@ export class ObligationPrismaRepository implements ObligationRepository {
         where: {
           driverId: { in: driverIds },
           contract: { status: "active" },
+          type: "installment",
           dueDate: {
             gte: new Date(`${startDate}T00:00:00.000Z`),
             lte: new Date(`${endDate}T00:00:00.000Z`),
@@ -313,7 +317,7 @@ export class ObligationPrismaRepository implements ObligationRepository {
 
     const ids = new Set(driverIds);
     return seedObligations
-      .filter((item) => ids.has(item.driverId) && item.dueDate >= startDate && item.dueDate <= endDate)
+      .filter((item) => item.type === "installment" && ids.has(item.driverId) && item.dueDate >= startDate && item.dueDate <= endDate)
       .reduce((sum, item) => sum + Math.max(0, item.amount - item.paidAmount), 0);
   }
 
@@ -324,6 +328,7 @@ export class ObligationPrismaRepository implements ObligationRepository {
         where: {
           driver: { companyName },
           contract: { status: "active" },
+          type: "installment",
           dueDate: {
             gte: new Date(`${startDate}T00:00:00.000Z`),
             lte: new Date(`${endDate}T00:00:00.000Z`),
@@ -559,6 +564,7 @@ export class ObligationPrismaRepository implements ObligationRepository {
         where: {
           driverId,
           contract: { status: "active" },
+          type: "installment",
           dueDate: new Date(`${date}T00:00:00.000Z`),
         },
         select: {
@@ -576,7 +582,7 @@ export class ObligationPrismaRepository implements ObligationRepository {
     }
 
     return seedObligations
-      .filter((item) => item.driverId === driverId && item.dueDate === date)
+      .filter((item) => item.type === "installment" && item.driverId === driverId && item.dueDate === date)
       .reduce((sum, item) => sum + Math.max(0, item.amount - item.paidAmount), 0);
   }
 
@@ -587,6 +593,7 @@ export class ObligationPrismaRepository implements ObligationRepository {
         where: {
           driverId: { in: driverIds },
           contract: { status: "active" },
+          type: "installment",
           dueDate: new Date(`${date}T00:00:00.000Z`),
         },
         select: {
@@ -605,7 +612,7 @@ export class ObligationPrismaRepository implements ObligationRepository {
 
     const ids = new Set(driverIds);
     return seedObligations
-      .filter((item) => ids.has(item.driverId) && item.dueDate === date)
+      .filter((item) => item.type === "installment" && ids.has(item.driverId) && item.dueDate === date)
       .reduce((sum, item) => sum + Math.max(0, item.amount - item.paidAmount), 0);
   }
 

@@ -1057,7 +1057,7 @@ export class InMemoryObligationRepository implements ObligationRepository {
     }
 
     for (const item of seedObligations) {
-      if (!ids.has(item.driverId)) {
+      if (item.type !== "installment" || !ids.has(item.driverId)) {
         continue;
       }
 
@@ -1105,7 +1105,7 @@ export class InMemoryObligationRepository implements ObligationRepository {
   async getTotalDueByDriversInPeriod(driverIds: string[], startDate: string, endDate: string) {
     const ids = new Set(driverIds);
     return seedObligations
-      .filter((item) => ids.has(item.driverId) && item.dueDate >= startDate && item.dueDate <= endDate)
+      .filter((item) => item.type === "installment" && ids.has(item.driverId) && item.dueDate >= startDate && item.dueDate <= endDate)
       .reduce((sum, item) => sum + item.amount, 0);
   }
 
@@ -1120,7 +1120,7 @@ export class InMemoryObligationRepository implements ObligationRepository {
   async getOpenDueByDriversInPeriod(driverIds: string[], startDate: string, endDate: string) {
     const ids = new Set(driverIds);
     return seedObligations
-      .filter((item) => ids.has(item.driverId) && item.dueDate >= startDate && item.dueDate <= endDate)
+      .filter((item) => item.type === "installment" && ids.has(item.driverId) && item.dueDate >= startDate && item.dueDate <= endDate)
       .reduce((sum, item) => sum + Math.max(0, item.amount - item.paidAmount), 0);
   }
 
@@ -1246,14 +1246,14 @@ export class InMemoryObligationRepository implements ObligationRepository {
 
   async getDueAmountByDriverOnDate(driverId: string, date: string) {
     return seedObligations
-      .filter((item) => item.driverId === driverId && item.dueDate === date)
+      .filter((item) => item.type === "installment" && item.driverId === driverId && item.dueDate === date)
       .reduce((sum, item) => sum + Math.max(0, item.amount - item.paidAmount), 0);
   }
 
   async getDueAmountByDriversOnDate(driverIds: string[], date: string) {
     const ids = new Set(driverIds);
     return seedObligations
-      .filter((item) => ids.has(item.driverId) && item.dueDate === date)
+      .filter((item) => item.type === "installment" && ids.has(item.driverId) && item.dueDate === date)
       .reduce((sum, item) => sum + Math.max(0, item.amount - item.paidAmount), 0);
   }
 

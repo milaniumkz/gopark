@@ -50,6 +50,11 @@ jobs:
               cat "$BASE/gopark-current-sha" 2>/dev/null || true
               curl -fsS http://127.0.0.1:3000/api/health
               ;;
+            dashboard-totals)
+              # Aggregate diagnostics only: no names, phone numbers or record identifiers.
+              docker exec gopark-postgres psql -U gopark -d gopark -v ON_ERROR_STOP=1 -c "SELECT CURRENT_DATE AS server_date; SELECT status, count(*) AS drivers FROM drivers GROUP BY status; SELECT c.status AS contract_status, d.status AS driver_status, count(*) AS contracts, sum(c.installment_amount) AS daily_payment FROM contracts c LEFT JOIN drivers d ON d.id=c.driver_id GROUP BY c.status,d.status; SELECT o.due_date::date AS due_date, o.type, c.status AS contract_status, d.status AS driver_status, EXISTS(SELECT 1 FROM car_assignments a JOIN cars car ON car.id=a.car_id WHERE a.driver_id=o.driver_id AND a.ended_at IS NULL AND car.status='assigned') AS assigned, count(*) AS obligations, sum(o.amount) AS charged, sum(o.paid_amount) AS paid, sum(GREATEST(COALESCE((o.metadata->>'installmentAmount')::numeric,o.amount)-LEAST(o.paid_amount,COALESCE((o.metadata->>'installmentAmount')::numeric,o.amount)),0)) AS open_installment FROM obligations o LEFT JOIN contracts c ON c.id=o.contract_id LEFT JOIN drivers d ON d.id=o.driver_id WHERE o.due_date::date BETWEEN CURRENT_DATE AND CURRENT_DATE+6 GROUP BY o.due_date::date,o.type,c.status,d.status,assigned ORDER BY o.due_date::date,o.type;"
+              docker exec gopark-api node --input-type=module -e 'const {DashboardService}=await import("./apps/api/dist/apps/api/src/modules/dashboard/dashboard.service.js");const date=new Date().toISOString().slice(0,10);const overview=await new DashboardService().getOverview("today",null,date,date);console.log(JSON.stringify({date,plannedPayment:overview.plannedPayment,debt:overview.debt,actualPayment:overview.actualPayment,overpayment:overview.overpayment}));process.exit(0)'
+              ;;
             incident-schema)
               cat "$BASE/gopark-current-sha" 2>/dev/null || true
               find "$APP_DIR/apps/api/prisma/migrations" -maxdepth 2 -type f -name migration.sql -printf '%P\n' 2>/dev/null || true
