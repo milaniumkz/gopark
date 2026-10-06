@@ -38,10 +38,15 @@ jobs:
           CURRENT="${BASE}/gopark-current"
           if [ -L "$CURRENT" ]; then APP_DIR="$(readlink -f "$CURRENT")"; else APP_DIR="$CONFIG_DIR"; fi
           cd "$APP_DIR"
+          compose() {
+            local args=(-p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml)
+            if [ -f release-images.yml ]; then args+=(-f release-images.yml); fi
+            docker compose "${args[@]}" "$@"
+          }
 
           case "$OPERATION" in
             status)
-              docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml ps
+              compose ps
               cat "$BASE/gopark-current-sha" 2>/dev/null || true
               curl -fsS http://127.0.0.1:3000/api/health
               ;;
@@ -54,14 +59,14 @@ jobs:
               fi
               ;;
             logs)
-              docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml logs --tail=200 api worker crm-web | sed -E 's/(Authorization: Bearer )[A-Za-z0-9._-]+/\1[redacted]/g'
+              compose logs --tail=200 api worker crm-web | sed -E 's/(Authorization: Bearer )[A-Za-z0-9._-]+/\1[redacted]/g'
               ;;
             restart)
-              docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml restart api worker crm-web
+              compose restart api worker crm-web
               curl -fsS http://127.0.0.1:3000/api/health
               ;;
             redeploy)
-              docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml up -d --no-deps --force-recreate api worker crm-web
+              compose up -d --no-deps --force-recreate api worker crm-web
               curl -fsS http://127.0.0.1:3000/api/health
               ;;
             rollback)
@@ -69,8 +74,8 @@ jobs:
               TARGET="$BASE/gopark-releases/$ROLLBACK_SHA"
               test -d "$TARGET"
               cd "$TARGET"
-              docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml build api crm-web
-              docker compose -p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml up -d --no-deps --force-recreate api worker crm-web
+              compose build api crm-web
+              compose up -d --no-deps --force-recreate api worker crm-web
               ln -sfn "$TARGET" "$CURRENT"
               echo "$ROLLBACK_SHA" > "$BASE/gopark-current-sha"
               curl -fsS http://127.0.0.1:3000/api/health

@@ -2,7 +2,7 @@
 set -euo pipefail
 : "${SHA:?Release SHA required}"
 [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
-BASE=/home/client
+BASE=${GOPARK_DEPLOY_BASE:-/home/client}
 CONFIG_DIR="$BASE/gopark"
 RELEASE_DIR="$BASE/gopark-releases/$SHA"
 ARCHIVE="/tmp/gopark-release-$SHA.tgz"
@@ -73,7 +73,7 @@ trap rollback ERR
 healthy=false
 for attempt in $(seq 1 45); do
   if curl -fsS http://127.0.0.1:3000/api/health > "$BACKUP_DIR/after-health.json"; then
-    if docker exec gopark-api node -e 'const h=JSON.parse(require("fs").readFileSync(0,"utf8"));if(h.status!=="ok"||h.mode!=="prisma"||!h.redisQueueReady||!h.productionStartupSafe)process.exit(1)' < "$BACKUP_DIR/after-health.json"; then
+    if docker exec -i gopark-api node -e 'const h=JSON.parse(require("fs").readFileSync(0,"utf8"));if(h.status!=="ok"||h.mode!=="prisma"||!h.redisQueueReady||!h.productionStartupSafe)process.exit(1)' < "$BACKUP_DIR/after-health.json"; then
       healthy=true
       break
     fi

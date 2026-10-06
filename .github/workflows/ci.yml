@@ -36,6 +36,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: '3.47.6'
       - name: Driver app analyze
         working-directory: apps/driver-app
         run: |
@@ -44,5 +45,5 @@ jobs:
       - name: Manager app analyze
         working-directory: apps/manager-app
         run: |
-          flutter pub get
+          flutter pub get --enforce-lockfile
           flutter analyze
