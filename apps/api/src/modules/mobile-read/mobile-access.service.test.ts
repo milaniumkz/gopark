@@ -18,6 +18,7 @@ test("senior manager scope includes junior managers drivers", async () => {
       status: "active",
       mfaEnabled: false,
       displayName: "Senior Scope",
+      companyName: "Scope Test",
       managerLevel: "senior",
       seniorManagerId: null,
     },
@@ -31,6 +32,7 @@ test("senior manager scope includes junior managers drivers", async () => {
       status: "active",
       mfaEnabled: false,
       displayName: "Junior Scope",
+      companyName: "Scope Test",
       managerLevel: "regular",
       seniorManagerId: "mgr_scope_senior",
     },
@@ -41,7 +43,7 @@ test("senior manager scope includes junior managers drivers", async () => {
       id: "drv_scope_senior",
       fullName: "Senior Direct Driver",
       phone: "+996700000001",
-      companyName: null,
+      companyName: "Scope Test",
       weeklyDayOff: null,
       status: "active",
       riskStatus: "normal",
@@ -53,7 +55,7 @@ test("senior manager scope includes junior managers drivers", async () => {
       id: "drv_scope_junior",
       fullName: "Junior Driver",
       phone: "+996700000002",
-      companyName: null,
+      companyName: "Scope Test",
       weeklyDayOff: null,
       status: "active",
       riskStatus: "normal",
@@ -65,7 +67,7 @@ test("senior manager scope includes junior managers drivers", async () => {
       id: "drv_scope_other",
       fullName: "Other Driver",
       phone: "+996700000003",
-      companyName: null,
+      companyName: "Scope Test",
       weeklyDayOff: null,
       status: "active",
       riskStatus: "normal",
@@ -80,6 +82,7 @@ test("senior manager scope includes junior managers drivers", async () => {
     const drivers = await service.getScopedDrivers({
       id: "mgr_scope_senior",
       role: "manager",
+      companyName: "Scope Test",
     });
     const driverIds = drivers.map((driver) => driver.id).sort();
 

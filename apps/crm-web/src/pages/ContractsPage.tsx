@@ -336,10 +336,7 @@ export function ContractsPage() {
   }, [driverId, driverWeekOffMap, endDate, installmentAmount, principalAmount, startDate]);
 
   useEffect(() => {
-    const nextStatus = searchParams.get("status");
-    if (nextStatus) {
-      setStatusFilter(nextStatus);
-    }
+    setStatusFilter(searchParams.get("status") ?? "active");
   }, [searchParams]);
 
   useEffect(() => {
