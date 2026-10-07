@@ -8,6 +8,9 @@ on:
         default: false
   push:
     branches: [codex/incident-history-release]
+concurrency:
+  group: ${{ inputs.publish == true && 'production-deploy' || format('manager-apk-{0}', github.ref) }}
+  cancel-in-progress: false
 jobs:
   build:
     runs-on: ubuntu-latest
