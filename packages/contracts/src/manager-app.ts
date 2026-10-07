@@ -24,6 +24,7 @@ export interface ManagerAssignedDriverItem {
   overdueSinceDate: string | null;
   overdueUntilDate: string | null;
   duePeriodAmount?: number;
+  overduePeriodAmount?: number | null;
   yandexBalance: number;
   nextPaymentAmount: number;
   nextPaymentDate: string | null;

@@ -43,7 +43,7 @@ type CreateIncidentInput = {
 };
 
 function isServiceIncident(item: ManagerIncidentItem): boolean {
-  return item.incidentType === "repair";
+  return item.incidentType === "repair" || ["awaiting_repair", "in_repair", "completed", "written_off"].includes(item.serviceStage ?? "");
 }
 
 function getServiceStage(item: ManagerIncidentItem): string {
@@ -58,6 +58,7 @@ function getServiceStage(item: ManagerIncidentItem): string {
 }
 
 function getServiceWorkflowLabel(item: ManagerIncidentItem): string {
+  if (item.status === "archived") return "Архив";
   const stage = getServiceStage(item);
   if (stage === "awaiting_repair") {
     return "Ожидает ремонт";
@@ -159,7 +160,6 @@ export function ServicePage() {
   const [payerFilter, setPayerFilter] = useState<"all" | "insurance" | "driver" | "company">("all");
   const [managerFilter, setManagerFilter] = useState("");
   const [searchFilter, setSearchFilter] = useState("");
-  const [showHistoricalInList, setShowHistoricalInList] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [selectedIncidentIds, setSelectedIncidentIds] = useState<string[]>([]);
 
@@ -190,7 +190,7 @@ export function ServicePage() {
     return [...serviceIncidents]
       .filter((item) => {
         const stage = getServiceStage(item);
-        if (!showHistoricalInList && statusFilter !== "completed" && statusFilter !== "written_off" && (item.status === "closed" || item.status === "archived")) {
+        if (statusFilter === "active" && ["resolved", "closed", "archived"].includes(item.status)) {
           return false;
         }
         if (statusFilter === "archived" && item.status !== "archived") {
@@ -251,7 +251,7 @@ export function ServicePage() {
         return haystack.includes(normalizedSearch);
       })
       .sort((left, right) => (right.occurredAt ?? right.id).localeCompare(left.occurredAt ?? left.id));
-  }, [caseTypeFilter, driverMap, managerFilter, matchesCompany, payerFilter, paymentStateFilter, searchFilter, serviceIncidents, showHistoricalInList, statusFilter, vehicleLabelMap]);
+  }, [caseTypeFilter, driverMap, managerFilter, matchesCompany, payerFilter, paymentStateFilter, searchFilter, serviceIncidents, statusFilter, vehicleLabelMap]);
 
   const totalExpense = serviceRows.reduce((sum, item) => sum + (item.amount ?? 0), 0);
   const totalInsurance = serviceRows.reduce((sum, item) => sum + (item.insuranceCompensationAmount ?? 0), 0);
@@ -269,7 +269,6 @@ export function ServicePage() {
       setPayerFilter("all");
       setManagerFilter("");
       setSearchFilter("");
-      setShowHistoricalInList(false);
       return;
     }
     if (view === "insurance") {
@@ -279,7 +278,6 @@ export function ServicePage() {
       setPayerFilter("insurance");
       setManagerFilter("");
       setSearchFilter("страх");
-      setShowHistoricalInList(false);
       return;
     }
 
@@ -289,7 +287,6 @@ export function ServicePage() {
     setPayerFilter("all");
     setManagerFilter("");
     setSearchFilter("");
-    setShowHistoricalInList(true);
   }
 
   useEffect(() => {
@@ -332,7 +329,7 @@ export function ServicePage() {
         servicePayer: servicePayer === "not_set" ? null : servicePayer,
       });
       setMessage(`СТО-кейс создан: ${created.title}.`);
-      await incidentsApi.refetch();
+      await Promise.all([incidentsApi.refetch(), vehiclesApi.refetch(), driversApi.refetch()]);
       setDescription("");
       setRepairNote("");
       setAmount("");
@@ -348,7 +345,7 @@ export function ServicePage() {
 
   async function handleQuickStatusUpdate(item: ManagerIncidentItem, nextStage: "in_repair" | "completed" | "written_off" | "archived"): Promise<void> {
     setMessage(null);
-    const nextStatus = nextStage === "in_repair" ? "resolved" : nextStage === "archived" ? "archived" : "closed";
+    const nextStatus = nextStage === "in_repair" ? "open" : nextStage === "archived" ? "archived" : "closed";
     const nextWorkflowLabel = nextStage === "in_repair" ? "В ремонте" : nextStage === "completed" ? "Завершён" : nextStage === "written_off" ? "Списан" : "Архив";
 
     try {
@@ -362,12 +359,8 @@ export function ServicePage() {
         setMessage("СТО-кейс не найден.");
         return;
       }
-      if (nextStage === "written_off" && item.carId) {
-        await patchJson(`cars/${item.carId}`, { status: "written_off" });
-        await vehiclesApi.refetch();
-      }
       setMessage(`Кейс ${formatShortId(item.id)} переведён в статус "${nextWorkflowLabel}".`);
-      await incidentsApi.refetch();
+      await Promise.all([incidentsApi.refetch(), vehiclesApi.refetch(), driversApi.refetch()]);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Не удалось обновить статус СТО-кейса.");
     }
@@ -391,7 +384,7 @@ export function ServicePage() {
 
     setMessage(null);
     let updatedCount = 0;
-    const nextStatus = nextStage === "in_repair" ? "resolved" : nextStage === "archived" ? "archived" : "closed";
+    const nextStatus = nextStage === "in_repair" ? "open" : nextStage === "archived" ? "archived" : "closed";
     const nextWorkflowLabel = nextStage === "in_repair" ? "В ремонте" : nextStage === "completed" ? "Завершён" : nextStage === "written_off" ? "Списан" : "Архив";
 
     try {
@@ -400,20 +393,15 @@ export function ServicePage() {
         const updated = await patchJson<ManagerIncidentItem | null, Partial<CreateIncidentInput>>(`incidents/${incidentId}`, {
           status: nextStatus,
           serviceStage: nextStage,
+          periodLabel: sourceIncident && ["completed", "written_off", "archived"].includes(nextStage) ? buildCompletedRepairPeriod(sourceIncident) : sourceIncident?.periodLabel,
           repairNote: nextStage === "written_off" ? (sourceIncident?.repairNote ?? "Не подлежит восстановлению") : sourceIncident?.repairNote,
         });
         if (updated) {
           updatedCount += 1;
-          if (nextStage === "written_off" && sourceIncident?.carId) {
-            await patchJson(`cars/${sourceIncident.carId}`, { status: "written_off" });
-          }
         }
       }
 
-      await incidentsApi.refetch();
-      if (nextStage === "written_off") {
-        await vehiclesApi.refetch();
-      }
+      await Promise.all([incidentsApi.refetch(), vehiclesApi.refetch(), driversApi.refetch()]);
       setSelectedIncidentIds([]);
       setMessage(`Массово обработано ${updatedCount} кейсов СТО: статус "${nextWorkflowLabel}".`);
     } catch (error) {
@@ -534,10 +522,7 @@ export function ServicePage() {
               <input value={managerFilter} onChange={(event) => setManagerFilter(event.target.value)} placeholder="Фильтр по бригадиру" />
               <input value={searchFilter} onChange={(event) => setSearchFilter(event.target.value)} placeholder="Поиск по авто, водителю и СТО" />
             </div>
-            <label className="checkbox-row">
-              <input type="checkbox" checked={showHistoricalInList} onChange={(event) => setShowHistoricalInList(event.target.checked)} />
-              <span>Показать закрытые и архив</span>
-            </label>
+            <p className="panel-note">Завершённые ремонты доступны в фильтре «Все статусы» или «Завершённые». Архив — в фильтре «Архив».</p>
             {canCreate && serviceRows.length ? (
               <div className="toolbar">
                 <button type="button" onClick={toggleSelectAll}>

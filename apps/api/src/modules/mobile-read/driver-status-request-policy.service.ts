@@ -22,6 +22,8 @@ type ApprovedPeriodRange = DriverStatusRequestPeriodRange & {
 export interface DriverEffectiveDebtPolicySnapshot {
   currentDebt: number;
   overdueDebt: number;
+  overdueSinceDate: string | null;
+  overdueUntilDate: string | null;
   nextPaymentAmount: number;
   nextPaymentDate: string | null;
 }
@@ -47,13 +49,14 @@ export class DriverStatusRequestPolicyService {
   ): Promise<DriverEffectiveDebtPolicySnapshot> {
     const openObligations = await this.listEffectiveOpenObligations(driverId, creditBalance);
     const next = openObligations.find((item) => item.remainingAmount > 0) ?? null;
-    const overdueDebt = openObligations
-      .filter((item) => item.remainingAmount > 0 && item.effectiveDueDate < asOfDate)
-      .reduce((sum, item) => sum + item.remainingAmount, 0);
+    const overdueObligations = openObligations.filter((item) => item.remainingAmount > 0 && item.effectiveDueDate < asOfDate);
+    const overdueDebt = overdueObligations.reduce((sum, item) => sum + item.remainingAmount, 0);
 
     return {
       currentDebt: openObligations.reduce((sum, item) => sum + item.remainingAmount, 0),
       overdueDebt,
+      overdueSinceDate: overdueObligations[0]?.effectiveDueDate ?? null,
+      overdueUntilDate: overdueObligations[overdueObligations.length - 1]?.effectiveDueDate ?? null,
       nextPaymentAmount: next?.remainingAmount ?? 0,
       nextPaymentDate: next?.effectiveDueDate ?? null,
     };
@@ -105,7 +108,7 @@ export class DriverStatusRequestPolicyService {
     ]);
     const activeContractId = driver?.activeContractId ?? null;
     const scopedObligations = activeContractId
-      ? obligations.filter((item) => item.contractId === activeContractId)
+      ? obligations.filter((item) => item.contractId === activeContractId && item.type === "installment")
       : [];
 
     return this.buildEffectiveObligations(scopedObligations, approvedPeriods, creditBalance, options);

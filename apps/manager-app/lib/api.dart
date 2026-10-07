@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -91,6 +92,7 @@ class ManagerAssignedDriverDto {
     required this.debt,
     required this.creditBalance,
     required this.overdueDebt,
+    this.overduePeriodAmount,
     required this.overdueSinceDate,
     required this.overdueUntilDate,
     required this.yandexBalance,
@@ -117,6 +119,7 @@ class ManagerAssignedDriverDto {
       debt: _asNum(json['debt']),
       creditBalance: _asNum(json['creditBalance']),
       overdueDebt: _asNum(json['overdueDebt']),
+      overduePeriodAmount: json['overduePeriodAmount'] == null ? null : _asNum(json['overduePeriodAmount']),
       overdueSinceDate: json['overdueSinceDate'] as String?,
       overdueUntilDate: json['overdueUntilDate'] as String?,
       yandexBalance: _asNum(json['yandexBalance']),
@@ -142,6 +145,7 @@ class ManagerAssignedDriverDto {
   final num debt;
   final num creditBalance;
   final num overdueDebt;
+  final num? overduePeriodAmount;
   final String? overdueSinceDate;
   final String? overdueUntilDate;
   final num yandexBalance;
@@ -974,7 +978,10 @@ class ManagerApiClient {
   }
 
   Future<http.Response> _authorizedGet(Uri uri) {
-    return _sendAuthorized((headers) => client.get(uri, headers: headers));
+    return _sendAuthorized((headers) => client.get(uri, headers: headers).timeout(
+      const Duration(seconds: 20),
+      onTimeout: () => throw TimeoutException('Сервер не ответил. Проверьте соединение и повторите загрузку.'),
+    ));
   }
 
   Future<http.Response> _authorizedPost(
@@ -1026,9 +1033,12 @@ class ManagerApiClient {
     return ManagerSummaryDto.fromJson(_decodeObject(response));
   }
 
-  Future<List<ManagerAssignedDriverDto>> getDrivers() async {
+  Future<List<ManagerAssignedDriverDto>> getDrivers({String? from, String? to}) async {
     final response = await _authorizedGet(
-      Uri.parse('$baseUrl/mobile/manager/drivers'),
+      Uri.parse('$baseUrl/mobile/manager/drivers').replace(queryParameters: {
+        if (from != null) 'dueDateFrom': from,
+        if (to != null) 'dueDateTo': to,
+      }),
     );
 
     return _decodeList(response)

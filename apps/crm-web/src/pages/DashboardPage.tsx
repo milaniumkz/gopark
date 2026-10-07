@@ -1,3 +1,4 @@
+import { DateRangePicker } from "../ui/DateRangePicker";
 import { Link } from "react-router-dom";
 import { useState } from "react";
 import { useEffect, useMemo } from "react";
@@ -1228,18 +1229,7 @@ export function DashboardPage() {
                 </option>
               ))}
             </select>
-            <input
-              aria-label="Дата начала периода"
-              type="date"
-              value={dashboardDateFrom}
-              onChange={(event) => setDashboardDateFrom(event.target.value)}
-            />
-            <input
-              aria-label="Дата окончания периода"
-              type="date"
-              value={dashboardDateTo}
-              onChange={(event) => setDashboardDateTo(event.target.value)}
-            />
+            <DateRangePicker from={dashboardDateFrom} to={dashboardDateTo} onChange={(from, to) => { setDashboardDateFrom(from); setDashboardDateTo(to); }} />
             {canCreateCar && canCreateDriver ? (
               <button type="button" onClick={() => setIsQuickCreateOpen(true)}>
                 <DriversIcon width={16} height={16} />

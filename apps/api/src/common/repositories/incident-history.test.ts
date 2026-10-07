@@ -26,7 +26,7 @@ for (const [name, repository] of [
       assert.deepEqual(updated?.statusHistory?.map(({ status, serviceStage }) => [status, serviceStage]), [
         ["open", "awaiting_repair"], ["open", "in_repair"],
         ["open", "awaiting_repair"], ["open", "in_repair"],
-        ["resolved", "completed"], ["closed", "completed"],
+        ["closed", "completed"],
       ]);
       const times = updated!.statusHistory!.map(({ changedAt }) => Date.parse(changedAt));
       assert.ok(times.every(Number.isFinite));

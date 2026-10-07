@@ -1487,15 +1487,20 @@ a {
 }
 
 .user-roles-list {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0 18px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
 }
 
-.user-roles-list > div {
-  min-height: 32px;
+.summary-list.user-roles-list > div {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
   align-items: center;
-  padding: 5px 0;
+  padding: 10px;
+  border: 1px solid var(--border, #e3e8f0);
+  border-radius: 9px;
 }
+.user-roles-list > div .toolbar { grid-column: 1 / -1; margin-left: 0; }
 
 .user-roles-list span,
 .user-roles-list strong {
@@ -8001,3 +8006,12 @@ a {
     padding: 0 14px;
   }
 }
+
+.date-range-picker { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.date-range-popup { position: absolute; top: calc(100% + 8px); left: 0; z-index: 20; width: min(350px, calc(100vw - 40px)); padding: 12px; background: white; border: 1px solid #dce4ef; border-radius: 12px; box-shadow: 0 8px 30px #142a4420; }
+.date-range-popup p { margin: 8px 0; font-size: 12px; }
+.date-range-popup .toolbar { justify-content: space-between; }
+.date-range-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; margin-bottom: 10px; touch-action: none; user-select: none; }
+.date-range-grid > span { text-align: center; font-size: 12px; padding: 5px; }
+.date-range-grid > button { padding: 8px 3px; background: #f2f5fa; color: #20334d; border: 1px solid transparent; }
+.date-range-grid > button[aria-pressed="true"] { background: #dbeafe; border-color: #3b82f6; }

@@ -184,36 +184,41 @@ export class IncidentPrismaRepository implements IncidentRepository {
   }
 
   async create(input: CreateIncidentRecord): Promise<ManagerIncidentItem> {
+    input = { ...input, ...repairLifecycle(input) };
     const prisma = this.prisma.client;
     if (prisma) {
-      const incident = await prisma.incident.create({
-        data: {
-          title: input.title,
-          incidentType: input.incidentType,
-          status: input.status,
-          priority: input.priority,
-          driverId: input.driverId ?? null,
-          carId: input.carId ?? null,
-          occurredAt: input.occurredAt ? new Date(input.occurredAt) : null,
-          periodLabel: input.periodLabel ?? null,
-          referenceNumber: input.referenceNumber ?? null,
-          amount: input.amount ?? null,
-          insuranceCompensationAmount: input.insuranceCompensationAmount ?? null,
-          writeoffAmount: input.writeoffAmount ?? null,
-          description: input.description ?? null,
-          accidentPhotoUrl: input.accidentPhotoUrl ?? null,
-          insuranceNote: input.insuranceNote ?? null,
-          repairNote: input.repairNote ?? null,
-          locationNote: input.locationNote ?? null,
-          managerLabel: input.managerLabel ?? null,
-          serviceStage: input.serviceStage ?? null,
-          serviceCaseType: input.serviceCaseType ?? null,
-          servicePaymentStatus: input.servicePaymentStatus ?? null,
-          servicePayer: input.servicePayer ?? null,
-        },
-      });
+      return prisma.$transaction(async (tx: any) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(2036548158)`;
+        const incident = await tx.incident.create({
+          data: {
+            title: input.title,
+            incidentType: input.incidentType,
+            status: input.status,
+            priority: input.priority,
+            driverId: input.driverId ?? null,
+            carId: input.carId ?? null,
+            occurredAt: input.occurredAt ? new Date(input.occurredAt) : null,
+            periodLabel: input.periodLabel ?? null,
+            referenceNumber: input.referenceNumber ?? null,
+            amount: input.amount ?? null,
+            insuranceCompensationAmount: input.insuranceCompensationAmount ?? null,
+            writeoffAmount: input.writeoffAmount ?? null,
+            description: input.description ?? null,
+            accidentPhotoUrl: input.accidentPhotoUrl ?? null,
+            insuranceNote: input.insuranceNote ?? null,
+            repairNote: input.repairNote ?? null,
+            locationNote: input.locationNote ?? null,
+            managerLabel: input.managerLabel ?? null,
+            serviceStage: input.serviceStage ?? null,
+            serviceCaseType: input.serviceCaseType ?? null,
+            servicePaymentStatus: input.servicePaymentStatus ?? null,
+            servicePayer: input.servicePayer ?? null,
+          },
+        });
 
-      return mapIncidentRecord(incident);
+        await syncRepairCar(tx, incident);
+        return mapIncidentRecord(incident);
+      });
     }
 
     const incident: ManagerIncidentItem = {
@@ -246,50 +251,56 @@ export class IncidentPrismaRepository implements IncidentRepository {
       servicePayer: input.servicePayer ?? null,
     };
     seedManagerIncidents.unshift(incident);
+    syncSeedRepairCar(incident);
     return incident;
   }
 
   async update(incidentId: string, input: UpdateIncidentRecord): Promise<ManagerIncidentItem | null> {
     const prisma = this.prisma.client;
     if (prisma) {
-      const existing = await prisma.incident.findUnique({
-        where: { id: incidentId },
-        select: { id: true },
-      });
-      if (!existing) {
-        return null;
-      }
+      return prisma.$transaction(async (tx: any) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(2036548158)`;
+        const existing = await tx.incident.findUnique({
+          where: { id: incidentId },
+          select: incidentSelect,
+        });
+        if (!existing) {
+          return null;
+        }
 
-      const incident = await prisma.incident.update({
-        where: { id: incidentId },
-        data: {
-          ...(input.title !== undefined ? { title: input.title } : {}),
-          ...(input.incidentType !== undefined ? { incidentType: input.incidentType } : {}),
-          ...(input.status !== undefined ? { status: input.status } : {}),
-          ...(input.priority !== undefined ? { priority: input.priority } : {}),
-          ...(input.driverId !== undefined ? { driverId: input.driverId ?? null } : {}),
-          ...(input.carId !== undefined ? { carId: input.carId ?? null } : {}),
-          ...(input.occurredAt !== undefined ? { occurredAt: input.occurredAt ? new Date(input.occurredAt) : null } : {}),
-          ...(input.periodLabel !== undefined ? { periodLabel: input.periodLabel ?? null } : {}),
-          ...(input.referenceNumber !== undefined ? { referenceNumber: input.referenceNumber ?? null } : {}),
-          ...(input.amount !== undefined ? { amount: input.amount ?? null } : {}),
-          ...(input.insuranceCompensationAmount !== undefined ? { insuranceCompensationAmount: input.insuranceCompensationAmount ?? null } : {}),
-          ...(input.writeoffAmount !== undefined ? { writeoffAmount: input.writeoffAmount ?? null } : {}),
-          ...(input.description !== undefined ? { description: input.description ?? null } : {}),
-          ...(input.accidentPhotoUrl !== undefined ? { accidentPhotoUrl: input.accidentPhotoUrl ?? null } : {}),
-          ...(input.insuranceNote !== undefined ? { insuranceNote: input.insuranceNote ?? null } : {}),
-          ...(input.repairNote !== undefined ? { repairNote: input.repairNote ?? null } : {}),
-          ...(input.locationNote !== undefined ? { locationNote: input.locationNote ?? null } : {}),
-          ...(input.managerLabel !== undefined ? { managerLabel: input.managerLabel ?? null } : {}),
-          ...(input.serviceStage !== undefined ? { serviceStage: input.serviceStage ?? null } : {}),
-          ...(input.serviceCaseType !== undefined ? { serviceCaseType: input.serviceCaseType ?? null } : {}),
-          ...(input.servicePaymentStatus !== undefined ? { servicePaymentStatus: input.servicePaymentStatus ?? null } : {}),
-          ...(input.servicePayer !== undefined ? { servicePayer: input.servicePayer ?? null } : {}),
-        },
-        select: incidentSelect,
-      });
+        input = { ...input, ...repairLifecycle({ ...existing, ...input }) };
+        const incident = await tx.incident.update({
+          where: { id: incidentId },
+          data: {
+            ...(input.title !== undefined ? { title: input.title } : {}),
+            ...(input.incidentType !== undefined ? { incidentType: input.incidentType } : {}),
+            ...(input.status !== undefined ? { status: input.status } : {}),
+            ...(input.priority !== undefined ? { priority: input.priority } : {}),
+            ...(input.driverId !== undefined ? { driverId: input.driverId ?? null } : {}),
+            ...(input.carId !== undefined ? { carId: input.carId ?? null } : {}),
+            ...(input.occurredAt !== undefined ? { occurredAt: input.occurredAt ? new Date(input.occurredAt) : null } : {}),
+            ...(input.periodLabel !== undefined ? { periodLabel: input.periodLabel ?? null } : {}),
+            ...(input.referenceNumber !== undefined ? { referenceNumber: input.referenceNumber ?? null } : {}),
+            ...(input.amount !== undefined ? { amount: input.amount ?? null } : {}),
+            ...(input.insuranceCompensationAmount !== undefined ? { insuranceCompensationAmount: input.insuranceCompensationAmount ?? null } : {}),
+            ...(input.writeoffAmount !== undefined ? { writeoffAmount: input.writeoffAmount ?? null } : {}),
+            ...(input.description !== undefined ? { description: input.description ?? null } : {}),
+            ...(input.accidentPhotoUrl !== undefined ? { accidentPhotoUrl: input.accidentPhotoUrl ?? null } : {}),
+            ...(input.insuranceNote !== undefined ? { insuranceNote: input.insuranceNote ?? null } : {}),
+            ...(input.repairNote !== undefined ? { repairNote: input.repairNote ?? null } : {}),
+            ...(input.locationNote !== undefined ? { locationNote: input.locationNote ?? null } : {}),
+            ...(input.managerLabel !== undefined ? { managerLabel: input.managerLabel ?? null } : {}),
+            ...(input.serviceStage !== undefined ? { serviceStage: input.serviceStage ?? null } : {}),
+            ...(input.serviceCaseType !== undefined ? { serviceCaseType: input.serviceCaseType ?? null } : {}),
+            ...(input.servicePaymentStatus !== undefined ? { servicePaymentStatus: input.servicePaymentStatus ?? null } : {}),
+            ...(input.servicePayer !== undefined ? { servicePayer: input.servicePayer ?? null } : {}),
+          },
+          select: incidentSelect,
+        });
 
-      return mapIncidentRecord(incident);
+        await syncRepairCar(tx, incident);
+        return mapIncidentRecord(incident);
+      });
     }
 
     const incident = seedManagerIncidents.find((item) => item.id === incidentId);
@@ -297,6 +308,7 @@ export class IncidentPrismaRepository implements IncidentRepository {
       return null;
     }
 
+    input = { ...input, ...repairLifecycle({ ...incident, ...input }) };
     Object.assign(incident, {
       statusHistory: nextIncidentStatusHistory(incident, input),
       ...(input.title !== undefined ? { title: input.title } : {}),
@@ -323,6 +335,79 @@ export class IncidentPrismaRepository implements IncidentRepository {
       ...(input.servicePayer !== undefined ? { servicePayer: input.servicePayer ?? null } : {}),
     });
 
+    syncSeedRepairCar(incident);
     return incident;
   }
+}
+
+
+async function syncRepairCar(tx: any, incident: any): Promise<void> {
+  // Legacy cases may lack carId. Link only an unambiguous assignment at the
+  // incident's recorded time; never substitute the driver's current vehicle.
+  if (!incident.carId && incident.driverId && incident.occurredAt && incident.incidentType === "repair") {
+    const matches = await tx.carAssignment.findMany({ where: {
+      driverId: incident.driverId, startedAt: { lte: incident.occurredAt },
+      OR: [{ endedAt: null }, { endedAt: { gt: incident.occurredAt } }],
+    }, take: 2 });
+    if (matches.length === 1) {
+      incident.carId = matches[0].carId;
+      await tx.incident.update({ where: { id: incident.id }, data: { carId: incident.carId } });
+    }
+  }
+  if (!incident.carId || !(incident.incidentType === "repair" || ["awaiting_repair", "in_repair", "completed", "written_off"].includes(incident.serviceStage))) return;
+  const car = await tx.car.findUnique({ where: { id: incident.carId } });
+  if (!car || ["sold", "written_off"].includes(car.status)) return;
+  const stage = incident.serviceStage;
+  if (stage === "written_off") {
+    await tx.car.update({ where: { id: car.id }, data: { status: "written_off" } });
+    return;
+  }
+  if (["awaiting_repair", "in_repair"].includes(stage) && incident.status === "open") {
+    if (["assigned", "free", "maintenance", "accident"].includes(car.status)) {
+      await tx.car.update({ where: { id: car.id }, data: { status: "maintenance" } });
+    }
+    return;
+  }
+  if (stage !== "completed" || !["resolved", "closed", "archived"].includes(incident.status) || !["maintenance", "accident"].includes(car.status)) return;
+  const blocking = await tx.incident.count({ where: {
+    id: { not: incident.id }, carId: car.id,
+    OR: [{ status: "open" }, { serviceStage: "written_off" }],
+  } });
+  if (blocking) return;
+  const assignment = await tx.carAssignment.findFirst({
+    where: { carId: car.id, endedAt: null }, include: { driver: true }, orderBy: { startedAt: "desc" },
+  });
+  const driver = assignment?.driver;
+  await tx.car.update({ where: { id: car.id }, data: { status: driver && driver.status !== "terminated" ? "assigned" : "free" } });
+  // Only clear the incident-related status for the same, still assigned driver.
+  if (driver && driver.id === incident.driverId && driver.status === "accident") {
+    const otherDriverIncident = await tx.incident.count({ where: { id: { not: incident.id }, driverId: driver.id, status: "open" } });
+    if (!otherDriverIncident) await tx.driver.update({ where: { id: driver.id }, data: { status: "active" } });
+  }
+}
+
+
+function repairLifecycle(incident: { incidentType?: string; serviceStage?: string | null; status?: string }): UpdateIncidentRecord {
+  if (incident.incidentType !== "repair" && !["awaiting_repair", "in_repair", "completed", "written_off"].includes(incident.serviceStage ?? "")) return {};
+  if (incident.serviceStage === "written_off") return { status: "closed", serviceStage: "written_off" };
+  if (incident.serviceStage === "completed" || ["resolved", "closed", "archived"].includes(incident.status ?? "")) {
+    return { serviceStage: "completed", status: incident.status === "archived" ? "archived" : "closed" };
+  }
+  return { status: "open", serviceStage: incident.serviceStage || "awaiting_repair" };
+}
+
+function syncSeedRepairCar(incident: ManagerIncidentItem): void {
+  if (!incident.carId || !(incident.incidentType === "repair" || ["awaiting_repair", "in_repair", "completed", "written_off"].includes(incident.serviceStage ?? ""))) return;
+  const car = seedCars.find((item) => item.id === incident.carId);
+  if (!car || ["sold", "written_off"].includes(car.status)) return;
+  if (incident.serviceStage === "written_off") { car.status = "written_off"; return; }
+  if (["awaiting_repair", "in_repair"].includes(incident.serviceStage ?? "") && incident.status === "open") {
+    if (["assigned", "free", "maintenance", "accident"].includes(car.status)) car.status = "maintenance";
+    return;
+  }
+  if (incident.serviceStage !== "completed" || !["maintenance", "accident"].includes(car.status)) return;
+  if (seedManagerIncidents.some((item) => item.id !== incident.id && item.carId === car.id && (item.status === "open" || item.serviceStage === "written_off"))) return;
+  const driver = seedDrivers.find((item) => item.id === car.assignedDriverId);
+  car.status = driver && driver.status !== "terminated" ? "assigned" : "free";
+  if (driver && driver.id === incident.driverId && driver.status === "accident" && !seedManagerIncidents.some((item) => item.id !== incident.id && item.driverId === driver.id && item.status === "open")) driver.status = "active";
 }

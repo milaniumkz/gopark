@@ -1,5 +1,6 @@
+import { IncidentPrismaRepository } from "../../infrastructure/repositories/incident.prisma.repository.js";
+import type { PrismaService } from "../../infrastructure/prisma/prisma.service.js";
 import { nextContractNumber } from "../repositories/contract-number.js";
-import { nextIncidentStatusHistory } from "../repositories/incident-history.js";
 import type {
   AuthRateLimitRepository,
   AuditRepository,
@@ -1767,108 +1768,8 @@ export class InMemoryYandexBalanceRepository implements YandexBalanceRepository 
   }
 }
 
-export class InMemoryIncidentRepository implements IncidentRepository {
-  async list() {
-    return seedManagerIncidents;
-  }
-
-  async listByCompany(companyName: string) {
-    const driverIds = new Set(
-      seedDrivers
-        .filter((item) => (item.companyName ?? null) === companyName)
-        .map((item) => item.id),
-    );
-    const carIds = new Set(
-      seedCars
-        .filter((item) => (item.companyName ?? null) === companyName)
-        .map((item) => item.id),
-    );
-
-    return seedManagerIncidents.filter((item) => (
-      (item.driverId && driverIds.has(item.driverId))
-      || (item.carId && carIds.has(item.carId))
-    ));
-  }
-
-  async countOpen() {
-    return seedManagerIncidents.filter((item) => item.status === "open").length;
-  }
-
-  async countOpenByDrivers(driverIds: string[]) {
-    const ids = new Set(driverIds);
-    return seedManagerIncidents
-      .filter((item) => item.status === "open" && item.driverId && ids.has(item.driverId))
-      .length;
-  }
-
-  async listOpenByDriver(driverId: string) {
-    return seedManagerIncidents.filter((item) => item.driverId === driverId && item.status === "open");
-  }
-
-  async create(input: import("../repositories/incident.repository.js").CreateIncidentRecord) {
-    const incident = {
-      id: `inc_${seedManagerIncidents.length + 1}`,
-      title: input.title,
-      incidentType: input.incidentType,
-      status: input.status,
-      priority: input.priority,
-      driverId: input.driverId ?? undefined,
-      carId: input.carId ?? undefined,
-      occurredAt: input.occurredAt ?? null,
-      periodLabel: input.periodLabel ?? null,
-      referenceNumber: input.referenceNumber ?? null,
-      amount: input.amount ?? null,
-      insuranceCompensationAmount: input.insuranceCompensationAmount ?? null,
-      writeoffAmount: input.writeoffAmount ?? null,
-      description: input.description ?? null,
-      insuranceNote: input.insuranceNote ?? null,
-      repairNote: input.repairNote ?? null,
-      locationNote: input.locationNote ?? null,
-      managerLabel: input.managerLabel ?? null,
-      statusHistory: [{ status: input.status, serviceStage: input.serviceStage ?? null, changedAt: new Date().toISOString() }],
-      serviceStage: input.serviceStage ?? null,
-      serviceCaseType: input.serviceCaseType ?? null,
-      servicePaymentStatus: input.servicePaymentStatus ?? null,
-      servicePayer: input.servicePayer ?? null,
-    };
-
-    seedManagerIncidents.unshift(incident);
-    return incident;
-  }
-
-  async update(incidentId: string, input: import("../repositories/incident.repository.js").UpdateIncidentRecord) {
-    const incident = seedManagerIncidents.find((item) => item.id === incidentId);
-    if (!incident) {
-      return null;
-    }
-
-    Object.assign(incident, {
-      statusHistory: nextIncidentStatusHistory(incident, input),
-      ...(input.title !== undefined ? { title: input.title } : {}),
-      ...(input.incidentType !== undefined ? { incidentType: input.incidentType } : {}),
-      ...(input.status !== undefined ? { status: input.status } : {}),
-      ...(input.priority !== undefined ? { priority: input.priority } : {}),
-      ...(input.driverId !== undefined ? { driverId: input.driverId ?? undefined } : {}),
-      ...(input.carId !== undefined ? { carId: input.carId ?? undefined } : {}),
-      ...(input.occurredAt !== undefined ? { occurredAt: input.occurredAt ?? null } : {}),
-      ...(input.periodLabel !== undefined ? { periodLabel: input.periodLabel ?? null } : {}),
-      ...(input.referenceNumber !== undefined ? { referenceNumber: input.referenceNumber ?? null } : {}),
-      ...(input.amount !== undefined ? { amount: input.amount ?? null } : {}),
-      ...(input.insuranceCompensationAmount !== undefined ? { insuranceCompensationAmount: input.insuranceCompensationAmount ?? null } : {}),
-      ...(input.writeoffAmount !== undefined ? { writeoffAmount: input.writeoffAmount ?? null } : {}),
-      ...(input.description !== undefined ? { description: input.description ?? null } : {}),
-      ...(input.insuranceNote !== undefined ? { insuranceNote: input.insuranceNote ?? null } : {}),
-      ...(input.repairNote !== undefined ? { repairNote: input.repairNote ?? null } : {}),
-      ...(input.locationNote !== undefined ? { locationNote: input.locationNote ?? null } : {}),
-      ...(input.managerLabel !== undefined ? { managerLabel: input.managerLabel ?? null } : {}),
-      ...(input.serviceStage !== undefined ? { serviceStage: input.serviceStage ?? null } : {}),
-      ...(input.serviceCaseType !== undefined ? { serviceCaseType: input.serviceCaseType ?? null } : {}),
-      ...(input.servicePaymentStatus !== undefined ? { servicePaymentStatus: input.servicePaymentStatus ?? null } : {}),
-      ...(input.servicePayer !== undefined ? { servicePayer: input.servicePayer ?? null } : {}),
-    });
-
-    return incident;
-  }
+export class InMemoryIncidentRepository extends IncidentPrismaRepository {
+  constructor() { super({ client: null } as PrismaService); }
 }
 
 export class InMemoryManagerAlertRepository implements ManagerAlertRepository {

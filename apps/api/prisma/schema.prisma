@@ -63,6 +63,7 @@ enum DriverRiskStatusReviewStatus {
 }
 
 enum CarStatus {
+  written_off
   free
   assigned
   maintenance

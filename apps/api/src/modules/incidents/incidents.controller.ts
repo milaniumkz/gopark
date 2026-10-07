@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
+import { Body, Controller, Get, NotFoundException, Param, Patch, Post } from "@nestjs/common";
 import type { ManagerIncidentItem } from "@gopark/contracts";
 import {
   makeCarRepository,
@@ -56,6 +56,10 @@ export class IncidentsController {
     @Body() body: UpdateIncidentDto,
     @CurrentUser() currentUser: RequestUser | null,
   ): Promise<ManagerIncidentItem | null> {
+    const existing = (currentUser?.companyName
+      ? await this.incidentsService.listByCompany(currentUser.companyName)
+      : await this.incidentsService.list()).find((item) => item.id === incidentId);
+    if (!existing) throw new NotFoundException("Incident not found");
     const [driver, car] = await Promise.all([
       body.driverId ? assertDriverWriteScope(this.driverRepository, body.driverId, currentUser) : Promise.resolve(null),
       body.carId ? assertCarWriteScope(this.carRepository, body.carId, currentUser) : Promise.resolve(null),

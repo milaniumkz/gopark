@@ -71,6 +71,15 @@ class ManagerRepository {
     return api.getManagers();
   }
 
+  Future<num> loadDriverOverduePeriod(String driverId, DateTime from, DateTime to) async {
+    String date(DateTime value) => '${value.year}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
+    final drivers = await api.getDrivers(from: date(from), to: date(to));
+    for (final driver in drivers) {
+      if (driver.id == driverId) return driver.overduePeriodAmount ?? 0;
+    }
+    throw StateError('Водитель недоступен. Обновите список.');
+  }
+
   Future<ManagerDriverDetailDto?> loadDriverDetail(String driverId) {
     return api.getDriverDetail(driverId);
   }

@@ -1,0 +1,73 @@
+name: publish-manager-apk
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Private draft release containing the verified APK, ZIP and download page
+        required: true
+      code_sha:
+        description: Expected deployed application commit
+        required: true
+      apk_sha256:
+        description: Expected APK SHA256
+        required: true
+      zip_sha256:
+        description: Expected ZIP SHA256
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and verify prepared artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          APK_SHA256: ${{ inputs.apk_sha256 }}
+          ZIP_SHA256: ${{ inputs.zip_sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^codex-manager-[a-zA-Z0-9-]+$ ]]
+          [[ "$APK_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$ZIP_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          mkdir /tmp/manager-upload
+          for file in gopark-manager.apk gopark-manager.zip manager-download.html; do
+            gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$file" --dir /tmp/manager-upload
+          done
+          cd /tmp/manager-upload
+          printf '%s  gopark-manager.apk\n%s  gopark-manager.zip\n' "$APK_SHA256" "$ZIP_SHA256" | sha256sum --check
+          unzip -t gopark-manager.zip
+      - name: Configure SSH and upload artifacts
+        env:
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          PROD_SSH_KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
+          PROD_SSH_PORT: ${{ secrets.PROD_SSH_PORT }}
+          PROD_SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+          PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          CODE_SHA: ${{ inputs.code_sha }}
+          APK_SHA256: ${{ inputs.apk_sha256 }}
+          ZIP_SHA256: ${{ inputs.zip_sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$CODE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$APK_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$ZIP_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          mkdir -p ~/.ssh
+          printf '%s\n' "$PROD_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$PROD_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          remote="$PROD_SSH_USER@$PROD_SSH_HOST"
+          stage="/tmp/gopark-manager-upload-$APK_SHA256"
+          ssh -i ~/.ssh/id_ed25519 -p "$PROD_SSH_PORT" "$remote" "mkdir -p '$stage'; chmod 700 '$stage'"
+          scp -i ~/.ssh/id_ed25519 -P "$PROD_SSH_PORT" /tmp/manager-upload/gopark-manager.apk /tmp/manager-upload/gopark-manager.zip /tmp/manager-upload/manager-download.html scripts/publish_manager_apk.sh "$remote:$stage/"
+          ssh -i ~/.ssh/id_ed25519 -p "$PROD_SSH_PORT" "$remote" "CODE_SHA='$CODE_SHA' APK_SHA256='$APK_SHA256' ZIP_SHA256='$ZIP_SHA256' STAGE='$stage' bash '$stage/publish_manager_apk.sh'"

@@ -889,6 +889,7 @@ export class UserPrismaRepository implements UserRepository {
           manager: {
             select: {
               id: true,
+              level: true,
             },
           },
         },
@@ -907,6 +908,7 @@ export class UserPrismaRepository implements UserRepository {
             passwordHash: user.passwordHash,
             mustChangePassword: user.mustChangePassword,
             requestUserId: resolveRequestUserId(user),
+            managerLevel: user.manager?.level ?? null,
             refreshTokenVersion: user.refreshTokenVersion,
           }
         : null;
@@ -930,6 +932,7 @@ export class UserPrismaRepository implements UserRepository {
       legacyPassword: user.password,
       mustChangePassword: user.mustChangePassword ?? false,
       requestUserId: user.requestUserId ?? user.id,
+      managerLevel: user.role === "manager" ? user.managerLevel ?? "regular" : null,
       refreshTokenVersion: user.refreshTokenVersion ?? 0,
     };
   }
@@ -961,6 +964,7 @@ export class UserPrismaRepository implements UserRepository {
           manager: {
             select: {
               id: true,
+              level: true,
             },
           },
         },
@@ -979,6 +983,7 @@ export class UserPrismaRepository implements UserRepository {
             passwordHash: user.passwordHash,
             mustChangePassword: user.mustChangePassword,
             requestUserId: resolveRequestUserId(user),
+            managerLevel: user.manager?.level ?? null,
             refreshTokenVersion: user.refreshTokenVersion,
           }
         : null;
@@ -1001,6 +1006,7 @@ export class UserPrismaRepository implements UserRepository {
       legacyPassword: user.password,
       mustChangePassword: user.mustChangePassword ?? false,
       requestUserId: user.requestUserId ?? user.id,
+      managerLevel: user.role === "manager" ? user.managerLevel ?? "regular" : null,
       refreshTokenVersion: user.refreshTokenVersion ?? 0,
     };
   }

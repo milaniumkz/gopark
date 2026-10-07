@@ -251,20 +251,19 @@ export class DriverMobileReadService {
       driverIds.map((driverId) => {
         const effectivePolicy = effectivePolicies[driverIds.indexOf(driverId)];
         const debtSnapshot = debtSnapshots[driverId];
-        const hasOverdue = (debtSnapshot?.overdueDebt ?? 0) > 0;
         const creditBalance = driverCreditBalances[driverId] ?? 0;
         const currentDebt = Math.max(0, (debtSnapshot?.totalDebt ?? 0) - creditBalance);
 
         return [
           driverId,
           {
-            currentDebt: hasOverdue || !effectivePolicy ? currentDebt : effectivePolicy.currentDebt,
+            currentDebt: effectivePolicy?.currentDebt ?? currentDebt,
             creditBalance,
-            overdueDebt: hasOverdue || !effectivePolicy ? debtSnapshot?.overdueDebt ?? 0 : effectivePolicy.overdueDebt,
-            overdueSinceDate: hasOverdue || !effectivePolicy ? debtSnapshot?.overdueSinceDate ?? null : null,
-            overdueUntilDate: hasOverdue || !effectivePolicy ? debtSnapshot?.overdueUntilDate ?? null : null,
-            nextPaymentAmount: hasOverdue || !effectivePolicy ? debtSnapshot?.nextPaymentAmount ?? 0 : effectivePolicy.nextPaymentAmount,
-            nextPaymentDate: hasOverdue || !effectivePolicy ? debtSnapshot?.nextPaymentDate ?? null : effectivePolicy.nextPaymentDate,
+            overdueDebt: effectivePolicy?.overdueDebt ?? debtSnapshot?.overdueDebt ?? 0,
+            overdueSinceDate: effectivePolicy ? effectivePolicy.overdueSinceDate : debtSnapshot?.overdueSinceDate ?? null,
+            overdueUntilDate: effectivePolicy ? effectivePolicy.overdueUntilDate : debtSnapshot?.overdueUntilDate ?? null,
+            nextPaymentAmount: effectivePolicy?.nextPaymentAmount ?? debtSnapshot?.nextPaymentAmount ?? 0,
+            nextPaymentDate: effectivePolicy ? effectivePolicy.nextPaymentDate : debtSnapshot?.nextPaymentDate ?? null,
             lastPaymentDate: payments[driverId]?.createdAt ?? null,
             yandexBalance: yandexBalances[driverId]?.amount ?? 0,
             reservedPayoutAmount: reservedPayoutAmounts[driverId] ?? 0,

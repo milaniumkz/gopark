@@ -115,14 +115,15 @@ export class MobileManagerService {
     const historicalSnapshots = await this.getHistoricalFinanceSnapshots(drivers, currentUser);
     const effectiveStatuses = await this.statusRequestPolicyService.getEffectiveCurrentStatuses(drivers, this.today());
     const duePeriodAmounts = new Map<string, number>();
+    const overduePeriodAmounts = new Map<string, number>();
     if (duePeriod) {
       await Promise.all(drivers.map(async (driver) => {
-        const amount = await this.obligationRepository.getOpenDueByDriverInPeriod(
-          driver.id,
-          duePeriod.startDate,
-          duePeriod.endDate,
+        const obligations = await this.statusRequestPolicyService.listEffectiveOpenObligations(
+          driver.id, financeSnapshots[driver.id]?.creditBalance ?? 0,
         );
-        duePeriodAmounts.set(driver.id, amount);
+        const inPeriod = obligations.filter((item) => item.effectiveDueDate >= duePeriod.startDate && item.effectiveDueDate <= duePeriod.endDate);
+        duePeriodAmounts.set(driver.id, inPeriod.reduce((sum, item) => sum + item.remainingAmount, 0));
+        overduePeriodAmounts.set(driver.id, inPeriod.filter((item) => item.effectiveDueDate < this.today()).reduce((sum, item) => sum + item.remainingAmount, 0));
       }));
     }
     const managerNameById = new Map<string, string>();
@@ -165,6 +166,7 @@ export class MobileManagerService {
         overdueSinceDate: effectiveFinance?.overdueSinceDate ?? null,
         overdueUntilDate: effectiveFinance?.overdueUntilDate ?? null,
         duePeriodAmount: duePeriodAmounts.get(driver.id) ?? 0,
+        overduePeriodAmount: duePeriod ? overduePeriodAmounts.get(driver.id) ?? 0 : null,
         yandexBalance: effectiveFinance?.yandexBalance ?? 0,
         nextPaymentAmount: effectiveFinance?.nextPaymentAmount ?? 0,
         nextPaymentDate: effectiveFinance?.nextPaymentDate ?? null,
@@ -182,18 +184,17 @@ export class MobileManagerService {
     startDate?: string | null,
     endDate?: string | null,
   ): { startDate: string; endDate: string } | null {
-    if (!this.isDateOnly(startDate)) {
-      return null;
+    if (!startDate && !endDate) return null;
+    const from = startDate || endDate;
+    const to = endDate || startDate;
+    if (!this.isDateOnly(from) || !this.isDateOnly(to) || from > to) {
+      throw new BadRequestException("Укажите корректный период: начало не позже окончания");
     }
-
-    return {
-      startDate,
-      endDate: this.isDateOnly(endDate) ? endDate : startDate,
-    };
+    return { startDate: from, endDate: to };
   }
 
   private isDateOnly(value?: string | null): value is string {
-    return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+    return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
   }
 
   async getIdleVehicles(currentUser: RequestUser | null): Promise<ManagerIdleVehicleItem[]> {
@@ -675,7 +676,6 @@ export class MobileManagerService {
         servicePaymentStatus: "unpaid",
         servicePayer: "driver",
       });
-      await this.carRepository.update(car.id, { status: "maintenance" });
       await this.notificationsCreateService.createManagerDriverEvent(
         driverId,
         `Срочно: ремонт - ${driver.fullName}`,
@@ -837,27 +837,16 @@ export class MobileManagerService {
       patch.serviceStage = "in_repair";
       patch.serviceCaseType = incident.serviceCaseType ?? "repair";
       patch.repairNote = note ?? incident.repairNote ?? null;
-      if (incident.driverId) {
-        await this.updateAssignedCarStatus(incident.driverId, "maintenance");
-      }
     } else if (action === "completed") {
-      patch.status = "resolved";
+      patch.status = "closed";
       patch.serviceStage = "completed";
       patch.periodLabel = this.buildCompletedIncidentPeriod(incident);
       patch.repairNote = note ?? incident.repairNote ?? null;
-      if (incident.driverId) {
-        await this.updateAssignedCarStatus(incident.driverId, "assigned");
-        await this.driverRepository.update(incident.driverId, { status: "active" });
-      }
     } else if (action === "closed") {
       patch.status = "closed";
       patch.serviceStage = "completed";
       patch.periodLabel = this.buildCompletedIncidentPeriod(incident);
       patch.repairNote = note ?? incident.repairNote ?? null;
-      if (incident.driverId) {
-        await this.updateAssignedCarStatus(incident.driverId, "assigned");
-        await this.driverRepository.update(incident.driverId, { status: "active" });
-      }
     } else if (action === "written_off") {
       if (!note) {
         throw new BadRequestException("Укажите причину: что именно не подлежит восстановлению");
@@ -876,8 +865,6 @@ export class MobileManagerService {
         patch.repairNote = note;
         patch.description = this.appendIncidentNote(incident.description, `Списание подтверждено: ${note}`);
         if (incident.driverId) {
-          await this.updateAssignedCarStatus(incident.driverId, "written_off");
-          await this.driverRepository.update(incident.driverId, { status: "active" });
           await this.notificationsCreateService.createManagerDriverEvent(
             incident.driverId,
             "Списание подтверждено",

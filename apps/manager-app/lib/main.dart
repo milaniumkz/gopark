@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -62,6 +63,9 @@ class GoParkManagerApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'GoPark Brigadier',
+      locale: const Locale('ru'),
+      supportedLocales: const [Locale('ru')],
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
@@ -618,7 +622,7 @@ void _showManagersSheet(
   );
 }
 
-class ManagerDashboardPage extends StatelessWidget {
+class ManagerDashboardPage extends StatefulWidget {
   const ManagerDashboardPage({
     super.key,
     required this.repository,
@@ -639,10 +643,29 @@ class ManagerDashboardPage extends StatelessWidget {
   final VoidCallback onOpenInsuranceTo;
 
   @override
+  State<ManagerDashboardPage> createState() => _ManagerDashboardPageState();
+}
+
+class _ManagerDashboardPageState extends State<ManagerDashboardPage> {
+  late Future<ManagerSummaryDto> _summaryFuture;
+  ManagerRepository get repository => widget.repository;
+  ManagerAuthSessionDto get session => widget.session;
+  ValueChanged<ManagerDriverListFilter> get onOpenDrivers => widget.onOpenDrivers;
+  ValueChanged<ManagerTeamDto> get onOpenManagerDrivers => widget.onOpenManagerDrivers;
+  ValueChanged<ManagerAlertsSection> get onOpenAlerts => widget.onOpenAlerts;
+  ValueChanged<ManagerVehicleFilter> get onOpenVehicles => widget.onOpenVehicles;
+  VoidCallback get onOpenInsuranceTo => widget.onOpenInsuranceTo;
+
+  @override
+  void initState() { super.initState(); _summaryFuture = repository.loadSummary(); }
+
+  @override
   Widget build(BuildContext context) {
     return FutureBuilder<ManagerSummaryDto>(
-      future: repository.loadSummary(),
+      future: _summaryFuture,
       builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
+        if (snapshot.hasError) return _ManagerLoadError(error: snapshot.error, onRetry: () => setState(() { _summaryFuture = repository.loadSummary(); }));
         final summary = snapshot.data;
 
         return ListView(
@@ -781,7 +804,7 @@ class SummaryGrid extends StatelessWidget {
       crossAxisCount: 2,
       crossAxisSpacing: 6,
       mainAxisSpacing: 6,
-      childAspectRatio: 3.15,
+      childAspectRatio: 1.8 / (MediaQuery.textScalerOf(context).scale(14) / 14).clamp(1.0, 3.0),
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       children: [
@@ -919,7 +942,7 @@ class _ManagerInsuranceToPageState extends State<ManagerInsuranceToPage> {
               crossAxisCount: 2,
               crossAxisSpacing: 6,
               mainAxisSpacing: 6,
-              childAspectRatio: 3.15,
+              childAspectRatio: 1.8 / (MediaQuery.textScalerOf(context).scale(14) / 14).clamp(1.0, 3.0),
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               children: [
@@ -1762,6 +1785,8 @@ class _ManagerDriversPageState extends State<ManagerDriversPage> {
     return FutureBuilder<List<ManagerAssignedDriverDto>>(
       future: widget.repository.loadDrivers(),
       builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
+        if (snapshot.hasError) return _ManagerLoadError(error: snapshot.error, onRetry: () => setState(() {}));
         final items = snapshot.data ?? const [];
         final scopedItems = widget.selectedManagerId == null
             ? items
@@ -1795,7 +1820,7 @@ class _ManagerDriversPageState extends State<ManagerDriversPage> {
               crossAxisCount: 2,
               crossAxisSpacing: 6,
               mainAxisSpacing: 6,
-              childAspectRatio: 3.15,
+              childAspectRatio: 1.8 / (MediaQuery.textScalerOf(context).scale(14) / 14).clamp(1.0, 3.0),
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               children: [
@@ -2530,7 +2555,7 @@ class _ManagerAlertsPageState extends State<ManagerAlertsPage> {
                           crossAxisCount: 2,
                           crossAxisSpacing: 6,
                           mainAxisSpacing: 6,
-                          childAspectRatio: 3.15,
+                          childAspectRatio: 1.8 / (MediaQuery.textScalerOf(context).scale(14) / 14).clamp(1.0, 3.0),
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
                           children: [
@@ -2858,6 +2883,42 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
     _detailFuture = widget.repository.loadDriverDetail(widget.driverId);
   }
 
+  Future<void> _showOverdueCalendar(ManagerDriverDetailDto data) async {
+    final today = DateUtils.dateOnly(DateTime.now());
+    final since = DateTime.tryParse(data.overdueSinceDate ?? '');
+    final earliest = DateTime(2000);
+    final initialStart = since != null && !since.isAfter(today) && !since.isBefore(earliest) ? since : today;
+    final period = await showDateRangePicker(
+      context: context,
+      firstDate: earliest,
+      lastDate: today,
+      initialDateRange: DateTimeRange(start: initialStart, end: today),
+      helpText: 'Просрочка',
+      saveText: 'Готово',
+      builder: (context, child) => Theme(
+        data: Theme.of(context).copyWith(datePickerTheme: Theme.of(context).datePickerTheme.copyWith(
+          rangePickerHeaderHeadlineStyle: const TextStyle(fontSize: 18),
+        )),
+        child: child!,
+      ),
+    );
+    if (period == null || !mounted) return;
+    setState(() => _pendingAction = 'debt-period');
+    try {
+      final amount = await widget.repository.loadDriverOverduePeriod(widget.driverId, period.start, period.end);
+      if (!mounted) return;
+      await showDialog<void>(context: context, builder: (context) => AlertDialog(
+        title: const Text('Просрочка за период'),
+        content: Text('${_managerDateLabel(period.start.toIso8601String())} — ${_managerDateLabel(period.end.toIso8601String())}\n$amount сом\nНепогашенные платежи периода, просроченные на сегодня.'),
+        actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Закрыть'))],
+      ));
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+    } finally {
+      if (mounted) setState(() => _pendingAction = null);
+    }
+  }
+
   Future<void> _createIncidentAction(String action, String successText) async {
     final details =
         action == 'inspection' || action == 'accident' || action == 'impound'
@@ -3115,6 +3176,8 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
         child: FutureBuilder<ManagerDriverDetailDto?>(
           future: _detailFuture,
           builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
+            if (snapshot.hasError) return _ManagerLoadError(error: snapshot.error, onRetry: () => setState(_reload));
             final data = snapshot.data;
             if (data == null) {
               return const Center(child: Text('Данные по водителю не найдены'));
@@ -3148,7 +3211,7 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
                     crossAxisCount: 2,
                     crossAxisSpacing: 6,
                     mainAxisSpacing: 6,
-                    childAspectRatio: 3.15,
+                    childAspectRatio: 1.8 / (MediaQuery.textScalerOf(context).scale(14) / 14).clamp(1.0, 3.0),
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
                     children: [
@@ -3176,7 +3239,7 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
                       ManagerMetric(
                         title: 'Яндекс',
                         value: '${data.yandexBalance} сом',
-                        icon: Icons.savings_outlined,
+                        icon: Icons.currency_exchange_rounded,
                         colorA: _managerBlue,
                         colorB: _managerCyan,
                       ),
@@ -3200,6 +3263,11 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
                         ),
                       ],
                       icon: Icons.date_range_rounded,
+                    ),
+                    TextButton.icon(
+                      onPressed: _pendingAction == null ? () => _showOverdueCalendar(data) : null,
+                      icon: const Icon(Icons.calendar_month),
+                      label: const Text('Выбрать период просрочки'),
                     ),
                     const SizedBox(height: 6),
                   ],
@@ -3390,7 +3458,7 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
                                                   : 'Ремонт завершен',
                                             )
                                         : null,
-                                    child: const Text('Завершить'),
+                                    child: Text(item.incidentType == 'inspection' ? 'Завершить осмотр' : 'Завершить ремонт / на линию'),
                                   ),
                                   if (item.incidentType == 'accident' ||
                                       item.incidentType == 'repair' ||
@@ -4886,7 +4954,7 @@ class _ManagerStatPill extends StatelessWidget {
             label,
             style: const TextStyle(
               color: _managerMuted,
-              fontSize: 9,
+              fontSize: 12,
               fontWeight: FontWeight.w700,
             ),
             maxLines: 1,
@@ -4898,7 +4966,7 @@ class _ManagerStatPill extends StatelessWidget {
             style: TextStyle(
               color: color,
               fontWeight: FontWeight.w900,
-              fontSize: 9,
+              fontSize: 14,
             ),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
@@ -5666,7 +5734,7 @@ class ManagerMetric extends StatelessWidget {
                           style: const TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.w900,
-                            fontSize: 11,
+                            fontSize: 14,
                           ),
                         ),
                       ),
@@ -5683,9 +5751,9 @@ class ManagerMetric extends StatelessWidget {
                       style: const TextStyle(
                         color: _managerMuted,
                         fontWeight: FontWeight.w800,
-                        fontSize: 9.5,
+                        fontSize: 12,
                       ),
-                      maxLines: 1,
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -5753,7 +5821,7 @@ class ManagerInfoCard extends StatelessWidget {
                 child: Text(
                   title,
                   style: const TextStyle(
-                      fontSize: 11, fontWeight: FontWeight.w800),
+                      fontSize: 14, fontWeight: FontWeight.w800),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -5769,7 +5837,7 @@ class ManagerInfoCard extends StatelessWidget {
                 style: const TextStyle(
                   color: Color(0xFF475569),
                   height: 1.08,
-                  fontSize: 10,
+                  fontSize: 12,
                 ),
               ),
             ),
@@ -6009,4 +6077,20 @@ List<String> _managerIncidentHistoryLines(
       return '$label: ${_managerDateTimeLabel(entry.changedAt)}';
     }),
   ];
+}
+
+
+class _ManagerLoadError extends StatelessWidget {
+  const _ManagerLoadError({required this.error, required this.onRetry});
+  final Object? error;
+  final VoidCallback onRetry;
+  @override
+  Widget build(BuildContext context) => Center(child: Padding(
+    padding: const EdgeInsets.all(20),
+    child: Column(mainAxisSize: MainAxisSize.min, children: [
+      Text('Не удалось загрузить данные. ${_managerUserError(error ?? 'Ошибка соединения')}', textAlign: TextAlign.center),
+      const SizedBox(height: 12),
+      FilledButton(onPressed: onRetry, child: const Text('Повторить')),
+    ]),
+  ));
 }
