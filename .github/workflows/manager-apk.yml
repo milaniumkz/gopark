@@ -1,6 +1,11 @@
 name: manager-apk
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Upload the verified APK to the already deployed matching server release
+        type: boolean
+        default: false
   push:
     branches: [codex/incident-history-release]
 jobs:
@@ -74,3 +79,28 @@ jobs:
           name: gopark-manager-apk
           path: apps/manager-app/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
+      - name: Prepare download files
+        if: inputs.publish == true
+        run: python3 scripts/prepare_manager_download.py apps/manager-app/build/app/outputs/flutter-apk/app-release.apk /tmp/manager-upload
+      - name: Publish verified APK with rollback
+        if: inputs.publish == true
+        env:
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          PROD_SSH_KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
+          PROD_SSH_PORT: ${{ secrets.PROD_SSH_PORT }}
+          PROD_SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+          PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$PROD_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$PROD_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          code_sha=$(git rev-parse HEAD)
+          apk_sha256=$(sha256sum /tmp/manager-upload/gopark-manager.apk | cut -d' ' -f1)
+          zip_sha256=$(sha256sum /tmp/manager-upload/gopark-manager.zip | cut -d' ' -f1)
+          remote="$PROD_SSH_USER@$PROD_SSH_HOST"
+          stage="/tmp/gopark-manager-upload-$apk_sha256"
+          ssh -i ~/.ssh/id_ed25519 -p "$PROD_SSH_PORT" "$remote" "mkdir -p '$stage'; chmod 700 '$stage'"
+          scp -i ~/.ssh/id_ed25519 -P "$PROD_SSH_PORT" /tmp/manager-upload/gopark-manager.apk /tmp/manager-upload/gopark-manager.zip /tmp/manager-upload/manager-download.html scripts/publish_manager_apk.sh "$remote:$stage/"
+          ssh -i ~/.ssh/id_ed25519 -p "$PROD_SSH_PORT" "$remote" "CODE_SHA='$code_sha' APK_SHA256='$apk_sha256' ZIP_SHA256='$zip_sha256' STAGE='$stage' bash '$stage/publish_manager_apk.sh'"
