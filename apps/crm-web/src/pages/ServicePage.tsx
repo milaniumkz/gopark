@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { DriverListItem, ManagerIncidentItem, VehicleListItem } from "@gopark/contracts";
-import { patchJson } from "../lib/api";
+import { patchJson, postJson } from "../lib/api";
 import { useApiMutation } from "../hooks/useApiMutation";
 import { useApiQuery } from "../hooks/useApiQuery";
 import { useAuth } from "../ui/AuthContext";
@@ -162,6 +162,7 @@ export function ServicePage() {
   const [searchFilter, setSearchFilter] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [selectedIncidentIds, setSelectedIncidentIds] = useState<string[]>([]);
+  const [returningCarId, setReturningCarId] = useState<string | null>(null);
 
   const companies = useMemo(() => settingsApi.data?.companies ?? [], [settingsApi.data?.companies]);
   const drivers = useMemo(() => driversApi.data ?? [], [driversApi.data]);
@@ -183,6 +184,15 @@ export function ServicePage() {
   const vehicleMap = useMemo(() => new Map(vehicles.map((item) => [item.id, item.plateNumber])), [vehicles]);
   const vehicleLabelMap = useMemo(() => new Map(vehicles.map((item) => [item.id, `${item.plateNumber} · ${item.make} ${item.model}`])), [vehicles]);
   const serviceIncidents = useMemo(() => incidents.filter(isServiceIncident), [incidents]);
+  const untrackedRepairCars = useMemo(() => visibleVehicles.filter((car) => {
+    if (!["maintenance", "repair"].includes(car.status)) return false;
+    if (!["active", "all", "in_repair"].includes(statusFilter)) return false;
+    if (caseTypeFilter !== "all" || paymentStateFilter !== "all" || payerFilter !== "all") return false;
+    if (serviceIncidents.some((item) => item.carId === car.id && !["resolved", "closed", "archived"].includes(item.status))) return false;
+    if (managerFilter && !(car.managerName ?? "").toLowerCase().includes(managerFilter.trim().toLowerCase())) return false;
+    const label = [car.plateNumber, car.make, car.model, car.assignedDriverId ? driverMap.get(car.assignedDriverId) : ""].join(" ").toLowerCase();
+    return label.includes(searchFilter.trim().toLowerCase());
+  }), [visibleVehicles, statusFilter, caseTypeFilter, paymentStateFilter, payerFilter, serviceIncidents, managerFilter, driverMap, searchFilter]);
   const serviceRows = useMemo(() => {
     const normalizedSearch = searchFilter.trim().toLowerCase();
     const normalizedManager = managerFilter.trim().toLowerCase();
@@ -366,6 +376,21 @@ export function ServicePage() {
     }
   }
 
+  async function handleReturnUntrackedCar(car: VehicleListItem): Promise<void> {
+    setReturningCarId(car.id);
+    setMessage(null);
+    try {
+      await postJson<ManagerIncidentItem | null, Record<string, never>>(`incidents/repair-cars/${car.id}/complete`, {});
+      await Promise.all([incidentsApi.refetch(), vehiclesApi.refetch(), driversApi.refetch()]);
+      setMessage(`Ремонт ${car.plateNumber} завершён. Статус автомобиля обновлён.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Не удалось завершить ремонт автомобиля.");
+      await Promise.all([incidentsApi.refetch(), vehiclesApi.refetch()]);
+    } finally {
+      setReturningCarId(null);
+    }
+  }
+
   function toggleIncidentSelection(incidentId: string): void {
     setSelectedIncidentIds((current) =>
       current.includes(incidentId) ? current.filter((id) => id !== incidentId) : [...current, incidentId],
@@ -455,10 +480,11 @@ export function ServicePage() {
           </Link>
           {serviceRows.length ? <button onClick={handleExport}>Скачать CSV</button> : null}
         </div>
-        <ReadOnlyNotice message="Новый кейс ремонта в этом разделе убран. Здесь остаются только журнал, фильтры и архив." />
+        <ReadOnlyNotice message="Здесь показаны кейсы СТО и автомобили со статусом ремонта. Новые ремонтные кейсы создаются в инцидентах." />
       </div>
 
       <div className="stats-grid">
+        <StatCard title="Автомобили в ремонте" value={String(visibleVehicles.filter((item) => ["maintenance", "repair"].includes(item.status)).length)} subtitle="По статусу автомобилей" tone="orange" icon={<CarIcon width={18} height={18} />} onClick={() => setStatusFilter("active")} />
         <StatCard title="Кейсы СТО" value={String(serviceRows.length)} subtitle="Строки по текущему фильтру" tone="blue" icon={<CarIcon width={18} height={18} />} onClick={() => applyPresetView("operations")} />
         <StatCard title="Ожидают ремонт" value={String(openCount)} subtitle="Живая очередь ремонта" tone="orange" icon={<LedgerIcon width={18} height={18} />} onClick={() => setStatusFilter("awaiting_repair")} />
         <StatCard title="Расход" value={formatCurrency(totalExpense)} subtitle="Сумма работ и запчастей" tone="orange" icon={<FinanceIcon width={18} height={18} />} onClick={() => setPaymentStateFilter("unpaid")} />
@@ -547,7 +573,7 @@ export function ServicePage() {
           <AsyncState
             loading={incidentsApi.loading || driversApi.loading || vehiclesApi.loading}
             error={incidentsApi.error || driversApi.error || vehiclesApi.error}
-            empty={!serviceRows.length}
+            empty={!serviceRows.length && !untrackedRepairCars.length}
             emptyContent={
               <EmptyStatePanel
                 title="Кейсов СТО по фильтру нет"
@@ -569,6 +595,21 @@ export function ServicePage() {
                   </tr>
                 </thead>
                 <tbody>
+                  {untrackedRepairCars.map((car) => (
+                    <tr key={`repair-car-${car.id}`}>
+                      <td />
+                      <td><div className="amount-stack"><strong>{vehicleLabelMap.get(car.id) ?? car.plateNumber}</strong><span>{car.assignedDriverId ? driverMap.get(car.assignedDriverId) : "Водитель не назначен"}</span></div></td>
+                      <td><div className="amount-stack"><strong>Без открытого кейса СТО</strong><span>Автомобиль отмечен как находящийся в ремонте. Связанные завершённые кейсы остаются в архиве.</span></div></td>
+                      <td>Расходы не указаны</td>
+                      <td>Не указана</td>
+                      <td>В ремонте</td>
+                      <td><div className="row-actions row-actions--vertical">
+                        {canCreate ? <button type="button" disabled={returningCarId !== null} onClick={() => void handleReturnUntrackedCar(car)}>Завершить ремонт / на линию</button> : null}
+                        <Link className="table-link" to={`/vehicles/${car.id}`}>Авто</Link>
+                        {car.assignedDriverId ? <Link className="table-link" to={`/drivers/${car.assignedDriverId}`}>Водитель</Link> : null}
+                      </div></td>
+                    </tr>
+                  ))}
                   {serviceRows.map((item) => (
                     <tr key={item.id}>
                       <td>

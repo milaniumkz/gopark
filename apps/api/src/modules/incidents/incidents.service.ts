@@ -41,6 +41,10 @@ export class IncidentsService {
     return this.incidentRepository.list();
   }
 
+  completeUntrackedRepair(carId: string): Promise<ManagerIncidentItem | null> {
+    return this.incidentRepository.completeUntrackedRepair(carId);
+  }
+
   listByCompany(companyName: string): Promise<ManagerIncidentItem[]> {
     return this.incidentRepository.listByCompany(companyName);
   }

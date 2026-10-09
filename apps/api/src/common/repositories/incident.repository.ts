@@ -57,5 +57,6 @@ export interface IncidentRepository {
   countOpenByDrivers(driverIds: string[]): Promise<number>;
   listOpenByDriver(driverId: string): Promise<ManagerIncidentItem[]>;
   create(input: CreateIncidentRecord): Promise<ManagerIncidentItem>;
+  completeUntrackedRepair(carId: string): Promise<ManagerIncidentItem | null>;
   update(incidentId: string, input: UpdateIncidentRecord): Promise<ManagerIncidentItem | null>;
 }

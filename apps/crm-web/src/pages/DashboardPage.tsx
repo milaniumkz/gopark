@@ -1486,7 +1486,7 @@ export function DashboardPage() {
             <span>ДТП</span>
             <strong>{stats?.vehicles.accident ?? 0}</strong>
           </Link>
-          <Link className="dashboard-shortcut dashboard-shortcut--orange" to="/vehicles?status=maintenance">
+          <Link className="dashboard-shortcut dashboard-shortcut--orange" to="/service?view=operations">
             <CarIcon width={20} height={20} />
             <span>Ремонт</span>
             <strong>{(vehiclesApi.data ?? []).filter((item) => item.status === "maintenance" || item.status === "repair").length}</strong>

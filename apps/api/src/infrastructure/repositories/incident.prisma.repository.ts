@@ -1,4 +1,5 @@
 import { nextIncidentStatusHistory } from "../../common/repositories/incident-history.js";
+import { ConflictException, NotFoundException } from "@nestjs/common";
 import type { ManagerIncidentItem } from "@gopark/contracts";
 import type { CreateIncidentRecord, IncidentRepository, UpdateIncidentRecord } from "../../common/repositories/index.js";
 import { seedCars, seedDrivers, seedManagerIncidents } from "../../data/seed.js";
@@ -181,6 +182,31 @@ export class IncidentPrismaRepository implements IncidentRepository {
     }
 
     return seedManagerIncidents.filter((item) => item.driverId === driverId && item.status === "open");
+  }
+
+  async completeUntrackedRepair(carId: string): Promise<ManagerIncidentItem | null> {
+    const data = { title: "Завершение ремонта автомобиля без открытого кейса СТО", incidentType: "repair", status: "closed", priority: "low", serviceStage: "completed", description: "Возврат автомобиля из ремонта подтверждён в журнале СТО. Дата начала ремонта и расходы не указаны." };
+    const prisma = this.prisma.client;
+    if (prisma) {
+      return prisma.$transaction(async (tx: any) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(2036548158)`;
+        const car = await tx.car.findUnique({ where: { id: carId } });
+        if (!car) throw new NotFoundException("Автомобиль не найден");
+        if (["assigned", "free"].includes(car.status)) return null;
+        if (car.status !== "maintenance") throw new ConflictException("Автомобиль уже не находится в ремонте. Обновите журнал.");
+        const blocking = await tx.incident.count({ where: { carId, OR: [{ status: "open" }, { serviceStage: "written_off" }] } });
+        if (blocking) throw new ConflictException("У автомобиля есть открытый инцидент или списание. Сначала завершите связанный кейс.");
+        const assignment = await tx.carAssignment.findFirst({ where: { carId, endedAt: null }, orderBy: { startedAt: "desc" } });
+        const incident = await tx.incident.create({ data: { ...data, carId, driverId: assignment?.driverId ?? null } });
+        await syncRepairCar(tx, incident);
+        return mapIncidentRecord(incident);
+      });
+    }
+    const car = seedCars.find((item) => item.id === carId);
+    if (!car) throw new NotFoundException("Автомобиль не найден");
+    if (["assigned", "free"].includes(car.status)) return null;
+    if (car.status !== "maintenance" || seedManagerIncidents.some((item) => item.carId === carId && (item.status === "open" || item.serviceStage === "written_off"))) throw new ConflictException("Сначала завершите связанный кейс автомобиля.");
+    return this.create({ ...data, carId, driverId: car.assignedDriverId });
   }
 
   async create(input: CreateIncidentRecord): Promise<ManagerIncidentItem> {

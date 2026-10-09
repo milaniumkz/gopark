@@ -42,7 +42,21 @@ test("repair creation/completion is atomic, concurrent and idempotent, preserves
     await repo.update(second.id, { serviceStage: "completed", status: "closed" });
     assert.equal((await db.car.findUnique({ where: { id: car.id } })).status, "assigned");
     assert.equal((await db.driver.findUnique({ where: { id: driver.id } })).status, "active");
+    await repo.update(repair.id, { status: "archived" });
+    await repo.update(second.id, { status: "archived" });
+    // Historical completed cases must not hide a car whose maintenance status remains.
+    await db.car.update({ where: { id: car.id }, data: { status: "maintenance" } });
+    const completions = await Promise.all([repo.completeUntrackedRepair(car.id), repo.completeUntrackedRepair(car.id)]);
+    const newCases = completions.filter((item) => item !== null);
+    assert.equal(newCases.length, 1, "concurrent return requests create one completion record");
+    incidents.push(newCases[0]!.id);
+    assert.equal(newCases[0]!.occurredAt, null, "do not invent the historical repair start date");
+    assert.equal((await db.car.findUnique({ where: { id: car.id } })).status, "assigned");
+    assert.equal((await db.incident.findUnique({ where: { id: repair.id } })).status, "archived", "old history stays archived");
     await repo.update(repair.id, { status: "open", serviceStage: "in_repair" });
+    const countBeforeBlocked = await db.incident.count();
+    await assert.rejects(repo.completeUntrackedRepair(car.id), /открытый инцидент/);
+    assert.equal(await db.incident.count(), countBeforeBlocked, "an open incident blocks untracked completion without writing a new case");
     await db.driver.update({ where: { id: driver.id }, data: { status: "terminated" } });
     await db.carAssignment.updateMany({ where: { carId: car.id }, data: { endedAt: new Date() } });
     const replacement = await db.car.create({ data: { vin: "ISOLATED-REPLACEMENT", plateNumber: "ISOLATED-REPLACEMENT", make: "Test", model: "Test", status: "maintenance" } }); cars.push(replacement.id);

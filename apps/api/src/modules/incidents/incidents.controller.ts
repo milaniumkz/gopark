@@ -1,4 +1,4 @@
-import { Body, Controller, Get, NotFoundException, Param, Patch, Post } from "@nestjs/common";
+import { Body, Controller, Get, NotFoundException, Param, ParseUUIDPipe, Patch, Post } from "@nestjs/common";
 import type { ManagerIncidentItem } from "@gopark/contracts";
 import {
   makeCarRepository,
@@ -47,6 +47,16 @@ export class IncidentsController {
     assertSameCompanyPair(driver?.companyName, car?.companyName, "Driver and car in incident must belong to the same company");
 
     return this.incidentsService.create(body);
+  }
+
+  @Post("repair-cars/:carId/complete")
+  @Roles("owner", "admin", "finance", "manager")
+  async completeUntrackedRepair(
+    @Param("carId", new ParseUUIDPipe()) carId: string,
+    @CurrentUser() currentUser: RequestUser | null,
+  ): Promise<ManagerIncidentItem | null> {
+    await assertCarWriteScope(this.carRepository, carId, currentUser);
+    return this.incidentsService.completeUntrackedRepair(carId);
   }
 
   @Patch(":incidentId")
