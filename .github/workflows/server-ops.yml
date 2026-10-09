@@ -45,6 +45,9 @@ jobs:
           }
 
           case "$OPERATION" in
+            repair-consistency)
+              docker exec gopark-api node --input-type=module -e 'const {PrismaClient}=await import("./apps/api/node_modules/@prisma/client/default.js");const p=new PrismaClient();try{const cars=await p.car.findMany({where:{status:"maintenance"},select:{id:true,status:true,assignments:{where:{endedAt:null},select:{driverId:true}}}});const driverIds=cars.flatMap(c=>c.assignments.map(a=>a.driverId));const incidents=await p.incident.findMany({where:{OR:[{carId:{in:cars.map(c=>c.id)}},{driverId:{in:driverIds}}]},select:{id:true,carId:true,driverId:true,incidentType:true,status:true,serviceStage:true,occurredAt:true}});console.log(JSON.stringify({repairCars:cars,relatedIncidents:incidents}));}finally{await p.$disconnect()}'
+              ;;
             manager-vehicles)
               docker exec gopark-api node --input-type=module -e 'const {PrismaClient}=await import("./apps/api/node_modules/@prisma/client/default.js");const p=new PrismaClient();try{const users=await p.user.findMany({where:{role:"manager"},select:{id:true,firstName:true,lastName:true,companyName:true,manager:{select:{id:true,level:true,_count:{select:{cars:true,drivers:true}}}}}});console.log(JSON.stringify(users));const cars=await p.car.findMany({select:{id:true,managerId:true,companyName:true,status:true,assignments:{where:{endedAt:null},select:{driver:{select:{managerId:true,companyName:true}}}}}});console.log(JSON.stringify({cars}));}finally{await p.$disconnect()}'
               ;;
