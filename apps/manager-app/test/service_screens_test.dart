@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:gopark_manager_app/api.dart';
 import 'package:gopark_manager_app/repository.dart';
 import 'package:gopark_manager_app/service_screens.dart';
+import 'package:gopark_manager_app/main.dart' show ManagerDriverDetailPage;
 
 class CalendarRepo extends ManagerRepository {
   CalendarRepo() : super(ManagerApiClient());
@@ -42,6 +43,29 @@ class CalendarRepo extends ManagerRepository {
       };
 }
 
+class RepairRepo extends CalendarRepo {
+  @override
+  Future<ManagerDriverDetailDto?> loadDriverDetail(String id) async =>
+      ManagerDriverDetailDto.fromJson({
+        'id': id,
+        'fullName': 'Учебный водитель',
+        'phone': 'test',
+        'status': 'maintenance',
+        'riskStatus': 'normal',
+        'openIncidents': [
+          {
+            'id': 'repair',
+            'title': 'Учебный ремонт',
+            'incidentType': 'repair',
+            'status': 'open',
+            'priority': 'high',
+            'serviceStage': 'sent_to_service',
+            'serviceDetails': {'reason': 'Диагностика'}
+          }
+        ]
+      });
+}
+
 Widget app(Widget child, double scale) => MaterialApp(
     locale: const Locale('ru'),
     supportedLocales: const [Locale('ru')],
@@ -51,6 +75,30 @@ Widget app(Widget child, double scale) => MaterialApp(
         child: w!),
     home: child);
 void main() {
+  testWidgets(
+      'brigadier retains write-off request but cannot confirm STO stages',
+      (t) async {
+    await t.pumpWidget(app(
+        ManagerDriverDetailPage(repository: RepairRepo(), driverId: 'test'),
+        1));
+    await t.pumpAndSettle();
+    expect(find.text("Учебный водитель"), findsOneWidget,
+        reason: t
+            .widgetList<Text>(find.byType(Text))
+            .map((x) => x.data ?? "")
+            .join("; "));
+    await t.scrollUntilVisible(find.text("Инциденты"), 200,
+        scrollable: find.byType(Scrollable).first);
+    await t.tap(find.text("Инциденты"));
+    await t.pumpAndSettle();
+    await t.scrollUntilVisible(find.text('Не подлежит восстановлению'), 300,
+        scrollable: find.byType(Scrollable).first);
+    expect(find.text('Не подлежит восстановлению'), findsOneWidget);
+    expect(find.text('Завершить ремонт / на линию'), findsNothing);
+    expect(find.text('Ожидает ремонт'), findsNothing);
+    expect(t.takeException(), isNull);
+  });
+
   for (final scale in [1.0, 2.0]) {
     testWidgets('payment calendar stays readable at 320px and scale $scale',
         (t) async {

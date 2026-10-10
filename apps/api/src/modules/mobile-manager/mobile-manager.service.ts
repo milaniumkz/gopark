@@ -157,7 +157,7 @@ export class MobileManagerService {
         id: driver.id,
         fullName: driver.fullName,
         phone: driver.phone,
-        status: effectiveStatus !== "terminated" && assignment?.vehicleStatus === "maintenance" ? "maintenance" : effectiveStatus,
+        status: displayDriverStatus(effectiveStatus, assignment?.vehicleStatus),
         riskStatus: driver.riskStatus ?? "normal",
         weeklyDayOff: driver.weeklyDayOff ?? null,
         vehicle: effectiveVehicle,
@@ -398,7 +398,7 @@ export class MobileManagerService {
       id: driver.id,
       fullName: driver.fullName,
       phone: driver.phone,
-      status: currentStatus !== "terminated" && detail.assignment.vehicleStatus === "maintenance" ? "maintenance" : currentStatus,
+      status: displayDriverStatus(currentStatus, detail.assignment.vehicleStatus),
       riskStatus: driver.riskStatus ?? "normal",
       weeklyDayOff: driver.weeklyDayOff ?? null,
       vehicle: effectiveVehicle,
@@ -587,7 +587,7 @@ export class MobileManagerService {
       id: updated.id,
       fullName: updated.fullName,
       phone: updated.phone,
-      status: effectiveStatus !== "terminated" && assignment?.vehicleStatus === "maintenance" ? "maintenance" : effectiveStatus,
+      status: displayDriverStatus(effectiveStatus, assignment?.vehicleStatus),
       riskStatus: updated.riskStatus ?? "normal",
       weeklyDayOff: updated.weeklyDayOff ?? null,
       vehicle: assignment?.vehicle ?? "unassigned",
@@ -1255,3 +1255,7 @@ export class MobileManagerService {
 }
 
 function closedIncident(status: string) { return ["closed", "resolved", "archived"].includes(status); }
+
+function displayDriverStatus(status: string, vehicleStatus?: string | null): string {
+  return status !== "terminated" && ["maintenance", "accident", "impound", "written_off"].includes(vehicleStatus ?? "") ? vehicleStatus! : status;
+}

@@ -426,11 +426,15 @@ class ManagerRepairCard extends StatelessWidget {
       required this.title,
       required this.stage,
       required this.details,
-      this.accidentDetails});
+      this.accidentDetails,
+      this.history = const [],
+      this.note});
   final String title;
   final String? stage;
   final Map<String, dynamic> details;
   final Map<String, dynamic>? accidentDetails;
+  final List<ManagerIncidentStatusHistoryDto> history;
+  final String? note;
   @override
   Widget build(BuildContext context) {
     const stages = [
@@ -473,7 +477,13 @@ class ManagerRepairCard extends StatelessWidget {
                   Align(
                       alignment: Alignment.centerLeft,
                       child: Chip(
-                          label: Text(current < 0 ? 'Ремонт' : titles[current]),
+                          label: Text(current < 0
+                              ? const {
+                                    'written_off': 'Списан',
+                                    'writeoff_requested': 'Запрошено списание'
+                                  }[stage] ??
+                                  'Ремонт'
+                              : titles[current]),
                           backgroundColor: const Color(0xfff3e8ff),
                           side: BorderSide.none)),
                   Container(
@@ -516,6 +526,29 @@ class ManagerRepairCard extends StatelessWidget {
                                             fontSize: 13))
                                   ]))
                             ])),
+                  if (note?.isNotEmpty == true && note != details['reason'])
+                    Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Text('Комментарий: $note')),
+                  for (final entry in history)
+                    Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Text(
+                            '${const {
+                                  "sent_to_service": "Отправлен на СТО",
+                                  "awaiting_repair": "В ожидании",
+                                  "in_repair": "В ремонте",
+                                  "completed": "Завершён",
+                                  "written_off": "Списан",
+                                  "writeoff_requested": "Запрошено списание"
+                                }[entry.serviceStage] ?? const {
+                                  "open": "Открыт",
+                                  "closed": "Закрыт",
+                                  "resolved": "Завершён",
+                                  "archived": "Архив"
+                                }[entry.status] ?? entry.status} · ${date(entry.changedAt)}',
+                            style: const TextStyle(
+                                color: Colors.blueGrey, fontSize: 13))),
                   for (final line in accidentDetailLines(accidentDetails))
                     Padding(
                         padding: const EdgeInsets.symmetric(vertical: 4),

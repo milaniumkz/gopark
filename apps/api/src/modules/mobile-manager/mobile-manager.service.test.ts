@@ -127,3 +127,15 @@ test("manager calendar is scoped and uses confirmed payments, real incident date
  assert.equal(calendar.days[5]!.status,"repair");assert.notEqual(calendar.days[6]!.status,"repair","historical unknown completion date must not extend repair to today");
  await assert.rejects(service.getDriverCalendar("driver","2026-13",user),/Месяц/);
 });
+
+test("brigadier sees the assigned vehicle's operational status while terminated drivers remain terminated",async()=>{
+ const {service,user}=fixture();let state="maintenance",status="active";
+ Object.assign(service,{
+  mobileAccessService:{getScopedDrivers:async()=>[{id:"driver",fullName:"Test",phone:"test",status,activeContractId:"contract"}]},
+  driverMobileReadService:{getDriverAssignmentSnapshots:async()=>({driver:{vehicle:"TEST",vehicleStatus:state}}),getFinanceSnapshots:async()=>({driver:{}})},
+  getHistoricalFinanceSnapshots:async()=>new Map(),
+  statusRequestPolicyService:{getEffectiveCurrentStatuses:async()=>({driver:status})},
+ });
+ for(state of ["maintenance","accident","impound","written_off"]){assert.equal((await service.getDrivers(user))[0]!.status,state);}
+ status="terminated";state="maintenance";assert.equal((await service.getDrivers(user))[0]!.status,"terminated");
+});

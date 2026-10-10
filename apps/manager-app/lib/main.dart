@@ -2819,7 +2819,7 @@ class _ManagerAlertsPageState extends State<ManagerAlertsPage> {
                           ...visibleIncidents.map(
                             (item) => Padding(
                               padding: const EdgeInsets.only(bottom: 6),
-                              child: item.serviceDetails != null ? ManagerRepairCard(title:item.title,stage:item.serviceStage,details:item.serviceDetails!,accidentDetails:item.accidentDetails) : ManagerSignalCard(
+                              child: item.serviceDetails != null ? ManagerRepairCard(title:item.title,stage:item.serviceStage,details:item.serviceDetails!,accidentDetails:item.accidentDetails,history:item.statusHistory,note:item.repairNote) : ManagerSignalCard(
                                 showAllDetails: true,
                                 title: item.driverName?.isNotEmpty == true
                                     ? item.driverName!
@@ -3402,7 +3402,7 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            item.serviceDetails != null ? ManagerRepairCard(title:item.title,stage:item.serviceStage,details:item.serviceDetails!,accidentDetails:item.accidentDetails) : ManagerSignalCard(
+                            item.serviceDetails != null ? ManagerRepairCard(title:item.title,stage:item.serviceStage,details:item.serviceDetails!,accidentDetails:item.accidentDetails,history:item.statusHistory,note:item.repairNote) : ManagerSignalCard(
                               showAllDetails: true,
                               title: item.title,
                               subtitle: [
@@ -3428,13 +3428,13 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
                                   : _managerPurple,
                               icon: Icons.report_problem_outlined,
                             ),
-                            if (!_managerIncidentIsArchived(item.status) && item.incidentType != 'repair' && item.serviceDetails == null) ...[
+                            if (!_managerIncidentIsArchived(item.status)) ...[
                               const SizedBox(height: 6),
                               Wrap(
                                 spacing: 6,
                                 runSpacing: 6,
                                 children: [
-                                  OutlinedButton(
+                                  if(item.serviceDetails == null && !const {'repair','accident'}.contains(item.incidentType)) OutlinedButton(
                                     onPressed: _pendingAction == null
                                         ? () => _updateIncidentAction(
                                               item,
@@ -3444,7 +3444,7 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
                                         : null,
                                     child: const Text('Ожидает ремонт'),
                                   ),
-                                  FilledButton(
+                                  if(item.serviceDetails == null && !const {'repair','accident'}.contains(item.incidentType)) FilledButton(
                                     onPressed: _pendingAction == null
                                         ? () => _updateIncidentAction(
                                               item,
@@ -3454,7 +3454,7 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
                                         : null,
                                     child: const Text('В ремонте'),
                                   ),
-                                  OutlinedButton(
+                                  if(item.serviceDetails == null && !const {'repair','accident'}.contains(item.incidentType)) OutlinedButton(
                                     onPressed: _pendingAction == null
                                         ? () => _updateIncidentAction(
                                               item,
@@ -3481,7 +3481,7 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
                                         'Не подлежит восстановлению',
                                       ),
                                     ),
-                                  TextButton(
+                                  if(item.serviceDetails == null && !const {'repair','accident'}.contains(item.incidentType)) TextButton(
                                     onPressed: _pendingAction == null
                                         ? () => _updateIncidentAction(
                                               item,
