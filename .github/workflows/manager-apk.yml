@@ -2,6 +2,10 @@ name: manager-apk
 on:
   workflow_dispatch:
     inputs:
+      source_ref:
+        description: Exact already deployed commit to build (empty uses workflow branch)
+        type: string
+        default: ""
       publish:
         description: Upload the verified APK to the already deployed matching server release
         type: boolean
@@ -17,6 +21,8 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -61,6 +67,8 @@ jobs:
           flutter analyze
           flutter test
       - name: Build manager APK
+        env:
+          ANDROID_USER_HOME: /home/runner/.android
         working-directory: apps/manager-app
         run: |
           build_number=$(( $(date +%s) / 60 ))
@@ -108,7 +116,14 @@ jobs:
           scp -i ~/.ssh/id_ed25519 -P "$PROD_SSH_PORT" /tmp/manager-upload/gopark-manager.apk /tmp/manager-upload/gopark-manager.zip /tmp/manager-upload/manager-download.html scripts/publish_manager_apk.sh "$remote:$stage/"
           # Keep the signing key only in the protected server secrets directory.
           # Never include it in Git, download files, logs, or Actions artifacts.
-          test -s ~/.android/debug.keystore
+          echo 'Download files uploaded; locating verified build signing key.'
+          if [ ! -s ~/.android/debug.keystore ]; then
+            signing_key=$(find "$HOME/.config" "$GITHUB_WORKSPACE/apps/manager-app/android" -name debug.keystore -type f 2>/dev/null | head -1 || true)
+            if [ -z "$signing_key" ]; then echo '::error::Build signing key was not found; leaving published APK unchanged.'; exit 1; fi
+            install -m 600 "$signing_key" ~/.android/debug.keystore
+          fi
           scp -i ~/.ssh/id_ed25519 -P "$PROD_SSH_PORT" ~/.android/debug.keystore "$remote:$stage/manager-signing.keystore"
           ssh -i ~/.ssh/id_ed25519 -p "$PROD_SSH_PORT" "$remote" "set -eu; target=/home/client/gopark/secrets/debug.keystore; if [ ! -e \"\$target\" ]; then install -m 600 '$stage/manager-signing.keystore' \"\$target\"; fi; cmp -s '$stage/manager-signing.keystore' \"\$target\"; rm -f '$stage/manager-signing.keystore'"
+          echo 'Signing key preserved; publishing downloads for the matching deployed commit.'
+          ssh -i ~/.ssh/id_ed25519 -p "$PROD_SSH_PORT" "$remote" "deployed_sha=\$(cat /home/client/gopark-current-sha); if [ \"\$deployed_sha\" != '$code_sha' ]; then echo 'Deployed commit differs from APK source; publication cancelled.'; exit 1; fi"
           ssh -i ~/.ssh/id_ed25519 -p "$PROD_SSH_PORT" "$remote" "CODE_SHA='$code_sha' APK_SHA256='$apk_sha256' ZIP_SHA256='$zip_sha256' STAGE='$stage' bash '$stage/publish_manager_apk.sh'"
