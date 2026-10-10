@@ -13,7 +13,7 @@ import type { DriverListItem, SettingsOverview, UserAdminListItem } from "@gopar
 export function UsersPage() {
   const [companyFilter, setCompanyFilter] = useState("all");
   const [query, setQuery] = useState("");
-  const [roleFilter, setRoleFilter] = useState("all");
+  const [roleFilter, setRoleFilter] = useState("manager");
   const [statusFilter, setStatusFilter] = useState("all");
   const [mfaFilter, setMfaFilter] = useState("all");
   const [sortKey, setSortKey] = useState("name_asc");
@@ -763,6 +763,7 @@ export function UsersPage() {
               />
               <select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}>
                 <option value="all">Все роли</option>
+                <option value="driver">Водители</option>
                 <option value="manager">Бригадиры</option>
                 <option value="admin">Администраторы</option>
                 <option value="owner">Владельцы</option>
@@ -800,7 +801,7 @@ export function UsersPage() {
                 type="button"
                 onClick={() => {
                   setQuery("");
-                  setRoleFilter("all");
+                  setRoleFilter("manager");
                   setStatusFilter("all");
                   setMfaFilter("all");
                   setSortKey("name_asc");
