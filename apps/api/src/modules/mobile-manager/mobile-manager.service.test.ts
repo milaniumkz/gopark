@@ -33,6 +33,7 @@ function fixture() {
     driverRepository: { getById: async () => driver },
     incidentRepository: {
       listByCompany: async () => created,
+      listOpenByDriver: async () => [],
       create: async (input: unknown) => { const incident = { id: `incident-${created.length}`, ...input as object }; created.push(incident); return incident; },
     },
   });
@@ -59,7 +60,8 @@ test("sending a driver's vehicle to repair creates the journal incident with veh
   assert.equal(incident.carId, "legacy");
   assert.equal(incident.driverId, "driver");
   assert.equal(incident.incidentType, "repair");
-  assert.equal(incident.serviceStage, "in_repair");
+  assert.equal(incident.serviceStage, "sent_to_service");
+  assert.equal(incident.serviceDetails!.reason,"Замена тормозов");
   assert.equal(incident.managerLabel, "Субанов");
   assert.equal(incident.repairNote, "Замена тормозов");
   assert.ok(incident.occurredAt);
@@ -70,7 +72,7 @@ test("sending a driver's vehicle to repair creates the journal incident with veh
 test("repair without an assigned vehicle creates no journal entry or vehicle update", async () => {
   const { service, user, created, updated, setAssignedCar } = fixture();
   setAssignedCar(null);
-  await assert.rejects(service.createDriverIncidentAction("driver", { action: "repair" }, user), /нет назначенной машины/);
+  await assert.rejects(service.createDriverIncidentAction("driver", { action: "repair", note:"Причина" }, user), /нет назначенной машины/);
   assert.equal(created.length, 0);
   assert.equal(updated.length, 0);
 });
@@ -104,4 +106,24 @@ test("selected debt period excludes today's/future installments from overdue, wh
   assert.equal((await service.getDrivers(user, "2026-10-07", "2026-10-08"))[0]!.overduePeriodAmount, 0);
   await assert.rejects(service.getDrivers(user, "2026-10-08", "2026-10-05"), /корректный период/);
   await assert.rejects(service.getDrivers(user, "2026-02-30", "2026-03-01"), /корректный период/);
+});
+
+test("manager calendar is scoped and uses confirmed payments, real incident dates and day-off statuses", async()=>{
+ const {service,user,created}=fixture();
+ Object.assign(service,{
+  prismaService:{client:null},
+  driverRepository:{getById:async()=>({id:"driver",fullName:"Test",weeklyDayOff:"sunday"})},
+  contractRepository:{getActiveByDriver:async()=>({contractNumber:"101",installmentAmount:2300,startDate:"2026-10-01",endDate:"2026-10-31"})},
+  paymentRepository:{listByDriver:async()=>[
+   {createdAt:"2026-10-01T10:00:00Z",status:"succeeded",amount:2300,appliedAmount:2300},
+   {createdAt:"2026-10-02T10:00:00Z",status:"pending",amount:2300,appliedAmount:0},
+   {createdAt:"2026-10-03T10:00:00Z",status:"succeeded",amount:400,appliedAmount:400},
+  ]},
+ });
+ created.push({id:"old",driverId:"driver",incidentType:"repair",status:"closed",occurredAt:"2026-10-06T10:00:00Z"});
+ const calendar=await service.getDriverCalendar("driver","2026-10",user);
+ assert.equal(calendar.days.length,31);assert.equal(calendar.paid,2700);
+ assert.equal(calendar.days[0]!.status,"paid");assert.equal(calendar.days[1]!.amount,0);assert.equal(calendar.days[2]!.status,"partial");assert.equal(calendar.days[3]!.status,"dayoff");
+ assert.equal(calendar.days[5]!.status,"repair");assert.notEqual(calendar.days[6]!.status,"repair","historical unknown completion date must not extend repair to today");
+ await assert.rejects(service.getDriverCalendar("driver","2026-13",user),/Месяц/);
 });

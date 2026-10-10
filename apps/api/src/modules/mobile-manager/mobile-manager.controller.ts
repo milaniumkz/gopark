@@ -1,3 +1,4 @@
+import type { AccidentDetails } from "@gopark/contracts";
 import { Body, Controller, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import type {
   ManagerAssignedDriverItem,
@@ -100,11 +101,17 @@ export class MobileManagerController {
     return this.mobileManagerService.getDriverPayments(driverId, currentUser);
   }
 
+  @Get("drivers/:driverId/calendar")
+  @Roles("owner", "admin", "finance", "manager")
+  getDriverCalendar(@Param("driverId") driverId: string, @Query("month") month: string, @CurrentUser() currentUser: RequestUser | null) {
+    return this.mobileManagerService.getDriverCalendar(driverId, month, currentUser);
+  }
+
   @Post("drivers/:driverId/incidents")
   @Roles("owner", "admin", "finance", "manager")
   createDriverIncidentAction(
     @Param("driverId") driverId: string,
-    @Body() body: { action?: string; note?: string },
+    @Body() body: { action?: string; note?: string; accidentDetails?: AccidentDetails },
     @CurrentUser() currentUser: RequestUser | null,
   ): Promise<ManagerIncidentItem> {
     return this.mobileManagerService.createDriverIncidentAction(driverId, body, currentUser);
@@ -199,7 +206,7 @@ export class MobileManagerController {
   @Roles("owner", "admin", "finance", "manager")
   updateIncidentAction(
     @Param("incidentId") incidentId: string,
-    @Body() body: { action?: string; note?: string },
+    @Body() body: { action?: string; note?: string; accidentDetails?: AccidentDetails },
     @CurrentUser() currentUser: RequestUser | null,
   ): Promise<ManagerIncidentItem> {
     return this.mobileManagerService.updateIncidentAction(incidentId, body, currentUser);

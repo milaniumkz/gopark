@@ -126,17 +126,21 @@ class ManagerRepository {
     return api.getIncidents();
   }
 
+  Future<Map<String,dynamic>> loadDriverCalendar(String driverId, String month) => api.getDriverCalendar(driverId,month);
+
   Future<ManagerIncidentDto> createDriverIncidentAction(
     String driverId,
     String action, {
     String? note,
     String? accidentPhotoUrl,
+    Map<String,dynamic>? accidentDetails,
   }) {
     return api.createDriverIncidentAction(
       driverId,
       action,
       note: note,
       accidentPhotoUrl: accidentPhotoUrl,
+      accidentDetails: accidentDetails,
     );
   }
 

@@ -60,7 +60,7 @@ export const crmAccessMatrix: Record<CrmRouteKey, readonly WebRole[]> = {
   contracts: ["owner", "admin", "finance", "manager", "auditor"],
   "contract-detail": ["owner", "admin", "finance", "manager", "auditor"],
   payments: ["owner", "admin", "finance", "auditor"],
-  service: ["owner", "admin", "finance", "manager", "auditor"],
+  service: ["owner", "admin", "finance", "manager", "operator", "auditor"],
   parts: ["owner", "admin", "finance", "manager", "operator", "auditor"],
   "insurance-gps": ["owner", "admin", "finance", "manager", "auditor"],
   inspections: ["owner", "admin", "finance", "manager", "auditor"],

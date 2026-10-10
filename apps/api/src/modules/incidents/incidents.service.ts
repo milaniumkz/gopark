@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
-import type { ManagerIncidentItem } from "@gopark/contracts";
+import type { ManagerIncidentItem, ServiceRepairDetails } from "@gopark/contracts";
 import { makeIncidentRepository } from "../../common/application/repository.factory.js";
 import type { IncidentRepository } from "../../common/repositories/index.js";
 import type { CreateIncidentDto } from "./dto/create-incident.dto.js";
@@ -41,8 +41,8 @@ export class IncidentsService {
     return this.incidentRepository.list();
   }
 
-  completeUntrackedRepair(carId: string): Promise<ManagerIncidentItem | null> {
-    return this.incidentRepository.completeUntrackedRepair(carId);
+  completeUntrackedRepair(carId: string, serviceDetails?: ServiceRepairDetails): Promise<ManagerIncidentItem | null> {
+    return this.incidentRepository.completeUntrackedRepair(carId, serviceDetails);
   }
 
   listByCompany(companyName: string): Promise<ManagerIncidentItem[]> {
@@ -76,6 +76,8 @@ export class IncidentsService {
       repairNote: trimOrNull(input.repairNote),
       locationNote: trimOrNull(input.locationNote),
       managerLabel: trimOrNull(input.managerLabel),
+      serviceDetails: input.serviceDetails,
+      accidentDetails: input.accidentDetails,
       serviceStage: trimOrNull(input.serviceStage),
       serviceCaseType: trimOrNull(input.serviceCaseType),
       servicePaymentStatus: trimOrNull(input.servicePaymentStatus),
@@ -94,7 +96,7 @@ export class IncidentsService {
   }
 
   update(incidentId: string, input: UpdateIncidentDto): Promise<ManagerIncidentItem | null> {
-    const patch: UpdateIncidentDto = {};
+    const patch: UpdateIncidentDto = { serviceDetails: input.serviceDetails, accidentDetails: input.accidentDetails };
 
     if (input.title !== undefined) {
       patch.title = input.title.trim();

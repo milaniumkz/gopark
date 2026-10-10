@@ -42,7 +42,7 @@ jobs:
       - run: corepack pnpm --filter @gopark/contracts build
       - run: corepack pnpm --filter @gopark/api typecheck
       - name: Verify dashboard repayment totals
-        run: corepack pnpm --filter @gopark/api exec node --loader ts-node/esm --test src/infrastructure/repositories/obligation.prisma.repository.test.ts src/modules/dashboard/dashboard.service.test.ts src/common/repositories/contract-number.test.ts src/modules/mobile-manager/mobile-manager.service.test.ts src/common/repositories/incident-history.test.ts src/infrastructure/repositories/user-manager-session.test.ts src/modules/incidents/incidents.controller.test.ts src/modules/mobile-read/debt-period-policy.test.ts
+        run: corepack pnpm --filter @gopark/api exec node --loader ts-node/esm --test src/infrastructure/repositories/obligation.prisma.repository.test.ts src/modules/dashboard/dashboard.service.test.ts src/common/repositories/contract-number.test.ts src/modules/mobile-manager/mobile-manager.service.test.ts src/common/repositories/incident-history.test.ts src/common/repositories/service-workflow.test.ts src/infrastructure/repositories/user-manager-session.test.ts src/modules/incidents/incidents.controller.test.ts src/modules/mobile-read/debt-period-policy.test.ts
       - run: corepack pnpm --filter @gopark/crm-web typecheck
       - run: corepack pnpm --filter @gopark/crm-web build
 

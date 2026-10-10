@@ -650,6 +650,9 @@ model Incident {
   createdAt    DateTime @default(now()) @map("created_at")
 
   @@map("incidents")
+  serviceDetails Json?
+  accidentDetails Json?
+
 }
 
 model OutboxEvent {

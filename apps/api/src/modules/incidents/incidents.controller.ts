@@ -1,5 +1,5 @@
-import { Body, Controller, Get, NotFoundException, Param, ParseUUIDPipe, Patch, Post } from "@nestjs/common";
-import type { ManagerIncidentItem } from "@gopark/contracts";
+import { Body, BadRequestException, ForbiddenException, Controller, Get, NotFoundException, Param, ParseUUIDPipe, Patch, Post } from "@nestjs/common";
+import type { ManagerIncidentItem, ServiceRepairDetails } from "@gopark/contracts";
 import {
   makeCarRepository,
   makeDriverRepository,
@@ -25,7 +25,7 @@ export class IncidentsController {
   constructor(private readonly incidentsService: IncidentsService) {}
 
   @Get()
-  @Roles("owner", "admin", "finance", "manager")
+  @Roles("owner", "admin", "finance", "manager", "operator", "auditor")
   async list(@CurrentUser() currentUser: RequestUser | null): Promise<ManagerIncidentItem[]> {
     if (currentUser?.companyName) {
       return this.incidentsService.listByCompany(currentUser.companyName);
@@ -46,17 +46,25 @@ export class IncidentsController {
     ]);
     assertSameCompanyPair(driver?.companyName, car?.companyName, "Driver and car in incident must belong to the same company");
 
+    if(body.incidentType === "repair" && !car) throw new BadRequestException("Выберите автомобиль для ремонта");
+    if(body.incidentType === "repair" && body.status === "open" && body.serviceStage !== "sent_to_service" && !(body.serviceStage === "in_repair" && car?.status === "maintenance")) {
+      body = {...body,serviceStage:"sent_to_service",serviceDetails:body.serviceDetails ?? {reason:body.repairNote ?? body.description ?? ""}};
+    }
+    if(body.serviceStage === "completed" && (!body.serviceDetails?.orderNumber?.trim() || !body.serviceDetails.works?.some(w=>w.trim()))) throw new BadRequestException("Для завершения нужны номер заказ-наряда и работы");
+    if(currentUser?.role === "manager" && body.incidentType === "repair" && body.serviceStage !== "sent_to_service") throw new ForbiddenException("Бригадир отправляет машину на СТО; дальнейшие этапы подтверждает СТО");
     return this.incidentsService.create(body);
   }
 
   @Post("repair-cars/:carId/complete")
-  @Roles("owner", "admin", "finance", "manager")
+  @Roles("owner", "admin", "finance", "manager", "operator")
   async completeUntrackedRepair(
     @Param("carId", new ParseUUIDPipe()) carId: string,
     @CurrentUser() currentUser: RequestUser | null,
+    @Body() body?: { serviceDetails?: ServiceRepairDetails },
   ): Promise<ManagerIncidentItem | null> {
     await assertCarWriteScope(this.carRepository, carId, currentUser);
-    return this.incidentsService.completeUntrackedRepair(carId);
+    if(currentUser?.role === "manager") throw new ForbiddenException("Завершение ремонта подтверждает сотрудник СТО");
+    return this.incidentsService.completeUntrackedRepair(carId, body?.serviceDetails);
   }
 
   @Patch(":incidentId")
@@ -76,6 +84,7 @@ export class IncidentsController {
     ]);
     assertSameCompanyPair(driver?.companyName, car?.companyName, "Driver and car in incident must belong to the same company");
 
+    if(currentUser?.role === "manager" && (existing.incidentType === "repair" || existing.serviceDetails || existing.incidentType === "accident" && body.serviceStage !== "sent_to_service") && (body.serviceDetails || body.serviceStage && body.serviceStage !== existing.serviceStage || body.status && body.status !== existing.status)) throw new ForbiddenException("Этапы ремонта и заказ-наряд заполняет сотрудник СТО");
     return this.incidentsService.update(incidentId, body);
   }
 }

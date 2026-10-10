@@ -38,7 +38,7 @@ jobs:
           printf '%s\n' "$PROD_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           printf '%s\n' "$PROD_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          key_path=$(ssh -i ~/.ssh/id_ed25519 -p "$PROD_SSH_PORT" "$PROD_SSH_USER@$PROD_SSH_HOST" 'for path in "$HOME/.android/debug.keystore" /home/client/.android/debug.keystore /home/client/gopark/secrets/debug.keystore; do if [ -r "$path" ]; then printf "%s\n" "$path"; break; fi; done')
+          key_path=$(ssh -i ~/.ssh/id_ed25519 -p "$PROD_SSH_PORT" "$PROD_SSH_USER@$PROD_SSH_HOST" 'for path in /home/client/gopark/secrets/debug.keystore "$HOME/.android/debug.keystore" /home/client/.android/debug.keystore; do if [ -r "$path" ]; then printf "%s\n" "$path"; break; fi; done')
           if [ -n "$key_path" ]; then
             scp -i ~/.ssh/id_ed25519 -P "$PROD_SSH_PORT" "$PROD_SSH_USER@$PROD_SSH_HOST:$key_path" ~/.android/debug.keystore
             chmod 600 ~/.android/debug.keystore
@@ -106,4 +106,9 @@ jobs:
           stage="/tmp/gopark-manager-upload-$apk_sha256"
           ssh -i ~/.ssh/id_ed25519 -p "$PROD_SSH_PORT" "$remote" "mkdir -p '$stage'; chmod 700 '$stage'"
           scp -i ~/.ssh/id_ed25519 -P "$PROD_SSH_PORT" /tmp/manager-upload/gopark-manager.apk /tmp/manager-upload/gopark-manager.zip /tmp/manager-upload/manager-download.html scripts/publish_manager_apk.sh "$remote:$stage/"
+          # Keep the signing key only in the protected server secrets directory.
+          # Never include it in Git, download files, logs, or Actions artifacts.
+          test -s ~/.android/debug.keystore
+          scp -i ~/.ssh/id_ed25519 -P "$PROD_SSH_PORT" ~/.android/debug.keystore "$remote:$stage/manager-signing.keystore"
+          ssh -i ~/.ssh/id_ed25519 -p "$PROD_SSH_PORT" "$remote" "set -eu; target=/home/client/gopark/secrets/debug.keystore; if [ ! -e \"\$target\" ]; then install -m 600 '$stage/manager-signing.keystore' \"\$target\"; fi; cmp -s '$stage/manager-signing.keystore' \"\$target\"; rm -f '$stage/manager-signing.keystore'"
           ssh -i ~/.ssh/id_ed25519 -p "$PROD_SSH_PORT" "$remote" "CODE_SHA='$code_sha' APK_SHA256='$apk_sha256' ZIP_SHA256='$zip_sha256' STAGE='$stage' bash '$stage/publish_manager_apk.sh'"

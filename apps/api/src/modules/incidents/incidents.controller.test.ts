@@ -23,6 +23,8 @@ test("returning a repair car checks company access before completing it", async 
   await assert.rejects(controller.completeUntrackedRepair("car", user), /cannot use this car/);
   assert.equal(completions, 0);
   (controller as any).carRepository = { getById: async () => ({ id: "car", companyName: "Own company" }) };
-  await controller.completeUntrackedRepair("car", user);
+  await assert.rejects(controller.completeUntrackedRepair("car", user), /сотрудник СТО/);
+  assert.equal(completions, 0);
+  await controller.completeUntrackedRepair("car", {...user,role:"operator"});
   assert.equal(completions, 1);
 });

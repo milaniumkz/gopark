@@ -1,679 +1,815 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
-import type { DriverListItem, ManagerIncidentItem, VehicleListItem } from "@gopark/contracts";
+import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import type {
+  DriverListItem,
+  ManagerIncidentItem,
+  ServiceRepairDetails,
+  ServicePaymentEntry,
+  VehicleListItem,
+} from "@gopark/contracts";
 import { patchJson, postJson } from "../lib/api";
-import { useApiMutation } from "../hooks/useApiMutation";
 import { useApiQuery } from "../hooks/useApiQuery";
 import { useAuth } from "../ui/AuthContext";
-import { AsyncState } from "../ui/AsyncState";
-import { EmptyStatePanel } from "../ui/EmptyStatePanel";
-import { ReadOnlyNotice } from "../ui/ReadOnlyNotice";
-import { StatCard } from "../ui/StatCard";
-import { CarIcon, DriversIcon, FinanceIcon, LedgerIcon } from "../ui/CrmIcons";
-import {
-  downloadCsvTable,
-  formatCurrency,
-  formatDateOnly,
-  formatRepairPeriodLabel,
-  formatShortId,
-  getIncidentPriorityLabel,
-  getStatusLabel,
-  getStatusTone,
-} from "../lib/utils";
-
-type CreateIncidentInput = {
-  title: string;
-  incidentType: string;
-  status: string;
-  priority: string;
-  serviceStage?: string | null;
-  serviceCaseType?: string | null;
-  servicePaymentStatus?: string | null;
-  servicePayer?: string | null;
-  driverId?: string | null;
-  carId?: string | null;
-  occurredAt?: string | null;
-  amount?: number | null;
-  insuranceCompensationAmount?: number | null;
-  writeoffAmount?: number | null;
-  description?: string | null;
-  repairNote?: string | null;
-  periodLabel?: string | null;
-  managerLabel?: string | null;
+import { downloadCsvTable, formatCurrency, formatDateOnly } from "../lib/utils";
+import "./service-workflow.css";
+const stages = ["sent_to_service", "awaiting_repair", "in_repair", "completed"];
+const labels: Record<string, string> = {
+  sent_to_service: "Отправлен на СТО",
+  awaiting_repair: "В ожидании",
+  in_repair: "В ремонте",
+  completed: "Завершён",
+  written_off: "Списан",
 };
-
-function isServiceIncident(item: ManagerIncidentItem): boolean {
-  return item.incidentType === "repair" || ["awaiting_repair", "in_repair", "completed", "written_off"].includes(item.serviceStage ?? "");
+const payerLabels = {
+  company: "GoPark",
+  driver: "Водитель",
+  insurance: "Страховая компания",
+};
+function paid(item: ManagerIncidentItem) {
+  return (item.serviceDetails?.payments ?? []).reduce(
+    (sum, p) => sum + p.amount,
+    0,
+  );
 }
-
-function getServiceStage(item: ManagerIncidentItem): string {
-  return item.serviceStage
-    ?? (item.status === "open"
-      ? "awaiting_repair"
-      : item.status === "resolved"
-        ? "in_repair"
-        : item.status === "closed" || item.status === "archived"
-          ? "completed"
-          : item.status);
+function cost(item: ManagerIncidentItem) {
+  return item.serviceDetails?.serviceCost ?? 0;
 }
-
-function getServiceWorkflowLabel(item: ManagerIncidentItem): string {
-  if (item.status === "archived") return "Архив";
-  const stage = getServiceStage(item);
-  if (stage === "awaiting_repair") {
-    return "Ожидает ремонт";
-  }
-  if (stage === "in_repair") {
-    return "В ремонте";
-  }
-  if (stage === "completed") {
-    return "Завершён";
-  }
-  if (stage === "written_off") {
-    return "Списан";
-  }
-  if (item.status === "archived") {
-    return "Архив";
-  }
-  return getStatusLabel(stage);
+function closed(item: ManagerIncidentItem) {
+  return ["resolved", "closed", "archived"].includes(item.status);
 }
-
-function getServiceCaseType(item: ManagerIncidentItem): string {
-  const type = item.serviceCaseType ?? ((item.insuranceCompensationAmount ?? 0) > 0 ? "insurance" : "non_insurance");
-  return type === "insurance" ? "Страховой случай" : "Нестраховой случай";
-}
-
-function getServicePaymentStatus(item: ManagerIncidentItem): string {
-  if (item.servicePaymentStatus === "paid") {
-    return "Оплачен";
-  }
-  if (item.servicePaymentStatus === "unpaid") {
-    return "Не оплачен";
-  }
-  if (item.servicePaymentStatus === "not_required") {
-    return "Оплата не требуется";
-  }
-  const coveredAmount = (item.insuranceCompensationAmount ?? 0) + (item.writeoffAmount ?? 0);
-  if ((item.amount ?? 0) <= 0) {
-    return "Оплата не требуется";
-  }
-  return coveredAmount >= (item.amount ?? 0) ? "Оплачен" : "Не оплачен";
-}
-
-function getServicePayer(item: ManagerIncidentItem): string {
-  if (item.servicePayer === "insurance") {
-    return "Оплачивает страховая";
-  }
-  if (item.servicePayer === "driver") {
-    return "Оплачивает водитель";
-  }
-  if (item.servicePayer === "company") {
-    return "Оплачивает компания";
-  }
-  if ((item.insuranceCompensationAmount ?? 0) > 0) {
-    return "Оплачивает страховая";
-  }
-  if ((item.writeoffAmount ?? 0) > 0) {
-    return "Оплачивает водитель";
-  }
-  if ((item.amount ?? 0) > 0) {
-    return "Оплачивает компания";
-  }
-  return "Плательщик не указан";
-}
-
-function buildCompletedRepairPeriod(item: ManagerIncidentItem): string {
-  if (item.periodLabel?.includes("..")) {
-    return item.periodLabel;
-  }
-
-  const startedAt = (item.periodLabel || item.occurredAt || new Date().toISOString()).slice(0, 10);
-  return `${startedAt}..${new Date().toISOString().slice(0, 10)}`;
-}
-
+const today = () =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Almaty" }).format(
+    new Date(),
+  );
+const stamp = (date?: string) =>
+  date
+    ? new Date(date).toLocaleString("ru-RU", { timeZone: "Asia/Almaty" })
+    : "Дата не указана";
 export function ServicePage() {
-  const [searchParams] = useSearchParams();
   const { session } = useAuth();
-  const [companyFilter, setCompanyFilter] = useState(session.companyName?.trim() || "all");
-  const incidentsApi = useApiQuery<ManagerIncidentItem[]>("incidents");
-  const driversApi = useApiQuery<DriverListItem[]>("drivers");
-  const vehiclesApi = useApiQuery<VehicleListItem[]>("cars");
-  const settingsApi = useApiQuery<{ companies: string[] }>("settings/overview");
-  const createIncident = useApiMutation<ManagerIncidentItem, CreateIncidentInput>("incidents");
-  const canCreate = ["owner", "admin", "finance", "manager"].includes(session.requestUserRole);
-  const [title, setTitle] = useState("Ремонт на СТО");
-  const [driverId, setDriverId] = useState("");
-  const [carId, setCarId] = useState("");
-  const [occurredAt, setOccurredAt] = useState("");
-  const [description, setDescription] = useState("");
-  const [repairNote, setRepairNote] = useState("");
-  const [managerLabel, setManagerLabel] = useState("");
-  const [amount, setAmount] = useState("");
-  const [insuranceCompensationAmount, setInsuranceCompensationAmount] = useState("");
-  const [writeoffAmount, setWriteoffAmount] = useState("");
-  const [serviceCaseType, setServiceCaseType] = useState<"insurance" | "non_insurance">("non_insurance");
-  const [servicePaymentStatus, setServicePaymentStatus] = useState<"paid" | "unpaid" | "not_required">("unpaid");
-  const [servicePayer, setServicePayer] = useState<"insurance" | "driver" | "company" | "not_set">("company");
-  const [statusFilter, setStatusFilter] = useState<"active" | "all" | "awaiting_repair" | "in_repair" | "completed" | "written_off" | "archived">("active");
-  const [caseTypeFilter, setCaseTypeFilter] = useState<"all" | "insurance" | "non_insurance">("all");
-  const [paymentStateFilter, setPaymentStateFilter] = useState<"all" | "paid" | "unpaid">("all");
-  const [payerFilter, setPayerFilter] = useState<"all" | "insurance" | "driver" | "company">("all");
+  const incidents = useApiQuery<ManagerIncidentItem[]>("incidents");
+  const cars = useApiQuery<VehicleListItem[]>("cars");
+  const drivers = useApiQuery<DriverListItem[]>("drivers");
+  const canEdit = ["owner", "admin", "finance", "operator"].includes(
+    session.requestUserRole,
+  );
+  const canSend = canEdit || session.requestUserRole === "manager";
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("active");
+  const [company, setCompany] = useState(session.companyName || "all");
+  const [caseType, setCaseType] = useState("all");
   const [managerFilter, setManagerFilter] = useState("");
-  const [searchFilter, setSearchFilter] = useState("");
-  const [message, setMessage] = useState<string | null>(null);
-  const [selectedIncidentIds, setSelectedIncidentIds] = useState<string[]>([]);
-  const [returningCarId, setReturningCarId] = useState<string | null>(null);
-
-  const companies = useMemo(() => settingsApi.data?.companies ?? [], [settingsApi.data?.companies]);
-  const drivers = useMemo(() => driversApi.data ?? [], [driversApi.data]);
-  const vehicles = useMemo(() => vehiclesApi.data ?? [], [vehiclesApi.data]);
-  const incidents = useMemo(() => incidentsApi.data ?? [], [incidentsApi.data]);
-  const driverCompanyMap = useMemo(() => new Map(drivers.map((item) => [item.id, item.companyName ?? ""])), [drivers]);
-  const vehicleCompanyMap = useMemo(() => new Map(vehicles.map((item) => [item.id, item.companyName ?? ""])), [vehicles]);
-  const matchesCompany = useCallback((driverId?: string | null, carId?: string | null): boolean => {
-    if (companyFilter === "all") {
-      return true;
-    }
-
-    return (driverId ? driverCompanyMap.get(driverId) : "") === companyFilter
-      || (carId ? vehicleCompanyMap.get(carId) : "") === companyFilter;
-  }, [companyFilter, driverCompanyMap, vehicleCompanyMap]);
-  const visibleDrivers = useMemo(() => drivers.filter((item) => matchesCompany(item.id, null)), [drivers, matchesCompany]);
-  const visibleVehicles = useMemo(() => vehicles.filter((item) => matchesCompany(item.assignedDriverId, item.id)), [matchesCompany, vehicles]);
-  const driverMap = useMemo(() => new Map(drivers.map((item) => [item.id, item.fullName])), [drivers]);
-  const vehicleMap = useMemo(() => new Map(vehicles.map((item) => [item.id, item.plateNumber])), [vehicles]);
-  const vehicleLabelMap = useMemo(() => new Map(vehicles.map((item) => [item.id, `${item.plateNumber} · ${item.make} ${item.model}`])), [vehicles]);
-  const serviceIncidents = useMemo(() => incidents.filter(isServiceIncident), [incidents]);
-  const untrackedRepairCars = useMemo(() => visibleVehicles.filter((car) => {
-    if (!["maintenance", "repair"].includes(car.status)) return false;
-    if (!["active", "all", "in_repair"].includes(statusFilter)) return false;
-    if (caseTypeFilter !== "all" || paymentStateFilter !== "all" || payerFilter !== "all") return false;
-    if (serviceIncidents.some((item) => item.carId === car.id && !["resolved", "closed", "archived"].includes(item.status))) return false;
-    if (managerFilter && !(car.managerName ?? "").toLowerCase().includes(managerFilter.trim().toLowerCase())) return false;
-    const label = [car.plateNumber, car.make, car.model, car.assignedDriverId ? driverMap.get(car.assignedDriverId) : ""].join(" ").toLowerCase();
-    return label.includes(searchFilter.trim().toLowerCase());
-  }), [visibleVehicles, statusFilter, caseTypeFilter, paymentStateFilter, payerFilter, serviceIncidents, managerFilter, driverMap, searchFilter]);
-  const serviceRows = useMemo(() => {
-    const normalizedSearch = searchFilter.trim().toLowerCase();
-    const normalizedManager = managerFilter.trim().toLowerCase();
-
-    return [...serviceIncidents]
-      .filter((item) => {
-        const stage = getServiceStage(item);
-        if (statusFilter === "active" && ["resolved", "closed", "archived"].includes(item.status)) {
-          return false;
-        }
-        if (statusFilter === "archived" && item.status !== "archived") {
-          return false;
-        }
-        if (statusFilter === "active" && !["awaiting_repair", "in_repair"].includes(stage)) {
-          return false;
-        }
-        if (statusFilter !== "active" && statusFilter !== "all" && statusFilter !== "archived" && stage !== statusFilter) {
-          return false;
-        }
-        if (caseTypeFilter === "insurance" && (item.insuranceCompensationAmount ?? 0) <= 0) {
-          if (getServiceCaseType(item) !== "Страховой случай") {
-            return false;
-          }
-        }
-        if (caseTypeFilter === "non_insurance" && getServiceCaseType(item) !== "Нестраховой случай") {
-          return false;
-        }
-        if (paymentStateFilter === "paid" && getServicePaymentStatus(item) !== "Оплачен") {
-          return false;
-        }
-        if (paymentStateFilter === "unpaid" && getServicePaymentStatus(item) !== "Не оплачен") {
-          return false;
-        }
-        if (payerFilter === "insurance" && getServicePayer(item) !== "Оплачивает страховая") {
-          return false;
-        }
-        if (payerFilter === "driver" && getServicePayer(item) !== "Оплачивает водитель") {
-          return false;
-        }
-        if (payerFilter === "company" && getServicePayer(item) !== "Оплачивает компания") {
-          return false;
-        }
-        if (normalizedManager && !(item.managerLabel ?? "").toLowerCase().includes(normalizedManager)) {
-          return false;
-        }
-        if (!matchesCompany(item.driverId, item.carId)) {
-          return false;
-        }
-        if (!normalizedSearch) {
-          return true;
-        }
-
-        const vehicleLabel = item.carId ? vehicleLabelMap.get(item.carId) ?? "" : "";
-        const driverLabel = item.driverId ? driverMap.get(item.driverId) ?? "" : "";
-        const haystack = [
-          item.title,
-          item.description ?? "",
-          item.repairNote ?? "",
-          item.managerLabel ?? "",
-          vehicleLabel,
-          driverLabel,
-        ]
-          .join(" ")
-          .toLowerCase();
-
-        return haystack.includes(normalizedSearch);
-      })
-      .sort((left, right) => (right.occurredAt ?? right.id).localeCompare(left.occurredAt ?? left.id));
-  }, [caseTypeFilter, driverMap, managerFilter, matchesCompany, payerFilter, paymentStateFilter, searchFilter, serviceIncidents, statusFilter, vehicleLabelMap]);
-
-  const totalExpense = serviceRows.reduce((sum, item) => sum + (item.amount ?? 0), 0);
-  const totalInsurance = serviceRows.reduce((sum, item) => sum + (item.insuranceCompensationAmount ?? 0), 0);
-  const totalWriteoff = serviceRows.reduce((sum, item) => sum + (item.writeoffAmount ?? 0), 0);
-  const openCount = serviceRows.filter((item) => getServiceStage(item) === "awaiting_repair").length;
-  const archivedCount = serviceIncidents.filter((item) => item.status === "archived").length;
-  const selectedCount = selectedIncidentIds.length;
-  const allSelected = serviceRows.length > 0 && selectedCount === serviceRows.length;
-
-  function applyPresetView(view: "operations" | "insurance" | "archive"): void {
-    if (view === "operations") {
-      setStatusFilter("active");
-      setCaseTypeFilter("all");
-      setPaymentStateFilter("all");
-      setPayerFilter("all");
-      setManagerFilter("");
-      setSearchFilter("");
-      return;
-    }
-    if (view === "insurance") {
-      setStatusFilter("active");
-      setCaseTypeFilter("insurance");
-      setPaymentStateFilter("all");
-      setPayerFilter("insurance");
-      setManagerFilter("");
-      setSearchFilter("страх");
-      return;
-    }
-
-    setStatusFilter("archived");
-    setCaseTypeFilter("all");
-    setPaymentStateFilter("all");
-    setPayerFilter("all");
-    setManagerFilter("");
-    setSearchFilter("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [payer, setPayer] = useState("all");
+  const [selected, setSelected] = useState<ManagerIncidentItem | null>(null);
+  const [details, setDetails] = useState<ServiceRepairDetails>({ reason: "" });
+  const [payment, setPayment] = useState({
+    amount: "",
+    paidAt: today(),
+    payer: "company" as ServicePaymentEntry["payer"],
+  });
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [sendCar, setSendCar] = useState("");
+  const [reason, setReason] = useState("");
+  const records = (incidents.data ?? []).filter(
+    (i) => i.incidentType === "repair" || stages.includes(i.serviceStage ?? ""),
+  );
+  const carById = new Map((cars.data ?? []).map((c) => [c.id, c]));
+  const driverById = new Map((drivers.data ?? []).map((d) => [d.id, d]));
+  const vehicleLabel = (i: ManagerIncidentItem) =>
+    i.carId ? (carById.get(i.carId)?.plateNumber ?? i.title) : i.title;
+  const periodRecords = records.filter((i) => {
+    const day = (i.serviceDetails?.costDate ?? i.occurredAt ?? "").slice(0, 10);
+    const companyName =
+      (i.carId ? carById.get(i.carId)?.companyName : null) ??
+      (i.driverId ? driverById.get(i.driverId)?.companyName : null);
+    return (
+      (company === "all" || companyName === company) &&
+      (caseType === "all" || i.serviceCaseType === caseType) &&
+      (!managerFilter ||
+        (i.managerLabel ?? "")
+          .toLowerCase()
+          .includes(managerFilter.toLowerCase())) &&
+      (!from || day >= from) &&
+      (!to || (!!day && day <= to)) &&
+      (payer === "all" ||
+        (i.serviceDetails?.payments ?? []).some((p) => p.payer === payer))
+    );
+  });
+  const rows = periodRecords.filter(
+    (i) =>
+      (filter === "all" ||
+        (filter === "active" && !closed(i)) ||
+        (filter === "archived" && closed(i)) ||
+        i.serviceStage === filter) &&
+      [
+        vehicleLabel(i),
+        i.title,
+        i.description,
+        i.serviceDetails?.reason,
+        i.driverId ? driverById.get(i.driverId)?.fullName : "",
+        i.managerLabel,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(search.toLowerCase()),
+  );
+  const untracked = (cars.data ?? []).filter(
+    (c) =>
+      (company === "all" || c.companyName === company) &&
+      caseType === "all" &&
+      payer === "all" &&
+      (!managerFilter ||
+        (c.managerName ?? "")
+          .toLowerCase()
+          .includes(managerFilter.toLowerCase())) &&
+      c.status === "maintenance" &&
+      !records.some((i) => i.carId === c.id && !closed(i)) &&
+      ["active", "all", "in_repair"].includes(filter) &&
+      [c.plateNumber, c.make, c.model]
+        .join(" ")
+        .toLowerCase()
+        .includes(search.toLowerCase()),
+  );
+  const sums = useMemo(
+    () =>
+      periodRecords.reduce(
+        (s, i) => ({ cost: s.cost + cost(i), paid: s.paid + paid(i) }),
+        { cost: 0, paid: 0 },
+      ),
+    [periodRecords],
+  );
+  const receipts = records
+    .filter((i) => {
+      const name =
+        (i.carId ? carById.get(i.carId)?.companyName : null) ??
+        (i.driverId ? driverById.get(i.driverId)?.companyName : null);
+      return (
+        (company === "all" || name === company) &&
+        (caseType === "all" || i.serviceCaseType === caseType) &&
+        (!managerFilter ||
+          (i.managerLabel ?? "")
+            .toLowerCase()
+            .includes(managerFilter.toLowerCase()))
+      );
+    })
+    .flatMap((i) => i.serviceDetails?.payments ?? [])
+    .filter(
+      (p) =>
+        (payer === "all" || p.payer === payer) &&
+        (!from || p.paidAt.slice(0, 10) >= from) &&
+        (!to || p.paidAt.slice(0, 10) <= to),
+    )
+    .reduce((sum, p) => sum + p.amount, 0);
+  async function refresh() {
+    await Promise.all([incidents.refetch(), cars.refetch(), drivers.refetch()]);
   }
-
-  useEffect(() => {
-    const view = searchParams.get("view");
-    if (view === "operations" || view === "insurance" || view === "archive") {
-      applyPresetView(view);
-    }
-  }, [searchParams]);
-
-  useEffect(() => {
-    setSelectedIncidentIds((current) => current.filter((incidentId) => serviceRows.some((item) => item.id === incidentId)));
-  }, [serviceRows]);
-
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    setMessage(null);
-    if (!carId || !description.trim()) {
-      setMessage("Укажите автомобиль и деталь/описание ремонта.");
-      return;
-    }
-
-    try {
-      const created = await createIncident.mutate({
-        title: title.trim() || "Ремонт на СТО",
-        incidentType: "repair",
-        status: "open",
-        priority: "medium",
-        driverId: driverId || null,
-        carId,
-        occurredAt: occurredAt || null,
-        amount: amount ? Number(amount) : null,
-        insuranceCompensationAmount: insuranceCompensationAmount ? Number(insuranceCompensationAmount) : null,
-        writeoffAmount: writeoffAmount ? Number(writeoffAmount) : null,
-        description: description.trim(),
-        repairNote: repairNote.trim() || null,
-        managerLabel: managerLabel.trim() || null,
-        serviceStage: "awaiting_repair",
-        serviceCaseType,
-        servicePaymentStatus,
-        servicePayer: servicePayer === "not_set" ? null : servicePayer,
-      });
-      setMessage(`СТО-кейс создан: ${created.title}.`);
-      await Promise.all([incidentsApi.refetch(), vehiclesApi.refetch(), driversApi.refetch()]);
-      setDescription("");
-      setRepairNote("");
-      setAmount("");
-      setInsuranceCompensationAmount("");
-      setWriteoffAmount("");
-      setServiceCaseType("non_insurance");
-      setServicePaymentStatus("unpaid");
-      setServicePayer("company");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Не удалось создать кейс СТО.");
-    }
+  function open(i: ManagerIncidentItem) {
+    setSelected(i);
+    setDetails(
+      i.serviceDetails ?? { reason: i.repairNote ?? i.description ?? "" },
+    );
+    setMessage("");
   }
-
-  async function handleQuickStatusUpdate(item: ManagerIncidentItem, nextStage: "in_repair" | "completed" | "written_off" | "archived"): Promise<void> {
-    setMessage(null);
-    const nextStatus = nextStage === "in_repair" ? "open" : nextStage === "archived" ? "archived" : "closed";
-    const nextWorkflowLabel = nextStage === "in_repair" ? "В ремонте" : nextStage === "completed" ? "Завершён" : nextStage === "written_off" ? "Списан" : "Архив";
-
+  async function save(stage?: string) {
+    if (!selected || busy) return;
+    setBusy(true);
+    setMessage("");
     try {
-      const updated = await patchJson<ManagerIncidentItem | null, Partial<CreateIncidentInput>>(`incidents/${item.id}`, {
-        status: nextStatus,
-        serviceStage: nextStage,
-        periodLabel: ["completed", "written_off", "archived"].includes(nextStage) ? buildCompletedRepairPeriod(item) : item.periodLabel,
-        repairNote: nextStage === "written_off" ? (item.repairNote ?? "Не подлежит восстановлению") : item.repairNote,
-      });
-      if (!updated) {
-        setMessage("СТО-кейс не найден.");
-        return;
-      }
-      setMessage(`Кейс ${formatShortId(item.id)} переведён в статус "${nextWorkflowLabel}".`);
-      await Promise.all([incidentsApi.refetch(), vehiclesApi.refetch(), driversApi.refetch()]);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Не удалось обновить статус СТО-кейса.");
-    }
-  }
-
-  async function handleReturnUntrackedCar(car: VehicleListItem): Promise<void> {
-    setReturningCarId(car.id);
-    setMessage(null);
-    try {
-      await postJson<ManagerIncidentItem | null, Record<string, never>>(`incidents/repair-cars/${car.id}/complete`, {});
-      await Promise.all([incidentsApi.refetch(), vehiclesApi.refetch(), driversApi.refetch()]);
-      setMessage(`Ремонт ${car.plateNumber} завершён. Статус автомобиля обновлён.`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Не удалось завершить ремонт автомобиля.");
-      await Promise.all([incidentsApi.refetch(), vehiclesApi.refetch()]);
+      const next = await patchJson<ManagerIncidentItem, unknown>(
+        `incidents/${selected.id}`,
+        {
+          serviceDetails: details,
+          ...(stage
+            ? {
+                serviceStage: stage,
+                status: stage === "completed" ? "closed" : "open",
+              }
+            : {}),
+          repairNote: details.reason,
+        },
+      );
+      setSelected(next);
+      setDetails(next.serviceDetails ?? details);
+      await refresh();
+      setMessage(
+        stage === "completed"
+          ? "Ремонт завершён. Бригадир получит уведомление."
+          : "Данные сохранены. Бригадир получит уведомление.",
+      );
+    } catch (e) {
+      setMessage(
+        e instanceof Error ? e.message : "Не удалось сохранить ремонт",
+      );
     } finally {
-      setReturningCarId(null);
+      setBusy(false);
     }
   }
-
-  function toggleIncidentSelection(incidentId: string): void {
-    setSelectedIncidentIds((current) =>
-      current.includes(incidentId) ? current.filter((id) => id !== incidentId) : [...current, incidentId],
-    );
-  }
-
-  function toggleSelectAll(): void {
-    setSelectedIncidentIds(allSelected ? [] : serviceRows.map((item) => item.id));
-  }
-
-  async function handleBulkStatusUpdate(nextStage: "in_repair" | "completed" | "written_off" | "archived"): Promise<void> {
-    if (!selectedIncidentIds.length) {
-      setMessage("Выберите хотя бы один кейс СТО для массового действия.");
-      return;
-    }
-
-    setMessage(null);
-    let updatedCount = 0;
-    const nextStatus = nextStage === "in_repair" ? "open" : nextStage === "archived" ? "archived" : "closed";
-    const nextWorkflowLabel = nextStage === "in_repair" ? "В ремонте" : nextStage === "completed" ? "Завершён" : nextStage === "written_off" ? "Списан" : "Архив";
-
+  async function send() {
+    if (!sendCar || !reason.trim() || busy) return;
+    setBusy(true);
+    setMessage("");
     try {
-      for (const incidentId of selectedIncidentIds) {
-        const sourceIncident = serviceRows.find((item) => item.id === incidentId);
-        const updated = await patchJson<ManagerIncidentItem | null, Partial<CreateIncidentInput>>(`incidents/${incidentId}`, {
-          status: nextStatus,
-          serviceStage: nextStage,
-          periodLabel: sourceIncident && ["completed", "written_off", "archived"].includes(nextStage) ? buildCompletedRepairPeriod(sourceIncident) : sourceIncident?.periodLabel,
-          repairNote: nextStage === "written_off" ? (sourceIncident?.repairNote ?? "Не подлежит восстановлению") : sourceIncident?.repairNote,
-        });
-        if (updated) {
-          updatedCount += 1;
-        }
-      }
-
-      await Promise.all([incidentsApi.refetch(), vehiclesApi.refetch(), driversApi.refetch()]);
-      setSelectedIncidentIds([]);
-      setMessage(`Массово обработано ${updatedCount} кейсов СТО: статус "${nextWorkflowLabel}".`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Не удалось выполнить массовое действие по СТО.");
+      const car = carById.get(sendCar)!;
+      const existing = records.find((i) => i.carId === car.id && !closed(i));
+      if (existing)
+        throw new Error(
+          "У машины уже есть открытый ремонт. Откройте его карточку.",
+        );
+      const legacy = car.status === "maintenance";
+      const accident = (incidents.data ?? []).find(
+        (i) =>
+          i.carId === car.id && i.incidentType === "accident" && !closed(i),
+      );
+      const result = accident
+        ? await patchJson<ManagerIncidentItem, unknown>(
+            `incidents/${accident.id}`,
+            {
+              serviceStage: "sent_to_service",
+              serviceDetails: { reason: reason.trim() },
+              repairNote: reason.trim(),
+            },
+          )
+        : await postJson<ManagerIncidentItem, unknown>("incidents", {
+            title: `Ремонт: ${car.plateNumber}`,
+            incidentType: "repair",
+            status: "open",
+            priority: "high",
+            carId: car.id,
+            driverId: car.assignedDriverId ?? null,
+            description: reason.trim(),
+            repairNote: reason.trim(),
+            serviceStage: legacy ? "in_repair" : "sent_to_service",
+            serviceDetails: { reason: reason.trim() },
+            occurredAt: legacy ? null : new Date().toISOString(),
+            managerLabel: car.managerName ?? null,
+          });
+      setSendCar("");
+      setReason("");
+      await refresh();
+      open(result);
+    } catch (e) {
+      setMessage(
+        e instanceof Error ? e.message : "Не удалось отправить машину",
+      );
+    } finally {
+      setBusy(false);
     }
   }
-
-  function handleExport(): void {
-    if (!serviceRows.length) {
+  function addPayment() {
+    const amount = Number(payment.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setMessage("Укажите сумму оплаты больше нуля");
       return;
     }
-
-    downloadCsvTable(
-      "gopark-service.csv",
-      ["case", "company", "plate", "driver", "occurred_at", "detail", "repair_note", "case_type", "payment_state", "payer", "expense", "insurance_compensation", "writeoff", "brigadier", "status"],
-      serviceRows.map((item) => [
-        formatShortId(item.id),
-        item.driverId ? (driverCompanyMap.get(item.driverId) ?? "") : item.carId ? (vehicleCompanyMap.get(item.carId) ?? "") : "",
-        item.carId ? (vehicleMap.get(item.carId) ?? formatShortId(item.carId)) : "",
-        item.driverId ? (driverMap.get(item.driverId) ?? formatShortId(item.driverId)) : "",
-        item.occurredAt ?? "",
-        item.description ?? "",
-        item.repairNote ?? "",
-        getServiceCaseType(item),
-        getServicePaymentStatus(item),
-        getServicePayer(item),
-        item.amount ?? 0,
-        item.insuranceCompensationAmount ?? 0,
-        item.writeoffAmount ?? 0,
-        item.managerLabel ?? "",
-        getServiceWorkflowLabel(item),
-      ]),
-    );
+    setDetails({
+      ...details,
+      payments: [
+        ...(details.payments ?? []),
+        {
+          id: crypto.randomUUID(),
+          amount,
+          paidAt: payment.paidAt,
+          payer: payment.payer,
+        },
+      ],
+    });
+    setPayment({ ...payment, amount: "" });
+    setMessage("Оплата добавлена в форму. Нажмите «Сохранить».");
   }
-
+  const error = incidents.error || cars.error || drivers.error;
   return (
     <section className="page-stack service-page">
-      <div className="hero-card">
-        <p className="eyebrow">Ремонт</p>
-        <h2>Журнал ремонта</h2>
-        <p>Отдельный реестр ремонтов по машинам: деталь, тип случая, расход, оплата и ответственный бригадир.</p>
-        <div className="toolbar">
-          <Link className="button-link" to="/incidents?view=operations">
-            Открыть инциденты
-          </Link>
-          <Link className="button-link" to="/reports">
-            Открыть отчёты
-          </Link>
-          <Link className="button-link" to="/parts">
-            Запчасти
-          </Link>
-          {serviceRows.length ? <button onClick={handleExport}>Скачать CSV</button> : null}
+      <div className="hero-card hero-card--dashboard">
+        <div className="hero-card__main">
+          <p className="eyebrow">Ремонт и услуги</p>
+          <h2>СТО</h2>
+          <p>Причина, этапы ремонта, заказ-наряд и оплата в одной карточке.</p>
         </div>
-        <ReadOnlyNotice message="Здесь показаны кейсы СТО и автомобили со статусом ремонта. Новые ремонтные кейсы создаются в инцидентах." />
-      </div>
-
-      <div className="stats-grid">
-        <StatCard title="Автомобили в ремонте" value={String(visibleVehicles.filter((item) => ["maintenance", "repair"].includes(item.status)).length)} subtitle="По статусу автомобилей" tone="orange" icon={<CarIcon width={18} height={18} />} onClick={() => setStatusFilter("active")} />
-        <StatCard title="Кейсы СТО" value={String(serviceRows.length)} subtitle="Строки по текущему фильтру" tone="blue" icon={<CarIcon width={18} height={18} />} onClick={() => applyPresetView("operations")} />
-        <StatCard title="Ожидают ремонт" value={String(openCount)} subtitle="Живая очередь ремонта" tone="orange" icon={<LedgerIcon width={18} height={18} />} onClick={() => setStatusFilter("awaiting_repair")} />
-        <StatCard title="Расход" value={formatCurrency(totalExpense)} subtitle="Сумма работ и запчастей" tone="orange" icon={<FinanceIcon width={18} height={18} />} onClick={() => setPaymentStateFilter("unpaid")} />
-        <StatCard title="Страховка" value={formatCurrency(totalInsurance)} subtitle="Покрытие от страховой" tone="green" icon={<LedgerIcon width={18} height={18} />} onClick={() => applyPresetView("insurance")} />
-        <StatCard title="Вычет" value={formatCurrency(totalWriteoff)} subtitle={`Сумма удержаний и вычетов · в архиве ${archivedCount}`} tone="purple" icon={<DriversIcon width={18} height={18} />} onClick={() => setPayerFilter("driver")} />
-      </div>
-
-      <div className="table-grid table-grid--single">
-        <article className="panel">
-          <div className="panel__title">
-            <LedgerIcon width={18} height={18} />
-            <h3>Журнал СТО</h3>
-          </div>
-          <div className="quick-form">
-            <p className="quick-form__meta">Фильтры и представления</p>
-            <div className="toolbar">
-              <button type="button" onClick={() => applyPresetView("operations")}>
-                Операционный вид
-              </button>
-              <button type="button" onClick={() => applyPresetView("insurance")}>
-                Страховой контур
-              </button>
-              <button type="button" onClick={() => applyPresetView("archive")}>
-                Архив
-              </button>
-            </div>
-            <div className="toolbar">
-              <select value={companyFilter} onChange={(event) => setCompanyFilter(event.target.value)}>
-                <option value="all">Все компании</option>
-                {companies.map((item) => (
-                  <option key={item} value={item}>
-                    {item}
-                  </option>
-                ))}
-              </select>
-              <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}>
-                <option value="active">Активные ремонты</option>
-                <option value="all">Все статусы</option>
-                <option value="awaiting_repair">Ожидает ремонт</option>
-                <option value="in_repair">В ремонте</option>
-                <option value="completed">Завершённые</option>
-                <option value="written_off">Списанные</option>
-                <option value="archived">Архив</option>
-              </select>
-              <select value={caseTypeFilter} onChange={(event) => setCaseTypeFilter(event.target.value as typeof caseTypeFilter)}>
-                <option value="all">Все случаи</option>
-                <option value="insurance">Страховой случай</option>
-                <option value="non_insurance">Нестраховой случай</option>
-              </select>
-              <select value={paymentStateFilter} onChange={(event) => setPaymentStateFilter(event.target.value as typeof paymentStateFilter)}>
-                <option value="all">Оплата: все</option>
-                <option value="paid">Оплачен</option>
-                <option value="unpaid">Не оплачен</option>
-              </select>
-              <select value={payerFilter} onChange={(event) => setPayerFilter(event.target.value as typeof payerFilter)}>
-                <option value="all">Все плательщики</option>
-                <option value="insurance">Страховая</option>
-                <option value="driver">Водитель</option>
-                <option value="company">Компания</option>
-              </select>
-              <input value={managerFilter} onChange={(event) => setManagerFilter(event.target.value)} placeholder="Фильтр по бригадиру" />
-              <input value={searchFilter} onChange={(event) => setSearchFilter(event.target.value)} placeholder="Поиск по авто, водителю и СТО" />
-            </div>
-            <p className="panel-note">Завершённые ремонты доступны в фильтре «Все статусы» или «Завершённые». Архив — в фильтре «Архив».</p>
-            {canCreate && serviceRows.length ? (
-              <div className="toolbar">
-                <button type="button" onClick={toggleSelectAll}>
-                  {allSelected ? "Снять выбор" : "Выбрать все"}
-                </button>
-                <span className="panel-note">Выбрано: {selectedCount}</span>
-                <button type="button" onClick={() => void handleBulkStatusUpdate("in_repair")} disabled={!selectedCount}>
-                  Массово в ремонт
-                </button>
-                <button type="button" onClick={() => void handleBulkStatusUpdate("completed")} disabled={!selectedCount}>
-                  Массово завершить
-                </button>
-                <button type="button" onClick={() => void handleBulkStatusUpdate("written_off")} disabled={!selectedCount}>
-                  Массово списать
-                </button>
-                <button type="button" onClick={() => void handleBulkStatusUpdate("archived")} disabled={!selectedCount}>
-                  Массово в архив
-                </button>
-              </div>
-            ) : null}
-          </div>
-          <AsyncState
-            loading={incidentsApi.loading || driversApi.loading || vehiclesApi.loading}
-            error={incidentsApi.error || driversApi.error || vehiclesApi.error}
-            empty={!serviceRows.length && !untrackedRepairCars.length}
-            emptyContent={
-              <EmptyStatePanel
-                title="Кейсов СТО по фильтру нет"
-                message="Измените фильтры или откройте инциденты, чтобы увидеть нужный ремонт в живой очереди."
-              />
+        <div className="hero-card__actions">
+          <Link className="button button--secondary" to="/incidents">
+            Инциденты
+          </Link>
+          <button
+            className="button button--secondary"
+            onClick={() =>
+              downloadCsvTable(
+                "gopark-service.csv",
+                [
+                  "Автомобиль",
+                  "Статус",
+                  "Причина",
+                  "Отправлен",
+                  "Прибыл",
+                  "Начало ремонта",
+                  "Завершён",
+                  "Заказ-наряд",
+                  "Работы",
+                  "Стоимость услуг",
+                  "Дата стоимости",
+                  "Оплачено",
+                  "Остаток",
+                  "Прибыль СТО",
+                  "Оплаты с датами и плательщиками",
+                ],
+                rows.map((i) => [
+                  vehicleLabel(i),
+                  labels[i.serviceStage ?? ""] ?? i.status,
+                  i.serviceDetails?.reason ?? i.repairNote ?? "",
+                  i.serviceDetails?.sentAt ?? "",
+                  i.serviceDetails?.arrivedAt ?? "",
+                  i.serviceDetails?.repairStartedAt ?? "",
+                  i.serviceDetails?.completedAt ?? "",
+                  i.serviceDetails?.orderNumber ?? "",
+                  i.serviceDetails?.works?.join("; ") ?? "",
+                  i.serviceDetails?.serviceCost ?? "",
+                  i.serviceDetails?.costDate ?? "",
+                  paid(i),
+                  Math.max(0, cost(i) - paid(i)),
+                  cost(i) * 0.3,
+                  JSON.stringify(i.serviceDetails?.payments ?? []),
+                ]),
+              )
             }
           >
-            <div className="table-scroll">
-              <table className="data-table service-table">
-                <thead>
-                  <tr>
-                    <th />
-                    <th>Авто и водитель</th>
-                    <th>Кейс</th>
-                    <th>Расходы</th>
-                    <th>Оплата</th>
-                    <th>Статус</th>
-                    <th>Действия</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {untrackedRepairCars.map((car) => (
-                    <tr key={`repair-car-${car.id}`}>
-                      <td />
-                      <td><div className="amount-stack"><strong>{vehicleLabelMap.get(car.id) ?? car.plateNumber}</strong><span>{car.assignedDriverId ? driverMap.get(car.assignedDriverId) : "Водитель не назначен"}</span></div></td>
-                      <td><div className="amount-stack"><strong>Без открытого кейса СТО</strong><span>Автомобиль отмечен как находящийся в ремонте. Связанные завершённые кейсы остаются в архиве.</span></div></td>
-                      <td>Расходы не указаны</td>
-                      <td>Не указана</td>
-                      <td>В ремонте</td>
-                      <td><div className="row-actions row-actions--vertical">
-                        {canCreate ? <button type="button" disabled={returningCarId !== null} onClick={() => void handleReturnUntrackedCar(car)}>Завершить ремонт / на линию</button> : null}
-                        <Link className="table-link" to={`/vehicles/${car.id}`}>Авто</Link>
-                        {car.assignedDriverId ? <Link className="table-link" to={`/drivers/${car.assignedDriverId}`}>Водитель</Link> : null}
-                      </div></td>
-                    </tr>
-                  ))}
-                  {serviceRows.map((item) => (
-                    <tr key={item.id}>
-                      <td>
-                        {canCreate ? (
-                          <input
-                            type="checkbox"
-                            checked={selectedIncidentIds.includes(item.id)}
-                            onChange={() => toggleIncidentSelection(item.id)}
-                          />
-                        ) : null}
-                      </td>
-                      <td>
-                        <div className="amount-stack">
-                          <strong>{item.carId ? (vehicleLabelMap.get(item.carId) ?? formatShortId(item.carId)) : "Авто не указано"}</strong>
-                          <span>{item.driverId ? (driverMap.get(item.driverId) ?? formatShortId(item.driverId)) : "Водитель не указан"}</span>
-                          <span>{item.driverId ? driverCompanyMap.get(item.driverId) : item.carId ? vehicleCompanyMap.get(item.carId) : ""}</span>
-                        </div>
-                      </td>
-                      <td>
-                        <div className="amount-stack">
-                          <strong title={item.description ?? item.title}>{item.description ?? item.title}</strong>
-                          <span>{formatRepairPeriodLabel(item.occurredAt, item.periodLabel)}</span>
-                          <span title={item.repairNote ?? ""}>{item.repairNote ?? "СТО не указано"}</span>
-                        </div>
-                      </td>
-                      <td>
-                        <div className="amount-stack">
-                          <strong>{formatCurrency(item.amount ?? 0)}</strong>
-                          <span>Страховка {formatCurrency(item.insuranceCompensationAmount ?? 0)}</span>
-                          <span>Вычет {formatCurrency(item.writeoffAmount ?? 0)}</span>
-                        </div>
-                      </td>
-                      <td>
-                        <div className="amount-stack">
-                          <strong>{getServiceCaseType(item)}</strong>
-                          <span>{getServicePaymentStatus(item)}</span>
-                          <span>{getServicePayer(item)}</span>
-                        </div>
-                      </td>
-                      <td>
-                        <div className="amount-stack">
-                          <span className={getStatusTone(item.status)}>{getServiceWorkflowLabel(item)}</span>
-                          <span className={getStatusTone(item.priority)}>{getIncidentPriorityLabel(item.priority)}</span>
-                        </div>
-                      </td>
-                      <td>
-                        <div className="row-actions row-actions--vertical">
-                          {canCreate && getServiceStage(item) === "awaiting_repair" ? <button type="button" onClick={() => void handleQuickStatusUpdate(item, "in_repair")}>В ремонт</button> : null}
-                          {canCreate && getServiceStage(item) !== "completed" && item.status !== "archived" ? <button type="button" onClick={() => void handleQuickStatusUpdate(item, "completed")}>Завершить</button> : null}
-                          {canCreate && getServiceStage(item) !== "written_off" && item.status !== "archived" ? <button type="button" onClick={() => void handleQuickStatusUpdate(item, "written_off")}>Списать</button> : null}
-                          {canCreate && item.status !== "archived" ? <button type="button" onClick={() => void handleQuickStatusUpdate(item, "archived")}>В архив</button> : null}
-                          <Link className="table-link" to="/incidents?view=operations">Инциденты</Link>
-                          {item.carId ? <Link className="table-link" to={`/vehicles/${item.carId}`}>Авто</Link> : null}
-                          {item.driverId ? <Link className="table-link" to={`/drivers/${item.driverId}`}>Водитель</Link> : null}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </AsyncState>
-        </article>
+            Скачать CSV
+          </button>
+        </div>
       </div>
+      <div className="sto-stats">
+        {[
+          [
+            "Автомобили в ремонте",
+            String((cars.data ?? []).filter(c => c.status === "maintenance" && (company === "all" || c.companyName === company)).length),
+          ],
+          ["Стоимость услуг", formatCurrency(sums.cost)],
+          ["Оплачено", formatCurrency(sums.paid)],
+          ["Не оплачено", formatCurrency(Math.max(0, sums.cost - sums.paid))],
+          ["Прибыль СТО · 30%", formatCurrency(sums.cost * 0.3)],
+        ].map(([label, value]) => (
+          <div className="sto-stat" key={label}>
+            <span>{label}</span>
+            <strong>{value}</strong>
+          </div>
+        ))}
+      </div>
+      <div className="panel sto-filters">
+        <label>
+          Компания
+          <select value={company} onChange={(e) => setCompany(e.target.value)}>
+            <option value="all">Все компании</option>
+            {[
+              ...new Set(
+                (cars.data ?? []).map((c) => c.companyName).filter(Boolean),
+              ),
+            ].map((c) => (
+              <option key={c!} value={c!}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Случай
+          <select
+            value={caseType}
+            onChange={(e) => setCaseType(e.target.value)}
+          >
+            <option value="all">Все случаи</option>
+            <option value="insurance">Страховой</option>
+            <option value="non_insurance">Нестраховой</option>
+          </select>
+        </label>
+        <label>
+          Бригадир
+          <input
+            value={managerFilter}
+            onChange={(e) => setManagerFilter(e.target.value)}
+            placeholder="Имя бригадира"
+          />
+        </label>
+        <label>
+          Поиск
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Машина, водитель, причина"
+          />
+        </label>
+        <label>
+          Статус
+          <select value={filter} onChange={(e) => setFilter(e.target.value)}>
+            <option value="active">Активные ремонты</option>
+            <option value="all">Все ремонты</option>
+            {stages.slice(0, 3).map((s) => (
+              <option key={s} value={s}>
+                {labels[s]}
+              </option>
+            ))}
+            <option value="archived">Завершённые / архив</option>
+          </select>
+        </label>
+        <label>
+          Плательщик
+          <select value={payer} onChange={(e) => setPayer(e.target.value)}>
+            <option value="all">Все плательщики</option>
+            {Object.entries(payerLabels).map(([v, l]) => (
+              <option key={v} value={v}>
+                {l}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Стоимость услуг с
+          <input
+            type="date"
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+          />
+        </label>
+        <label>
+          По
+          <input
+            type="date"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+          />
+        </label>
+        <p className="muted sto-wide">
+          Записей без указанной стоимости услуг:{" "}
+          {
+            periodRecords.filter(
+              (i) => i.serviceDetails?.serviceCost === undefined,
+            ).length
+          }
+          . Исторические расходы не включаются в прибыль без стоимости услуг.
+          <br />
+          Прибыль начисленная: {formatCurrency(sums.cost * 0.3)} · полученная:{" "}
+          {formatCurrency(sums.paid * 0.3)} · ожидаемая:{" "}
+          {formatCurrency(Math.max(0, sums.cost - sums.paid) * 0.3)}. Период
+          применяется к дате стоимости услуг; для старых записей — к дате
+          инцидента.
+          <br />
+          Поступило по датам оплаты за выбранный период:{" "}
+          {formatCurrency(receipts)} · прибыль с поступлений:{" "}
+          {formatCurrency(receipts * 0.3)}.
+        </p>
+      </div>
+      {error && (
+        <div role="alert" className="panel">
+          Не удалось загрузить журнал.{" "}
+          <button onClick={() => void refresh()}>Повторить</button>
+        </div>
+      )}
+      {incidents.loading && <div className="panel">Загрузка ремонтов…</div>}
+      {message && (
+        <div role="status" className="panel">
+          {message}
+        </div>
+      )}
+      <div className="sto-cards">
+        {rows.map((i) => (
+          <article className="sto-card" key={i.id}>
+            <div className="sto-card-heading">
+              <h3>{vehicleLabel(i)}</h3>
+              <span
+                className={`sto-badge ${closed(i) ? "sto-badge--done" : ""}`}
+              >
+                {labels[i.serviceStage ?? ""] ?? i.status}
+              </span>
+            </div>
+            <p className="muted">
+              {i.driverId
+                ? (driverById.get(i.driverId)?.fullName ?? "Водитель не указан")
+                : "Без водителя"}{" "}
+              · {i.managerLabel ?? "Бригадир не указан"}
+            </p>
+            <div className="sto-reason">
+              {i.serviceDetails?.reason ??
+                i.repairNote ??
+                i.description ??
+                "Причина не указана"}
+            </div>
+            <p className="muted">
+              Отправлен: {stamp(i.serviceDetails?.sentAt)}
+              <br />
+              Прибыл: {stamp(i.serviceDetails?.arrivedAt)}
+            </p>
+            <div className="sto-line">
+              <span>Услуги</span>
+              <b>
+                {i.serviceDetails?.serviceCost !== undefined
+                  ? formatCurrency(cost(i))
+                  : "Не указана"}
+              </b>
+            </div>
+            <div className="sto-line">
+              <span>Оплачено / остаток</span>
+              <b>
+                {formatCurrency(paid(i))} /{" "}
+                {formatCurrency(Math.max(0, cost(i) - paid(i)))}
+              </b>
+            </div>
+            <button
+              className="button button--secondary"
+              onClick={() => open(i)}
+            >
+              Открыть карточку
+            </button>
+          </article>
+        ))}
+        {untracked.map((c) => (
+          <article className="sto-card" key={c.id}>
+            <div className="sto-card-heading">
+              <h3>{c.plateNumber}</h3>
+              <span className="sto-badge">В ремонте</span>
+            </div>
+            <p>
+              {c.make} {c.model}
+            </p>
+            <p className="muted">
+              Открытый кейс не найден. Укажите причину, заказ-наряд и работы
+              перед завершением.
+            </p>
+            {canEdit && (
+              <button
+                className="button button--secondary"
+                onClick={() => {
+                  setSendCar(c.id);
+                  setReason("");
+                }}
+              >
+                Оформить ремонт
+              </button>
+            )}
+          </article>
+        ))}
+      </div>
+      {!rows.length && !untracked.length && !incidents.loading && !error && (
+        <div className="panel">Ремонтов по фильтру нет.</div>
+      )}
+      {canSend && (
+        <section className="panel">
+          <h3>
+            {carById.get(sendCar)?.status === "maintenance"
+              ? "Оформить текущий ремонт"
+              : "Отправить на СТО"}
+          </h3>
+          <div className="sto-filters">
+            <label>
+              Автомобиль
+              <select
+                value={sendCar}
+                onChange={(e) => setSendCar(e.target.value)}
+              >
+                <option value="">Выберите автомобиль</option>
+                {(cars.data ?? [])
+                  .filter((c) => !["sold", "written_off"].includes(c.status))
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.plateNumber} · {c.make} {c.model}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label className="sto-wide">
+              Причина *
+              <textarea
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="Что произошло и что требуется проверить"
+              />
+            </label>
+          </div>
+          <p className="muted">
+            Если СТО не подтвердит прибытие за 24 часа, бригадир получит
+            уведомление.
+          </p>
+          <button
+            className="button"
+            disabled={busy || !sendCar || !reason.trim()}
+            onClick={() => void send()}
+          >
+            {busy ? "Сохранение…" : "Сохранить и уведомить"}
+          </button>
+        </section>
+      )}
+      {selected && (
+        <section className="panel sto-detail" aria-label="Карточка ремонта">
+          <div className="sto-card-heading">
+            <h3>Карточка ремонта · {vehicleLabel(selected)}</h3>
+            <button
+              className="button button--secondary"
+              onClick={() => setSelected(null)}
+            >
+              Закрыть карточку
+            </button>
+          </div>
+          <div className="sto-timeline">
+            {stages.map((s, n) => (
+              <div
+                key={s}
+                className={
+                  stages.indexOf(selected.serviceStage ?? "") >= n
+                    ? "sto-step--done"
+                    : ""
+                }
+              >
+                <b>{labels[s]}</b>
+                <span>
+                  {stamp(
+                    selected.serviceDetails?.[
+                      (
+                        [
+                          "sentAt",
+                          "arrivedAt",
+                          "repairStartedAt",
+                          "completedAt",
+                        ] as const
+                      )[n]
+                    ],
+                  )}
+                </span>
+              </div>
+            ))}
+          </div>
+          <fieldset disabled={!canEdit || busy}>
+            <div className="sto-filters">
+              <label className="sto-wide">
+                Причина *
+                <textarea
+                  value={details.reason}
+                  onChange={(e) =>
+                    setDetails({ ...details, reason: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Номер заказ-наряда *
+                <input
+                  value={details.orderNumber ?? ""}
+                  onChange={(e) =>
+                    setDetails({ ...details, orderNumber: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Стоимость услуг, сом
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={details.serviceCost ?? ""}
+                  onChange={(e) =>
+                    setDetails({
+                      ...details,
+                      serviceCost:
+                        e.target.value === ""
+                          ? undefined
+                          : Number(e.target.value),
+                      costDate: details.costDate ?? today(),
+                    })
+                  }
+                />
+              </label>
+              <label>
+                Дата стоимости услуг
+                <input
+                  type="date"
+                  value={details.costDate ?? ""}
+                  onChange={(e) =>
+                    setDetails({ ...details, costDate: e.target.value })
+                  }
+                />
+              </label>
+              <label className="sto-wide">
+                Список выполненных работ *
+                <textarea
+                  value={(details.works ?? []).join("\n")}
+                  placeholder="Каждая работа с новой строки"
+                  onChange={(e) =>
+                    setDetails({
+                      ...details,
+                      works: e.target.value.split("\n"),
+                    })
+                  }
+                />
+              </label>
+            </div>
+            {selected.amount != null &&
+              selected.serviceDetails?.serviceCost === undefined && (
+                <p className="muted">
+                  Исторический расход: {formatCurrency(selected.amount)} ·
+                  страховое возмещение:{" "}
+                  {formatCurrency(selected.insuranceCompensationAmount ?? 0)}.
+                  Эти суммы сохранены отдельно от стоимости услуг.
+                </p>
+              )}
+            <h4>Оплаты</h4>
+            {(details.payments ?? []).map((p) => (
+              <div className="sto-line" key={p.id}>
+                <span>
+                  {formatDateOnly(p.paidAt)} · {payerLabels[p.payer]}
+                </span>
+                <b>{formatCurrency(p.amount)}</b>
+              </div>
+            ))}
+            <div className="sto-filters">
+              <label>
+                Плательщик
+                <select
+                  value={payment.payer}
+                  onChange={(e) =>
+                    setPayment({
+                      ...payment,
+                      payer: e.target.value as ServicePaymentEntry["payer"],
+                    })
+                  }
+                >
+                  {Object.entries(payerLabels).map(([v, l]) => (
+                    <option key={v} value={v}>
+                      {l}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Сумма
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={payment.amount}
+                  onChange={(e) =>
+                    setPayment({ ...payment, amount: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Дата оплаты
+                <input
+                  type="date"
+                  value={payment.paidAt}
+                  onChange={(e) =>
+                    setPayment({ ...payment, paidAt: e.target.value })
+                  }
+                />
+              </label>
+              <button
+                type="button"
+                className="button button--secondary"
+                onClick={addPayment}
+              >
+                Добавить оплату
+              </button>
+            </div>
+          </fieldset>
+          <p className="muted">
+            Перед завершением обязательны номер заказ-наряда и список работ.
+            Изменения и готовность машины отправляются бригадиру.
+          </p>
+          {canEdit && (
+            <div className="row-actions">
+              <button
+                className="button button--secondary"
+                disabled={busy}
+                onClick={() => void save()}
+              >
+                Сохранить
+              </button>
+              {!closed(selected) && (
+                <button
+                  className="button"
+                  disabled={
+                    busy ||
+                    (selected.serviceStage === "in_repair" &&
+                      (!details.orderNumber?.trim() ||
+                        !details.works?.some((w) => w.trim())))
+                  }
+                  onClick={() =>
+                    void save(
+                      selected.serviceStage === "sent_to_service"
+                        ? "awaiting_repair"
+                        : selected.serviceStage === "awaiting_repair"
+                          ? "in_repair"
+                          : "completed",
+                    )
+                  }
+                >
+                  {selected.serviceStage === "sent_to_service"
+                    ? "Подтвердить прибытие"
+                    : selected.serviceStage === "awaiting_repair"
+                      ? "Начать ремонт"
+                      : "Завершить ремонт"}
+                </button>
+              )}
+            </div>
+          )}
+        </section>
+      )}
     </section>
   );
 }

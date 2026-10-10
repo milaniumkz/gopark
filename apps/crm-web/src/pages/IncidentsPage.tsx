@@ -980,6 +980,7 @@ export function IncidentsPage() {
                         {item.insuranceNote ? <span>НСК: {item.insuranceNote}</span> : null}
                         {item.repairNote ? <span>СТО: {item.repairNote}</span> : null}
                         {item.locationNote ? <span>Локация: {item.locationNote}</span> : null}
+                        {item.accidentDetails ? <><span>Дата ДТП: {formatDateOnly(item.accidentDetails.occurredAt)}</span><span>Виновник: {({driver:"Наш водитель",other:"Второй участник",both:"Оба участника",unknown:"Не установлен"})[item.accidentDetails.fault]}</span><span>Страховая: {({gosstrakh:"Госстрах",nsk:"НСК",alma:"Алма"})[item.accidentDetails.insurer]}</span><span>Второй участник: {item.accidentDetails.otherPlate} · {item.accidentDetails.otherMake} {item.accidentDetails.otherModel}</span></> : null}
                         {item.accidentPhotoUrl?.startsWith("data:image/") ? (
                           <button type="button" className="photo-preview-button photo-preview-button--small" onClick={() => setPhotoPreviewUrl(item.accidentPhotoUrl ?? null)}>
                             <img src={item.accidentPhotoUrl} alt="Фото ДТП" className="photo-preview-image photo-preview-image--contain" />

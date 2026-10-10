@@ -10,6 +10,7 @@ import 'api.dart';
 import 'platform_storage.dart';
 import 'push_notifications.dart';
 import 'repository.dart';
+import 'service_screens.dart';
 
 const _managerBg = Color(0xFFF4F7FB);
 const _managerSurface = Color(0xFFFFFFFF);
@@ -688,6 +689,11 @@ class _ManagerDashboardPageState extends State<ManagerDashboardPage> {
               },
             ),
             const SizedBox(height: 6),
+            FilledButton.tonalIcon(
+              onPressed:()=>Navigator.of(context).push(MaterialPageRoute<void>(builder:(_)=>ManagerPaymentCalendarPage(repository:repository))),
+              icon:const Icon(Icons.calendar_month_rounded),label:const Text('Календарь платежей'),
+            ),
+            const SizedBox(height:10),
             SummaryGrid(
               repository: repository,
               summary: summary,
@@ -1097,6 +1103,7 @@ class _ManagerInsuranceVehicleCard extends StatelessWidget {
       title: vehicle.plateNumber,
       icon: Icons.directions_car_filled_rounded,
       lines: [
+        if(vehicle.incidentComment?.isNotEmpty==true) 'Комментарий бригадира: ${vehicle.incidentComment}',
         '${vehicle.make} ${vehicle.model}'.trim().isEmpty
             ? 'Марка и модель не указаны'
             : '${vehicle.make} ${vehicle.model}'.trim(),
@@ -1361,6 +1368,10 @@ class _ManagerVehicleCard extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
+                    if(vehicle.incidentComment?.isNotEmpty==true)...[
+                      const SizedBox(height:8),
+                      Text('Комментарий: ${vehicle.incidentComment}',style:const TextStyle(fontSize:12,color:_managerText,height:1.4),maxLines:3,overflow:TextOverflow.ellipsis),
+                    ],
                     const SizedBox(height: 2),
                     Text(
                       [
@@ -1684,19 +1695,17 @@ class _ManagerDriversPageState extends State<ManagerDriversPage> {
     String action,
     String successText,
   ) async {
-    final details = action == 'inspection' || action == 'impound'
-        ? await _showManagerIncidentDetailsDialog(
-            context,
-            title: action == 'impound'
-                ? 'Поставить на штрафстоянку'
-                : 'Осмотр водителя',
-            noteLabel: action == 'impound'
-                ? 'Причина / комментарий по штрафстоянке'
-                : 'Комментарий к осмотру',
-          )
-        : null;
-    if ((action == 'inspection' || action == 'impound') && details == null) {
-      return;
+    Map<String,dynamic>? accidentDetails;
+    _ManagerIncidentDetails? details;
+    if(action=='accident') {
+      accidentDetails=await showAccidentForm(context);
+      if(accidentDetails==null)return;
+    } else if(action=='repair') {
+      details=await _showManagerRequiredNoteDialog(context,title:'Отправить на СТО',noteLabel:'Причина отправки на СТО *',confirmLabel:'Отправить на СТО');
+      if(details==null)return;
+    } else if(action=='inspection'||action=='impound') {
+      details=await _showManagerIncidentDetailsDialog(context,title:action=='impound'?'Штрафстоянка':'Осмотр',noteLabel:'Причина / комментарий');
+      if(details==null)return;
     }
 
     final actionKey = '${driver.id}:$action';
@@ -1706,6 +1715,7 @@ class _ManagerDriversPageState extends State<ManagerDriversPage> {
         driver.id,
         action,
         note: details?.note,
+        accidentDetails: accidentDetails,
       );
       if (!mounted) {
         return;
@@ -2809,7 +2819,7 @@ class _ManagerAlertsPageState extends State<ManagerAlertsPage> {
                           ...visibleIncidents.map(
                             (item) => Padding(
                               padding: const EdgeInsets.only(bottom: 6),
-                              child: ManagerSignalCard(
+                              child: item.serviceDetails != null ? ManagerRepairCard(title:item.title,stage:item.serviceStage,details:item.serviceDetails!,accidentDetails:item.accidentDetails) : ManagerSignalCard(
                                 showAllDetails: true,
                                 title: item.driverName?.isNotEmpty == true
                                     ? item.driverName!
@@ -2827,7 +2837,9 @@ class _ManagerAlertsPageState extends State<ManagerAlertsPage> {
                                     item.repairNote!,
                                   if (item.carId != null)
                                     'Есть привязанное авто',
-                                  ..._managerIncidentHistoryLines(item.statusHistory),
+                                  ...repairDetailLines(item.serviceDetails),
+                                ...accidentDetailLines(item.accidentDetails),
+                                ..._managerIncidentHistoryLines(item.statusHistory),
                                 ].join('\n'),
                                 badge: _managerIncidentTypeLabel(
                                     item.incidentType),
@@ -2920,28 +2932,17 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
   }
 
   Future<void> _createIncidentAction(String action, String successText) async {
-    final details =
-        action == 'inspection' || action == 'accident' || action == 'impound'
-            ? await _showManagerIncidentDetailsDialog(
-                context,
-                title: action == 'accident'
-                    ? 'Фиксация ДТП'
-                    : action == 'impound'
-                        ? 'Поставить на штрафстоянку'
-                        : 'Осмотр водителя',
-                noteLabel: action == 'accident'
-                    ? 'Комментарий по ДТП'
-                    : action == 'impound'
-                        ? 'Причина / комментарий по штрафстоянке'
-                        : 'Комментарий к осмотру',
-                requirePhoto: action == 'accident',
-              )
-            : null;
-    if ((action == 'inspection' ||
-            action == 'accident' ||
-            action == 'impound') &&
-        details == null) {
-      return;
+    Map<String,dynamic>? accidentDetails;
+    _ManagerIncidentDetails? details;
+    if(action=='accident') {
+      accidentDetails=await showAccidentForm(context);
+      if(accidentDetails==null)return;
+    } else if(action=='repair') {
+      details=await _showManagerRequiredNoteDialog(context,title:'Отправить на СТО',noteLabel:'Причина отправки на СТО *',confirmLabel:'Отправить на СТО');
+      if(details==null)return;
+    } else if(action=='inspection'||action=='impound') {
+      details=await _showManagerIncidentDetailsDialog(context,title:action=='impound'?'Штрафстоянка':'Осмотр',noteLabel:'Причина / комментарий');
+      if(details==null)return;
     }
 
     setState(() => _pendingAction = action);
@@ -2950,6 +2951,7 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
         widget.driverId,
         action,
         note: details?.note,
+        accidentDetails: accidentDetails,
         accidentPhotoUrl: details?.photoDataUrl,
       );
       if (!mounted) {
@@ -3194,6 +3196,8 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
               child: ListView(
                 padding: const EdgeInsets.all(8),
                 children: [
+                  FilledButton.tonalIcon(onPressed:()=>Navigator.of(context).push(MaterialPageRoute<void>(builder:(_)=>ManagerPaymentCalendarPage(repository:widget.repository,driverId:widget.driverId))),icon:const Icon(Icons.calendar_month),label:const Text('Календарь платежей')),
+                  const SizedBox(height:12),
                   ManagerInfoCard(
                     title: data.fullName,
                     lines: [
@@ -3398,7 +3402,7 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            ManagerSignalCard(
+                            item.serviceDetails != null ? ManagerRepairCard(title:item.title,stage:item.serviceStage,details:item.serviceDetails!,accidentDetails:item.accidentDetails) : ManagerSignalCard(
                               showAllDetails: true,
                               title: item.title,
                               subtitle: [
@@ -3414,6 +3418,8 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
                                   _managerServiceCaseTypeLabel(
                                     item.serviceCaseType!,
                                   ),
+                                ...repairDetailLines(item.serviceDetails),
+                                ...accidentDetailLines(item.accidentDetails),
                                 ..._managerIncidentHistoryLines(item.statusHistory),
                               ].join('\n'),
                               badge: _managerPriorityLabel(item.priority),
@@ -3422,7 +3428,7 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
                                   : _managerPurple,
                               icon: Icons.report_problem_outlined,
                             ),
-                            if (!_managerIncidentIsArchived(item.status)) ...[
+                            if (!_managerIncidentIsArchived(item.status) && item.incidentType != 'repair' && item.serviceDetails == null) ...[
                               const SizedBox(height: 6),
                               Wrap(
                                 spacing: 6,
@@ -5242,6 +5248,10 @@ String _managerStatusLabel(String status) {
       return 'Одобрен';
     case 'rejected':
       return 'Отклонён';
+    case 'sent_to_service':
+      return 'Отправлен на СТО';
+    case 'maintenance':
+      return 'В ремонте';
     case 'active':
       return 'Активен';
     case 'terminated':
@@ -5260,8 +5270,6 @@ String _managerStatusLabel(String status) {
       return 'Простой';
     case 'impound':
       return 'Штрафстоянка';
-    case 'maintenance':
-      return 'Ремонт';
     case 'written_off':
       return 'Списан';
     case 'writeoff_requested':

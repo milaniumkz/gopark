@@ -1236,6 +1236,7 @@ export function VehiclesPage() {
                                 <span className={getStatusTone(vehicle.status)}>{getStatusLabel(vehicle.status)}</span>
                               </strong>
                               <span>{incidentCount > 0 ? `Открытых инцидентов: ${incidentCount}` : "Открытых инцидентов нет"}</span>
+                              {(incidentsApi.data ?? []).filter(i => i.carId === vehicle.id && !["closed", "resolved", "archived"].includes(i.status)).slice(0, 1).map(i => <span key={i.id} className="sto-reason">{i.serviceDetails?.reason ?? i.repairNote ?? i.description}</span>)}
                             </div>
                           </td>
                           <td>

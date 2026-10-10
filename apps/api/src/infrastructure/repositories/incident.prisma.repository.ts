@@ -1,6 +1,7 @@
+import { isServiceRepair, serviceWorkflow } from "../../common/repositories/service-workflow.js";
 import { nextIncidentStatusHistory } from "../../common/repositories/incident-history.js";
-import { ConflictException, NotFoundException } from "@nestjs/common";
-import type { ManagerIncidentItem } from "@gopark/contracts";
+import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
+import type { ManagerIncidentItem, ServiceRepairDetails } from "@gopark/contracts";
 import type { CreateIncidentRecord, IncidentRepository, UpdateIncidentRecord } from "../../common/repositories/index.js";
 import { seedCars, seedDrivers, seedManagerIncidents } from "../../data/seed.js";
 import { PrismaService } from "../prisma/prisma.service.js";
@@ -37,6 +38,8 @@ function mapIncidentRecord(incident: any): ManagerIncidentItem {
     locationNote: incident.locationNote ?? null,
     managerLabel: incident.managerLabel ?? null,
     statusHistory: incident.statusHistory ?? [],
+    serviceDetails: incident.serviceDetails ?? null,
+    accidentDetails: incident.accidentDetails ?? null,
     serviceStage: incident.serviceStage ?? null,
     serviceCaseType: incident.serviceCaseType ?? null,
     servicePaymentStatus: incident.servicePaymentStatus ?? null,
@@ -65,6 +68,8 @@ const incidentSelect = {
   locationNote: true,
   managerLabel: true,
   statusHistory: true,
+  serviceDetails: true,
+  accidentDetails: true,
   serviceStage: true,
   serviceCaseType: true,
   servicePaymentStatus: true,
@@ -184,8 +189,10 @@ export class IncidentPrismaRepository implements IncidentRepository {
     return seedManagerIncidents.filter((item) => item.driverId === driverId && item.status === "open");
   }
 
-  async completeUntrackedRepair(carId: string): Promise<ManagerIncidentItem | null> {
-    const data = { title: "Завершение ремонта автомобиля без открытого кейса СТО", incidentType: "repair", status: "closed", priority: "low", serviceStage: "completed", description: "Возврат автомобиля из ремонта подтверждён в журнале СТО. Дата начала ремонта и расходы не указаны." };
+  async completeUntrackedRepair(carId: string, serviceDetails?: ServiceRepairDetails): Promise<ManagerIncidentItem | null> {
+    if(!serviceDetails?.reason?.trim() || !serviceDetails.orderNumber?.trim() || !serviceDetails.works?.some(w=>w.trim())) throw new BadRequestException("Укажите причину, номер заказ-наряда и список работ перед завершением ремонта");
+    const validated = serviceWorkflow({ incidentType:"repair",serviceStage:"completed",serviceDetails });
+    const data = { ...validated, serviceDetails: {...serviceDetails,completedAt:new Date().toISOString()}, title: "Завершение ремонта автомобиля без открытого кейса СТО", incidentType: "repair", status: "closed", priority: "low", serviceStage: "completed", description: "Возврат автомобиля из ремонта подтверждён в журнале СТО. Дата начала ремонта неизвестна; заказ-наряд и оплаты указаны в карточке." };
     const prisma = this.prisma.client;
     if (prisma) {
       return prisma.$transaction(async (tx: any) => {
@@ -199,6 +206,7 @@ export class IncidentPrismaRepository implements IncidentRepository {
         const assignment = await tx.carAssignment.findFirst({ where: { carId, endedAt: null }, orderBy: { startedAt: "desc" } });
         const incident = await tx.incident.create({ data: { ...data, carId, driverId: assignment?.driverId ?? null } });
         await syncRepairCar(tx, incident);
+        await enqueueServiceEvents(tx, incident);
         return mapIncidentRecord(incident);
       });
     }
@@ -210,11 +218,15 @@ export class IncidentPrismaRepository implements IncidentRepository {
   }
 
   async create(input: CreateIncidentRecord): Promise<ManagerIncidentItem> {
-    input = { ...input, ...repairLifecycle(input) };
+    input = { ...input, ...repairLifecycle(input), ...serviceWorkflow({ ...input, ...repairLifecycle(input) }) };
     const prisma = this.prisma.client;
     if (prisma) {
       return prisma.$transaction(async (tx: any) => {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(2036548158)`;
+        if(input.serviceStage === "sent_to_service" && input.carId) {
+          const duplicate = await tx.incident.count({where:{carId:input.carId,status:"open",OR:[{incidentType:"repair"},{serviceStage:{in:["sent_to_service","awaiting_repair","in_repair"]}}]}});
+          if(duplicate)throw new ConflictException("У машины уже есть открытый ремонт. Откройте его карточку");
+        }
         const incident = await tx.incident.create({
           data: {
             title: input.title,
@@ -235,6 +247,8 @@ export class IncidentPrismaRepository implements IncidentRepository {
             repairNote: input.repairNote ?? null,
             locationNote: input.locationNote ?? null,
             managerLabel: input.managerLabel ?? null,
+            ...(input.serviceDetails ? { serviceDetails: input.serviceDetails } : {}),
+            ...(input.accidentDetails ? { accidentDetails: input.accidentDetails } : {}),
             serviceStage: input.serviceStage ?? null,
             serviceCaseType: input.serviceCaseType ?? null,
             servicePaymentStatus: input.servicePaymentStatus ?? null,
@@ -243,6 +257,7 @@ export class IncidentPrismaRepository implements IncidentRepository {
         });
 
         await syncRepairCar(tx, incident);
+        await enqueueServiceEvents(tx, incident);
         return mapIncidentRecord(incident);
       });
     }
@@ -271,6 +286,8 @@ export class IncidentPrismaRepository implements IncidentRepository {
       locationNote: input.locationNote ?? null,
       managerLabel: input.managerLabel ?? null,
       statusHistory: [{ status: input.status, serviceStage: input.serviceStage ?? null, changedAt: new Date().toISOString() }],
+      serviceDetails: input.serviceDetails ?? null,
+      accidentDetails: input.accidentDetails ?? null,
       serviceStage: input.serviceStage ?? null,
       serviceCaseType: input.serviceCaseType ?? null,
       servicePaymentStatus: input.servicePaymentStatus ?? null,
@@ -295,6 +312,7 @@ export class IncidentPrismaRepository implements IncidentRepository {
         }
 
         input = { ...input, ...repairLifecycle({ ...existing, ...input }) };
+        input = { ...input, ...serviceWorkflow(input, mapIncidentRecord(existing)) };
         const incident = await tx.incident.update({
           where: { id: incidentId },
           data: {
@@ -316,6 +334,8 @@ export class IncidentPrismaRepository implements IncidentRepository {
             ...(input.repairNote !== undefined ? { repairNote: input.repairNote ?? null } : {}),
             ...(input.locationNote !== undefined ? { locationNote: input.locationNote ?? null } : {}),
             ...(input.managerLabel !== undefined ? { managerLabel: input.managerLabel ?? null } : {}),
+            ...(input.serviceDetails ? { serviceDetails: input.serviceDetails } : {}),
+            ...(input.accidentDetails ? { accidentDetails: input.accidentDetails } : {}),
             ...(input.serviceStage !== undefined ? { serviceStage: input.serviceStage ?? null } : {}),
             ...(input.serviceCaseType !== undefined ? { serviceCaseType: input.serviceCaseType ?? null } : {}),
             ...(input.servicePaymentStatus !== undefined ? { servicePaymentStatus: input.servicePaymentStatus ?? null } : {}),
@@ -325,6 +345,7 @@ export class IncidentPrismaRepository implements IncidentRepository {
         });
 
         await syncRepairCar(tx, incident);
+        await enqueueServiceEvents(tx, incident, existing);
         return mapIncidentRecord(incident);
       });
     }
@@ -335,6 +356,7 @@ export class IncidentPrismaRepository implements IncidentRepository {
     }
 
     input = { ...input, ...repairLifecycle({ ...incident, ...input }) };
+    input = { ...input, ...serviceWorkflow(input, incident) };
     Object.assign(incident, {
       statusHistory: nextIncidentStatusHistory(incident, input),
       ...(input.title !== undefined ? { title: input.title } : {}),
@@ -355,7 +377,9 @@ export class IncidentPrismaRepository implements IncidentRepository {
       ...(input.repairNote !== undefined ? { repairNote: input.repairNote ?? null } : {}),
       ...(input.locationNote !== undefined ? { locationNote: input.locationNote ?? null } : {}),
       ...(input.managerLabel !== undefined ? { managerLabel: input.managerLabel ?? null } : {}),
-      ...(input.serviceStage !== undefined ? { serviceStage: input.serviceStage ?? null } : {}),
+      ...(input.serviceDetails ? { serviceDetails: input.serviceDetails } : {}),
+            ...(input.accidentDetails ? { accidentDetails: input.accidentDetails } : {}),
+            ...(input.serviceStage !== undefined ? { serviceStage: input.serviceStage ?? null } : {}),
       ...(input.serviceCaseType !== undefined ? { serviceCaseType: input.serviceCaseType ?? null } : {}),
       ...(input.servicePaymentStatus !== undefined ? { servicePaymentStatus: input.servicePaymentStatus ?? null } : {}),
       ...(input.servicePayer !== undefined ? { servicePayer: input.servicePayer ?? null } : {}),
@@ -380,7 +404,7 @@ async function syncRepairCar(tx: any, incident: any): Promise<void> {
       await tx.incident.update({ where: { id: incident.id }, data: { carId: incident.carId } });
     }
   }
-  if (!incident.carId || !(incident.incidentType === "repair" || ["awaiting_repair", "in_repair", "completed", "written_off"].includes(incident.serviceStage))) return;
+  if (!incident.carId || !isServiceRepair(incident)) return;
   const car = await tx.car.findUnique({ where: { id: incident.carId } });
   if (!car || ["sold", "written_off"].includes(car.status)) return;
   const stage = incident.serviceStage;
@@ -388,7 +412,7 @@ async function syncRepairCar(tx: any, incident: any): Promise<void> {
     await tx.car.update({ where: { id: car.id }, data: { status: "written_off" } });
     return;
   }
-  if (["awaiting_repair", "in_repair"].includes(stage) && incident.status === "open") {
+  if (["sent_to_service", "awaiting_repair", "in_repair"].includes(stage) && incident.status === "open") {
     if (["assigned", "free", "maintenance", "accident"].includes(car.status)) {
       await tx.car.update({ where: { id: car.id }, data: { status: "maintenance" } });
     }
@@ -413,8 +437,8 @@ async function syncRepairCar(tx: any, incident: any): Promise<void> {
 }
 
 
-function repairLifecycle(incident: { incidentType?: string; serviceStage?: string | null; status?: string }): UpdateIncidentRecord {
-  if (incident.incidentType !== "repair" && !["awaiting_repair", "in_repair", "completed", "written_off"].includes(incident.serviceStage ?? "")) return {};
+function repairLifecycle(incident: { incidentType?: string; serviceStage?: string | null; status?: string;serviceDetails?:ServiceRepairDetails|null }): UpdateIncidentRecord {
+  if (!isServiceRepair(incident)) return {};
   if (incident.serviceStage === "written_off") return { status: "closed", serviceStage: "written_off" };
   if (incident.serviceStage === "completed" || ["resolved", "closed", "archived"].includes(incident.status ?? "")) {
     return { serviceStage: "completed", status: incident.status === "archived" ? "archived" : "closed" };
@@ -423,11 +447,11 @@ function repairLifecycle(incident: { incidentType?: string; serviceStage?: strin
 }
 
 function syncSeedRepairCar(incident: ManagerIncidentItem): void {
-  if (!incident.carId || !(incident.incidentType === "repair" || ["awaiting_repair", "in_repair", "completed", "written_off"].includes(incident.serviceStage ?? ""))) return;
+  if (!incident.carId || !isServiceRepair(incident)) return;
   const car = seedCars.find((item) => item.id === incident.carId);
   if (!car || ["sold", "written_off"].includes(car.status)) return;
   if (incident.serviceStage === "written_off") { car.status = "written_off"; return; }
-  if (["awaiting_repair", "in_repair"].includes(incident.serviceStage ?? "") && incident.status === "open") {
+  if (["sent_to_service", "awaiting_repair", "in_repair"].includes(incident.serviceStage ?? "") && incident.status === "open") {
     if (["assigned", "free", "maintenance", "accident"].includes(car.status)) car.status = "maintenance";
     return;
   }
@@ -436,4 +460,12 @@ function syncSeedRepairCar(incident: ManagerIncidentItem): void {
   const driver = seedDrivers.find((item) => item.id === car.assignedDriverId);
   car.status = driver && driver.status !== "terminated" ? "assigned" : "free";
   if (driver && driver.id === incident.driverId && driver.status === "accident" && !seedManagerIncidents.some((item) => item.id !== incident.id && item.driverId === driver.id && item.status === "open")) driver.status = "active";
+}
+
+async function enqueueServiceEvents(tx: any, incident: any, previous?: any): Promise<void> {
+  if (!incident.serviceDetails || (previous && JSON.stringify(previous.serviceDetails) === JSON.stringify(incident.serviceDetails) && previous.serviceStage === incident.serviceStage)) return;
+  await tx.outboxEvent.create({ data: { topic: "service.changed", aggregateType: "incident", aggregateId: incident.id, payload: { incidentId: incident.id, stage: incident.serviceStage, kind: previous?.serviceStage === incident.serviceStage ? "updated" : "stage", details: incident.repairNote ?? incident.serviceDetails.reason } } });
+  if (incident.serviceStage === "sent_to_service" && previous?.serviceStage !== "sent_to_service") {
+    await tx.outboxEvent.create({ data: { topic: "service.arrival_overdue", aggregateType: "incident", aggregateId: incident.id, payload: { incidentId: incident.id }, createdAt: new Date(Date.parse(incident.serviceDetails.sentAt) + 24 * 60 * 60 * 1000) } });
+  }
 }

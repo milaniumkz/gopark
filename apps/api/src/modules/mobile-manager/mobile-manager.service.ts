@@ -1,4 +1,6 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import type { AccidentDetails } from "@gopark/contracts";
+import { validateAccident } from "../../common/repositories/service-workflow.js";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type {
   ManagerAssignedDriverItem,
   ManagerAlertItem,
@@ -155,7 +157,7 @@ export class MobileManagerService {
         id: driver.id,
         fullName: driver.fullName,
         phone: driver.phone,
-        status: effectiveStatus,
+        status: effectiveStatus !== "terminated" && assignment?.vehicleStatus === "maintenance" ? "maintenance" : effectiveStatus,
         riskStatus: driver.riskStatus ?? "normal",
         weeklyDayOff: driver.weeklyDayOff ?? null,
         vehicle: effectiveVehicle,
@@ -248,10 +250,11 @@ export class MobileManagerService {
   }
 
   async getVehicles(currentUser: RequestUser | null): Promise<VehicleListItem[]> {
-    const [cars, drivers, users] = await Promise.all([
+    const [cars, drivers, users, incidents] = await Promise.all([
       this.getCompanyScopedCars(currentUser),
       this.mobileAccessService.getScopedDrivers(currentUser),
       currentUser?.companyName ? this.userRepository.listAdminByCompany(currentUser.companyName) : this.userRepository.listAdmin(),
+      currentUser?.companyName ? this.incidentRepository.listByCompany(currentUser.companyName) : this.incidentRepository.list(),
     ]);
     const scopedDriverIds = new Set(drivers.map((driver) => driver.id));
     const driverById = new Map(drivers.map((driver) => [driver.id, driver]));
@@ -274,6 +277,7 @@ export class MobileManagerService {
       const driver = ownerDriverId ? driverById.get(ownerDriverId) : null;
       return {
         ...car,
+        incidentComment: incidents.find(i=>i.carId===car.id&&!closedIncident(i.status))?.serviceDetails?.reason ?? incidents.find(i=>i.carId===car.id&&!closedIncident(i.status))?.repairNote ?? incidents.find(i=>i.carId===car.id&&!closedIncident(i.status))?.description ?? null,
         managerId: car.managerId ?? driver?.managerId ?? null,
         managerName: car.managerName ?? (car.managerId ? managerNameById.get(car.managerId) ?? null : driver?.managerId ? managerNameById.get(driver.managerId) ?? null : null),
       };
@@ -285,12 +289,9 @@ export class MobileManagerService {
     if (!car || !matchesCompanyScope(currentUser, car.companyName)) {
       return null;
     }
-    if (this.canSeeAllCompanyVehicles(currentUser)) {
-      return car;
-    }
-
     const visibleCars = await this.getVehicles(currentUser);
-    return visibleCars.some((item) => item.id === vehicleId) ? car : null;
+    const visible = visibleCars.find((item) => item.id === vehicleId);
+    return visible ? {...car,incidentComment:visible.incidentComment??null} : null;
   }
 
   async getManagers(currentUser: RequestUser | null): Promise<ManagerTeamItem[]> {
@@ -335,6 +336,41 @@ export class MobileManagerService {
     return rows.sort((left, right) => left.displayName.localeCompare(right.displayName, "ru"));
   }
 
+  async getDriverCalendar(driverId: string, month: string, currentUser: RequestUser | null) {
+    await this.mobileAccessService.assertCanAccessDriver(driverId, currentUser);
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new BadRequestException("Месяц должен быть YYYY-MM");
+    const [driver, contract, payments, incidents, car] = await Promise.all([
+      this.driverRepository.getById(driverId), this.contractRepository.getActiveByDriver(driverId),
+      this.paymentRepository.listByDriver(driverId), currentUser?.companyName ? this.incidentRepository.listByCompany(currentUser.companyName) : this.incidentRepository.list(),this.carRepository.getAssignedByDriver(driverId),
+    ]);
+    if (!driver) throw new NotFoundException("Водитель не найден");
+    const [year, number] = month.split("-").map(Number);
+    const start = new Date(`${month}-01T00:00:00Z`), end = new Date(Date.UTC(year,number,1));
+    const overrides = this.prismaService.client ? await this.prismaService.client.paymentCalendarDayOverride.findMany({where:{driverId,date:{gte:start,lt:end}}}) : [];
+    const overrideByDate = new Map(overrides.map((o: any) => [o.date.toISOString().slice(0,10),o]));
+    const today = new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Almaty"}).format(new Date());
+    const week: Record<string,number> = {sunday:0,monday:1,tuesday:2,wednesday:3,thursday:4,friday:5,saturday:6,"воскресенье":0,"понедельник":1,"вторник":2,"среда":3,"четверг":4,"пятница":5,"суббота":6};
+    const rate = contract?.installmentAmount ?? 0;
+    const days = Array.from({length:new Date(Date.UTC(year,number,0)).getUTCDate()},(_,n)=>{
+      const day = `${month}-${String(n+1).padStart(2,"0")}`;
+      const pp = payments.filter(p=>(p.paymentForDate??p.createdAt).slice(0,10)===day);
+      const amount = pp.filter(p=>p.status==="succeeded").reduce((sum,p)=>sum+(p.appliedAmount||p.amount),0);
+      const outside = !contract || !!contract.startDate && day < contract.startDate.slice(0,10) || !!contract.endDate && day>contract.endDate.slice(0,10);
+      const off = week[(driver.weeklyDayOff??"").toLowerCase()] === new Date(`${day}T00:00:00Z`).getUTCDay();
+      const auto = pp.some(p=>p.status==="failed")?"failed":amount>0&&amount<rate?"partial":amount>0?"paid":off?"dayoff":day>today||outside?"future":"unpaid";
+      const override = overrideByDate.get(day) as any;
+      const incident = incidents.find(i=>{
+        if(i.driverId !== driverId)return false;
+        const from=(i.serviceDetails?.sentAt??i.occurredAt??"").slice(0,10);
+        const knownEnd=i.serviceDetails?.completedAt??(i.periodLabel?.includes("..")?i.periodLabel.split("..")[1]:undefined)??(i.statusHistory&&i.statusHistory.length>1?i.statusHistory.at(-1)?.changedAt:undefined);
+        const until=(closedIncident(i.status)?knownEnd??from:today).slice(0,10);
+        return !!from && from<=day && day<=until && ["repair","accident"].includes(i.incidentType??"");
+      });
+      return {day,status:override?.status??(incident?(incident.incidentType==="accident"?"accident":"repair"):day===today&&car?.status==="maintenance"?"repair":auto),amount,expected:!outside&&!off&&day<=today?rate:0,note:override?.note??incident?.serviceDetails?.reason??incident?.repairNote??null};
+    });
+    return {month,driverName:driver.fullName,contractNumber:contract?.contractNumber??null,rate,days,paid:days.reduce((s,d)=>s+d.amount,0),expected:days.reduce((s,d)=>s+d.expected,0)};
+  }
+
   async getDriverDetail(driverId: string, currentUser: RequestUser | null): Promise<ManagerDriverDetail | null> {
     await this.mobileAccessService.assertCanAccessDriver(driverId, currentUser);
     const driver = await this.driverRepository.getById(driverId);
@@ -362,7 +398,7 @@ export class MobileManagerService {
       id: driver.id,
       fullName: driver.fullName,
       phone: driver.phone,
-      status: currentStatus,
+      status: currentStatus !== "terminated" && detail.assignment.vehicleStatus === "maintenance" ? "maintenance" : currentStatus,
       riskStatus: driver.riskStatus ?? "normal",
       weeklyDayOff: driver.weeklyDayOff ?? null,
       vehicle: effectiveVehicle,
@@ -393,6 +429,8 @@ export class MobileManagerService {
           status: item.status,
           occurredAt: item.occurredAt ?? null,
           statusHistory: item.statusHistory ?? [],
+          serviceDetails: item.serviceDetails ?? null,
+          accidentDetails: item.accidentDetails ?? null,
           serviceStage: item.serviceStage ?? null,
           serviceCaseType: item.serviceCaseType ?? null,
           repairNote: item.repairNote ?? null,
@@ -549,7 +587,7 @@ export class MobileManagerService {
       id: updated.id,
       fullName: updated.fullName,
       phone: updated.phone,
-      status: effectiveStatus,
+      status: effectiveStatus !== "terminated" && assignment?.vehicleStatus === "maintenance" ? "maintenance" : effectiveStatus,
       riskStatus: updated.riskStatus ?? "normal",
       weeklyDayOff: updated.weeklyDayOff ?? null,
       vehicle: assignment?.vehicle ?? "unassigned",
@@ -618,7 +656,7 @@ export class MobileManagerService {
 
   async createDriverIncidentAction(
     driverId: string,
-    body: { action?: string; note?: string; accidentPhotoUrl?: string },
+    body: { action?: string; note?: string; accidentPhotoUrl?: string; accidentDetails?: AccidentDetails },
     currentUser: RequestUser | null,
   ): Promise<ManagerIncidentItem> {
     await this.mobileAccessService.assertCanAccessDriver(driverId, currentUser);
@@ -629,10 +667,11 @@ export class MobileManagerService {
 
     const note = this.trimOrNull(body.note);
     const action = body.action?.trim();
-    const accidentPhotoUrl = this.trimOrNull(body.accidentPhotoUrl);
     const occurredAt = new Date().toISOString();
     if (action === "inspection") {
+      const car = await this.carRepository.getAssignedByDriver(driverId);
       const incident = await this.incidentRepository.create({
+        carId: car?.id,
         title: `Осмотр: ${driver.fullName}`,
         incidentType: "inspection",
         status: "open",
@@ -653,6 +692,7 @@ export class MobileManagerService {
     }
 
     if (action === "repair") {
+      if (!note) throw new BadRequestException("Укажите причину отправки на СТО");
       const car = await this.carRepository.getAssignedByDriver(driverId);
       if (!car) {
         throw new BadRequestException("У водителя нет назначенной машины для отправки на СТО");
@@ -660,8 +700,15 @@ export class MobileManagerService {
       const manager = currentUser?.role === "manager"
         ? await this.userRepository.getManagerProfile(currentUser.id, currentUser.companyName ?? null)
         : null;
+      const existing = (await this.incidentRepository.listOpenByDriver(driverId)).find(i=>i.carId===car.id && (i.incidentType==="repair"||i.incidentType==="accident"));
+      if(existing) {
+        if(["sent_to_service","awaiting_repair","in_repair"].includes(existing.serviceStage??"")) throw new ConflictException("Машина уже отправлена на СТО. Откройте карточку ремонта");
+        const sent = await this.incidentRepository.update(existing.id,{serviceStage:"sent_to_service",serviceDetails:{reason:note},repairNote:note});
+        if(!sent)throw new NotFoundException("Инцидент не найден");
+        return sent;
+      }
       const incident = await this.incidentRepository.create({
-        title: `Ремонт: ${driver.fullName}`,
+        title: `Ремонт: ${car.plateNumber} · ${driver.fullName}`,
         incidentType: "repair",
         status: "open",
         priority: "high",
@@ -671,23 +718,19 @@ export class MobileManagerService {
         description: note ?? "Автомобиль поставлен на ремонт бригадиром",
         repairNote: note,
         managerLabel: manager?.displayName ?? currentUser?.id ?? null,
-        serviceStage: "in_repair",
+        serviceStage: "sent_to_service",
+        serviceDetails: { reason: note },
         serviceCaseType: "non_insurance",
         servicePaymentStatus: "unpaid",
         servicePayer: "driver",
       });
-      await this.notificationsCreateService.createManagerDriverEvent(
-        driverId,
-        `Срочно: ремонт - ${driver.fullName}`,
-        note ?? "Водитель отправлен на СТО/ремонт",
-      );
       return incident;
     }
 
     if (action === "accident") {
-      if (!accidentPhotoUrl?.startsWith("data:image/") || accidentPhotoUrl.length > 3_200_000) {
-        throw new BadRequestException("Accident photo is required and must be an image up to 3 MB");
-      }
+      if (!body.accidentDetails) throw new BadRequestException("Заполните данные ДТП");
+      const accidentDetails = validateAccident(body.accidentDetails);
+      const car = await this.carRepository.getAssignedByDriver(driverId);
       await this.driverRepository.update(driverId, { status: "accident" });
       await this.updateAssignedCarStatus(driverId, "accident");
       const incident = await this.incidentRepository.create({
@@ -696,12 +739,15 @@ export class MobileManagerService {
         status: "open",
         priority: "high",
         driverId,
-        occurredAt,
+        carId: car?.id,
+        occurredAt: accidentDetails.occurredAt,
+        accidentDetails,
+        locationNote: accidentDetails.location,
         description: note ?? "ДТП зафиксировано бригадиром",
-        accidentPhotoUrl,
+        accidentPhotoUrl: null,
         repairNote: note,
         managerLabel: currentUser?.id ?? null,
-        serviceStage: "awaiting_repair",
+        serviceStage: "accident",
         serviceCaseType: "insurance",
         servicePaymentStatus: "unpaid",
         servicePayer: "insurance",
@@ -715,8 +761,10 @@ export class MobileManagerService {
     }
 
     if (action === "impound") {
+      const car = await this.carRepository.getAssignedByDriver(driverId);
       await this.updateAssignedCarStatus(driverId, "impound");
       const incident = await this.incidentRepository.create({
+        carId: car?.id,
         title: `Штрафстоянка: ${driver.fullName}`,
         incidentType: "impound",
         status: "open",
@@ -824,6 +872,7 @@ export class MobileManagerService {
 
     const note = this.trimOrNull(body.note);
     const action = body.action?.trim();
+    if(currentUser?.role === "manager" && (incident.incidentType === "repair" || incident.incidentType === "accident" || incident.serviceDetails) && ["awaiting_repair","in_repair","completed","closed"].includes(action??"")) throw new ForbiddenException("Прибытие и этапы ремонта подтверждает сотрудник СТО");
     const patch: Parameters<IncidentRepository["update"]>[1] = {};
 
     if (action === "awaiting_repair") {
@@ -1204,3 +1253,5 @@ export class MobileManagerService {
     }
   }
 }
+
+function closedIncident(status: string) { return ["closed", "resolved", "archived"].includes(status); }

@@ -237,6 +237,7 @@ class ManagerVehicleAssignmentDto {
 
 class ManagerVehicleDto {
   const ManagerVehicleDto({
+    this.incidentComment,
     required this.id,
     required this.plateNumber,
     required this.vin,
@@ -263,6 +264,7 @@ class ManagerVehicleDto {
 
   factory ManagerVehicleDto.fromJson(Map<String, dynamic> json) {
     return ManagerVehicleDto(
+      incidentComment:json['incidentComment'] as String?,
       id: json['id'] as String,
       plateNumber: json['plateNumber'] as String,
       vin: json['vin'] as String,
@@ -291,6 +293,7 @@ class ManagerVehicleDto {
     );
   }
 
+  final String? incidentComment;
   final String id;
   final String plateNumber;
   final String vin;
@@ -478,6 +481,8 @@ class ManagerDriverIncidentDto {
     required this.occurredAt,
     required this.periodLabel,
     this.statusHistory = const [],
+    this.serviceDetails,
+    this.accidentDetails,
     required this.serviceStage,
     required this.serviceCaseType,
     required this.repairNote,
@@ -494,6 +499,8 @@ class ManagerDriverIncidentDto {
       occurredAt: json['occurredAt'] as String?,
       periodLabel: json['periodLabel'] as String?,
       statusHistory: _incidentStatusHistory(json['statusHistory']),
+      serviceDetails: json['serviceDetails'] as Map<String,dynamic>?,
+      accidentDetails: json['accidentDetails'] as Map<String,dynamic>?,
       serviceStage: json['serviceStage'] as String?,
       serviceCaseType: json['serviceCaseType'] as String?,
       repairNote: json['repairNote'] as String?,
@@ -509,6 +516,8 @@ class ManagerDriverIncidentDto {
   final String? occurredAt;
   final String? periodLabel;
   final List<ManagerIncidentStatusHistoryDto> statusHistory;
+  final Map<String,dynamic>? serviceDetails;
+  final Map<String,dynamic>? accidentDetails;
   final String? serviceStage;
   final String? serviceCaseType;
   final String? repairNote;
@@ -708,6 +717,8 @@ class ManagerIncidentDto {
     required this.occurredAt,
     required this.periodLabel,
     this.statusHistory = const [],
+    this.serviceDetails,
+    this.accidentDetails,
     required this.serviceStage,
     required this.serviceCaseType,
     required this.repairNote,
@@ -726,6 +737,8 @@ class ManagerIncidentDto {
       occurredAt: json['occurredAt'] as String?,
       periodLabel: json['periodLabel'] as String?,
       statusHistory: _incidentStatusHistory(json['statusHistory']),
+      serviceDetails: json['serviceDetails'] as Map<String,dynamic>?,
+      accidentDetails: json['accidentDetails'] as Map<String,dynamic>?,
       serviceStage: json['serviceStage'] as String?,
       serviceCaseType: json['serviceCaseType'] as String?,
       repairNote: json['repairNote'] as String?,
@@ -743,6 +756,8 @@ class ManagerIncidentDto {
   final String? occurredAt;
   final String? periodLabel;
   final List<ManagerIncidentStatusHistoryDto> statusHistory;
+  final Map<String,dynamic>? serviceDetails;
+  final Map<String,dynamic>? accidentDetails;
   final String? serviceStage;
   final String? serviceCaseType;
   final String? repairNote;
@@ -1173,16 +1188,23 @@ class ManagerApiClient {
     return _decodeList(response).map(ManagerIncidentDto.fromJson).toList();
   }
 
+  Future<Map<String,dynamic>> getDriverCalendar(String driverId, String month) async {
+    final response=await _authorizedGet(Uri.parse('$baseUrl/mobile/manager/drivers/$driverId/calendar?month=$month'));
+    return _decodeObject(response);
+  }
+
   Future<ManagerIncidentDto> createDriverIncidentAction(
     String driverId,
     String action, {
     String? note,
     String? accidentPhotoUrl,
+    Map<String,dynamic>? accidentDetails,
   }) async {
     final trimmedNote = note?.trim();
     final trimmedAccidentPhotoUrl = accidentPhotoUrl?.trim();
     final payload = {
       'action': action,
+      if(accidentDetails!=null) 'accidentDetails':accidentDetails,
       if (trimmedNote?.isNotEmpty == true) 'note': trimmedNote,
       if (trimmedAccidentPhotoUrl?.isNotEmpty == true)
         'accidentPhotoUrl': trimmedAccidentPhotoUrl,

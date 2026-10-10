@@ -107,6 +107,8 @@ export interface ManagerDriverDetail {
     status: string;
     occurredAt?: string | null;
     statusHistory?: IncidentStatusHistoryEntry[];
+    serviceDetails?: ServiceRepairDetails | null;
+    accidentDetails?: AccidentDetails | null;
     serviceStage?: string | null;
     serviceCaseType?: string | null;
     repairNote?: string | null;
@@ -188,7 +190,38 @@ export interface IncidentStatusHistoryEntry {
   changedAt: string;
 }
 
+export interface ServicePaymentEntry {
+  id: string;
+  amount: number;
+  paidAt: string;
+  payer: "company" | "driver" | "insurance";
+}
+export interface ServiceRepairDetails {
+  reason: string;
+  sentAt?: string;
+  arrivedAt?: string;
+  repairStartedAt?: string;
+  completedAt?: string;
+  orderNumber?: string;
+  works?: string[];
+  serviceCost?: number;
+  costDate?: string;
+  payments?: ServicePaymentEntry[];
+}
+export interface AccidentDetails {
+  location: string;
+  occurredAt: string;
+  fault: "driver" | "other" | "both" | "unknown";
+  insurer: "gosstrakh" | "nsk" | "alma";
+  otherPlate: string;
+  otherMake: string;
+  otherModel: string;
+}
+
 export interface ManagerIncidentItem {
+  serviceDetails?: ServiceRepairDetails | null;
+  accidentDetails?: AccidentDetails | null;
+
   id: string;
   title: string;
   incidentType?: string;
