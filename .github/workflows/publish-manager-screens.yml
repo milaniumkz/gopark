@@ -1,6 +1,9 @@
 name: publish-manager-screens
 on:
   workflow_dispatch:
+  push:
+    branches: [codex/whatsapp-oct7-fixes]
+    paths: [.github/workflows/publish-manager-screens.yml]
 concurrency:
   group: production-deploy
   cancel-in-progress: false
