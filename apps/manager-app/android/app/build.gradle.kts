@@ -34,6 +34,20 @@ android {
         versionName = flutter.versionName
     }
 
+    // CI restores the existing protected key so updates install over the
+    // released brigadier app instead of receiving a fresh ephemeral signature.
+    signingConfigs {
+        getByName("debug") {
+            val existingKey = System.getenv("GOPARK_MANAGER_KEYSTORE")
+            if (!existingKey.isNullOrBlank()) {
+                storeFile = file(existingKey)
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.

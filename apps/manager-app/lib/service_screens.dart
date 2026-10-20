@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'api.dart';
 import 'repository.dart';
+import 'design.dart';
 
 Future<Map<String, dynamic>?> showAccidentForm(BuildContext context) async {
   final form = GlobalKey<FormState>();
@@ -104,8 +105,8 @@ Future<Map<String, dynamic>?> showAccidentForm(BuildContext context) async {
                                     const SizedBox(height: 16),
                                     const Text(
                                         'Данные попадут в карточку ДТП в CRM. Фотография не требуется.',
-                                        style:
-                                            TextStyle(color: Colors.blueGrey)),
+                                        style: TextStyle(
+                                            color: ManagerDesign.muted)),
                                   ])))),
                   actions: [
                     TextButton(
@@ -175,7 +176,7 @@ class _CalendarState extends State<ManagerPaymentCalendarPage> {
     'partial': Color(0xfffef3c7),
     'dayoff': Color(0xffe2e8f0),
     'day_off': Color(0xffe2e8f0),
-    'asked_leave': Color(0xfff3e8ff),
+    'asked_leave': Color(0xFFFFF0E0),
     'sick': Color(0xffcffafe),
     'repair': Color(0xffffedd5),
     'accident': Color(0xfffecaca),
@@ -203,9 +204,27 @@ class _CalendarState extends State<ManagerPaymentCalendarPage> {
     });
   }
 
+  Future<void> editDay(Map<String, dynamic> day) async {
+    final selectedDriver = driverId;
+    if (selectedDriver == null) return;
+    final changed = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => _CalendarCommentDialog(
+            repository: widget.repository,
+            driverId: selectedDriver,
+            day: day,
+            statusLabel: labels['${day['status']}'] ?? '${day['status']}'));
+    if (changed == true && mounted) {
+      setState(reload);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Комментарий сохранён')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
-      backgroundColor: const Color(0xfff4f7fb),
+      backgroundColor: ManagerDesign.background,
       appBar: AppBar(title: const Text('Календарь платежей')),
       body: ListView(padding: const EdgeInsets.all(16), children: [
         FutureBuilder<List<ManagerAssignedDriverDto>>(
@@ -236,7 +255,10 @@ class _CalendarState extends State<ManagerPaymentCalendarPage> {
                         reload();
                       }));
             }),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
+        const Text('Нажмите на дату, чтобы добавить комментарий.',
+            style: TextStyle(color: ManagerDesign.muted, fontSize: 14)),
+        const SizedBox(height: 12),
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           IconButton(
               tooltip: 'Предыдущий месяц',
@@ -259,7 +281,7 @@ class _CalendarState extends State<ManagerPaymentCalendarPage> {
                     'Декабрь'
                   ][month.month - 1]} ${month.year}',
                   style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 18),
+                      fontWeight: FontWeight.bold, fontSize: 20),
                   textAlign: TextAlign.center)),
           IconButton(
               tooltip: 'Следующий месяц',
@@ -291,7 +313,7 @@ class _CalendarState extends State<ManagerPaymentCalendarPage> {
                     children: [
                       Text(
                           'Договор № ${data['contractNumber'] ?? '—'} · ${data['rate']} сом / день',
-                          style: const TextStyle(color: Colors.blueGrey)),
+                          style: const TextStyle(color: ManagerDesign.muted)),
                       const SizedBox(height: 14),
                       Row(
                           children: ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
@@ -314,22 +336,10 @@ class _CalendarState extends State<ManagerPaymentCalendarPage> {
                             final status = '${day['status']}';
                             return Semantics(
                                 label:
-                                    '${day['day']}: ${labels[status] ?? status}',
+                                    '${day['day']}: ${labels[status] ?? status}${day['comment'] == null ? '' : ', есть комментарий'}',
                                 button: true,
                                 child: InkWell(
-                                    onTap: () => showDialog<void>(
-                                        context: context,
-                                        builder: (c) => AlertDialog(
-                                                title: Text(
-                                                    '${day['day']} · ${labels[status] ?? status}'),
-                                                content: Text('Оплачено: ${day['amount']} сом\nПо графику: ${day['expected']} сом\n${day['note'] ?? ''}'),
-                                                actions: [
-                                                  TextButton(
-                                                      onPressed: () =>
-                                                          Navigator.pop(c),
-                                                      child:
-                                                          const Text('Закрыть'))
-                                                ])),
+                                    onTap: () => editDay(day),
                                     child: Container(
                                         alignment: Alignment.center,
                                         decoration: BoxDecoration(
@@ -337,10 +347,31 @@ class _CalendarState extends State<ManagerPaymentCalendarPage> {
                                                 Colors.grey.shade100,
                                             borderRadius:
                                                 BorderRadius.circular(8)),
-                                        child: Text('${n - offset + 1}',
-                                            style: const TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                color: Color(0xff172a45))))));
+                                        child: Stack(
+                                            fit: StackFit.expand,
+                                            alignment: Alignment.center,
+                                            children: [
+                                              Center(
+                                                  child: Text(
+                                                      '${n - offset + 1}',
+                                                      style: const TextStyle(
+                                                          fontWeight:
+                                                              FontWeight.w600,
+                                                          color: ManagerDesign
+                                                              .text))),
+                                              if ((day['comment'] as String?)
+                                                      ?.isNotEmpty ==
+                                                  true)
+                                                const Positioned(
+                                                    right: 3,
+                                                    bottom: 3,
+                                                    child: Icon(
+                                                        Icons
+                                                            .chat_bubble_rounded,
+                                                        size: 9,
+                                                        color: ManagerDesign
+                                                            .primary)),
+                                            ]))));
                           }),
                       const SizedBox(height: 18),
                       Wrap(
@@ -356,7 +387,7 @@ class _CalendarState extends State<ManagerPaymentCalendarPage> {
                                             color: colors[e.key])),
                                     TextSpan(text: '  ${e.value}')
                                   ]),
-                                  style: const TextStyle(fontSize: 12)))
+                                  style: const TextStyle(fontSize: 14)))
                               .toList()),
                       const SizedBox(height: 20),
                       Card(
@@ -370,6 +401,106 @@ class _CalendarState extends State<ManagerPaymentCalendarPage> {
                     ]);
               }),
       ]));
+}
+
+class _CalendarCommentDialog extends StatefulWidget {
+  const _CalendarCommentDialog(
+      {required this.repository,
+      required this.driverId,
+      required this.day,
+      required this.statusLabel});
+  final ManagerRepository repository;
+  final String driverId, statusLabel;
+  final Map<String, dynamic> day;
+  @override
+  State<_CalendarCommentDialog> createState() => _CalendarCommentDialogState();
+}
+
+class _CalendarCommentDialogState extends State<_CalendarCommentDialog> {
+  late final controller =
+      TextEditingController(text: widget.day['comment'] as String? ?? '');
+  bool saving = false;
+  String? error;
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> save(String text) async {
+    setState(() {
+      saving = true;
+      error = null;
+    });
+    try {
+      await widget.repository.saveDriverCalendarComment(
+          widget.driverId, '${widget.day['day']}', text);
+      if (mounted) Navigator.pop(context, true);
+    } catch (_) {
+      if (mounted)
+        setState(() {
+          saving = false;
+          error =
+              'Не удалось сохранить комментарий. Проверьте связь и повторите.';
+        });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => PopScope(
+      canPop: !saving,
+      child: AlertDialog(
+        title: Text(MaterialLocalizations.of(context)
+            .formatFullDate(DateTime.parse('${widget.day['day']}'))),
+        content: SingleChildScrollView(
+            child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+              Text(widget.statusLabel,
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 12),
+              Text(
+                  'Оплачено: ${widget.day['amount']} сом\nПо графику: ${widget.day['expected']} сом'),
+              if ('${widget.day['note'] ?? ''}'.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text('${widget.day['note']}',
+                    style: const TextStyle(color: ManagerDesign.muted))
+              ],
+              const SizedBox(height: 20),
+              TextField(
+                  key: const ValueKey('calendar-comment'),
+                  controller: controller,
+                  enabled: !saving,
+                  minLines: 3,
+                  maxLines: 6,
+                  maxLength: 2000,
+                  keyboardType: TextInputType.multiline,
+                  decoration: const InputDecoration(
+                      labelText: 'Комментарий бригадира',
+                      hintText: 'Например, причина просрочки',
+                      alignLabelWithHint: true)),
+              const SizedBox(height: 6),
+              const Text('Комментарий не изменяет оплату, долг или статус дня.',
+                  style: TextStyle(color: ManagerDesign.muted, fontSize: 14)),
+              if (error != null) ...[
+                const SizedBox(height: 10),
+                Text(error!, style: const TextStyle(color: ManagerDesign.red))
+              ],
+            ])),
+        actions: [
+          if ((widget.day['comment'] as String?)?.isNotEmpty == true)
+            TextButton(
+                onPressed: saving ? null : () => save(''),
+                child: const Text('Удалить')),
+          TextButton(
+              onPressed: saving ? null : () => Navigator.pop(context, false),
+              child: const Text('Отмена')),
+          FilledButton(
+              onPressed: saving ? null : () => save(controller.text),
+              child: Text(saving ? 'Сохраняем…' : 'Сохранить')),
+        ],
+      ));
 }
 
 List<String> repairDetailLines(Map<String, dynamic>? details) {
@@ -472,7 +603,7 @@ class ManagerRepairCard extends StatelessWidget {
                 children: [
                   Text(title,
                       style: const TextStyle(
-                          fontSize: 18, fontWeight: FontWeight.bold)),
+                          fontSize: 20, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 10),
                   Align(
                       alignment: Alignment.centerLeft,
@@ -484,12 +615,12 @@ class ManagerRepairCard extends StatelessWidget {
                                   }[stage] ??
                                   'Ремонт'
                               : titles[current]),
-                          backgroundColor: const Color(0xfff3e8ff),
+                          backgroundColor: const Color(0xFFFFF0E0),
                           side: BorderSide.none)),
                   Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                          color: const Color(0xffeff6ff),
+                          color: const Color(0xFFF8F4EE),
                           borderRadius: BorderRadius.circular(10)),
                       child: Text('Причина: ${details['reason']}',
                           style: const TextStyle(height: 1.5))),
@@ -507,8 +638,8 @@ class ManagerRepairCard extends StatelessWidget {
                                           ? Icons.radio_button_checked
                                           : Icons.radio_button_unchecked,
                                   color: n <= current
-                                      ? const Color(0xff2563eb)
-                                      : Colors.blueGrey,
+                                      ? ManagerDesign.primary
+                                      : ManagerDesign.muted,
                                   size: 22),
                               const SizedBox(width: 12),
                               Expanded(
@@ -522,8 +653,8 @@ class ManagerRepairCard extends StatelessWidget {
                                     const SizedBox(height: 4),
                                     Text(date(details[keys[n]]),
                                         style: const TextStyle(
-                                            color: Colors.blueGrey,
-                                            fontSize: 13))
+                                            color: ManagerDesign.muted,
+                                            fontSize: 15))
                                   ]))
                             ])),
                   if (note?.isNotEmpty == true && note != details['reason'])
@@ -548,7 +679,7 @@ class ManagerRepairCard extends StatelessWidget {
                                   "archived": "Архив"
                                 }[entry.status] ?? entry.status} · ${date(entry.changedAt)}',
                             style: const TextStyle(
-                                color: Colors.blueGrey, fontSize: 13))),
+                                color: ManagerDesign.muted, fontSize: 15))),
                   for (final line in accidentDetailLines(accidentDetails))
                     Padding(
                         padding: const EdgeInsets.symmetric(vertical: 4),
@@ -579,12 +710,13 @@ class ManagerRepairCard extends StatelessWidget {
                               'insurance': 'Страховая компания'
                             }[p['payer']]} · ${p['amount']} сом',
                             style: const TextStyle(
-                                color: Colors.blueGrey, fontSize: 13))),
+                                color: ManagerDesign.muted, fontSize: 15))),
                   if (current < 3) ...[
                     const SizedBox(height: 12),
                     const Text(
                         'При изменении этапа и готовности машины вы получите уведомление.',
-                        style: TextStyle(color: Colors.blueGrey, fontSize: 13))
+                        style:
+                            TextStyle(color: ManagerDesign.muted, fontSize: 15))
                   ],
                 ])));
   }

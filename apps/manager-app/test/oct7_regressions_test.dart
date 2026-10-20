@@ -76,6 +76,8 @@ void main() {
       expect(find.byIcon(Icons.savings_outlined), findsOneWidget);
       expect(find.byIcon(Icons.currency_exchange_rounded), findsOneWidget);
       await tester.scrollUntilVisible(find.text('Выбрать период просрочки'), 200, scrollable: find.byType(Scrollable).first);
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Выбрать период просрочки'));await tester.pumpAndSettle();
       await tester.tap(find.text('Выбрать период просрочки')); await tester.pumpAndSettle();
       expect(find.byType(DateRangePickerDialog), findsOneWidget);
       expect(find.text('Готово'), findsOneWidget);

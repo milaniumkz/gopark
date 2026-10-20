@@ -71,8 +71,10 @@ class ManagerRepository {
     return api.getManagers();
   }
 
-  Future<num> loadDriverOverduePeriod(String driverId, DateTime from, DateTime to) async {
-    String date(DateTime value) => '${value.year}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
+  Future<num> loadDriverOverduePeriod(
+      String driverId, DateTime from, DateTime to) async {
+    String date(DateTime value) =>
+        '${value.year}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
     final drivers = await api.getDrivers(from: date(from), to: date(to));
     for (final driver in drivers) {
       if (driver.id == driverId) return driver.overduePeriodAmount ?? 0;
@@ -126,14 +128,20 @@ class ManagerRepository {
     return api.getIncidents();
   }
 
-  Future<Map<String,dynamic>> loadDriverCalendar(String driverId, String month) => api.getDriverCalendar(driverId,month);
+  Future<Map<String, dynamic>> loadDriverCalendar(
+          String driverId, String month) =>
+      api.getDriverCalendar(driverId, month);
+
+  Future<Map<String, dynamic>> saveDriverCalendarComment(
+          String driverId, String day, String comment) =>
+      api.saveDriverCalendarComment(driverId, day, comment);
 
   Future<ManagerIncidentDto> createDriverIncidentAction(
     String driverId,
     String action, {
     String? note,
     String? accidentPhotoUrl,
-    Map<String,dynamic>? accidentDetails,
+    Map<String, dynamic>? accidentDetails,
   }) {
     return api.createDriverIncidentAction(
       driverId,

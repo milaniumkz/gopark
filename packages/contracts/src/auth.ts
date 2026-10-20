@@ -49,6 +49,9 @@ export interface UserAdminListItem {
   status: string;
   mfaEnabled: boolean;
   displayName: string;
+  firstName?: string;
+  lastName?: string;
+  middleName?: string | null;
   managerProfileId?: string | null;
   managerLevel?: "regular" | "senior" | null;
   seniorManagerProfileId?: string | null;
@@ -61,6 +64,7 @@ export interface CreateAdminUserRequest {
   password: string;
   firstName: string;
   lastName: string;
+  middleName?: string | null;
   role: Exclude<UserRole, "driver">;
   customRoleKey?: string | null;
   companyName?: string | null;
@@ -69,6 +73,7 @@ export interface CreateAdminUserRequest {
 }
 
 export interface UpdateAdminUserRequest {
+  middleName?: string | null;
   phone?: string;
   role?: UserRole;
   customRoleKey?: string | null;

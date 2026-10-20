@@ -89,6 +89,8 @@ void main() {
             .join("; "));
     await t.scrollUntilVisible(find.text("Инциденты"), 200,
         scrollable: find.byType(Scrollable).first);
+    await t.pumpAndSettle();
+    await t.ensureVisible(find.text("Инциденты"));await t.pumpAndSettle();
     await t.tap(find.text("Инциденты"));
     await t.pumpAndSettle();
     await t.scrollUntilVisible(find.text('Не подлежит восстановлению'), 300,

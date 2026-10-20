@@ -23,7 +23,7 @@ RUN mkdir -p /app/_optional/driver /app/_optional/manager /app/_optional/apk /ap
   && if [ -d apk ]; then cp -a apk/. /app/_optional/apk/; fi \
   && if [ -f gopark-manager.apk ]; then cp gopark-manager.apk /app/_optional/root/gopark-manager.apk; fi \
   && if [ -f gopark-driver.apk ]; then cp gopark-driver.apk /app/_optional/root/gopark-driver.apk; fi \
-  && for file in manager-download.html gopark-manager.zip; do if [ -f "$file" ]; then cp "$file" /app/_optional/root/; fi; done
+  && for file in manager-download.html gopark-manager.zip brigadir-vse-ekrany.pdf brigadir-screenshots.zip brigadir-screens.html brigadir-new-design; do if [ -e "$file" ]; then cp -a "$file" /app/_optional/root/; fi; done
 
 FROM nginx:1.27-alpine AS runtime
 COPY --from=build /app/apps/crm-web/dist /usr/share/nginx/html

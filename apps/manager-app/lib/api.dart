@@ -119,7 +119,9 @@ class ManagerAssignedDriverDto {
       debt: _asNum(json['debt']),
       creditBalance: _asNum(json['creditBalance']),
       overdueDebt: _asNum(json['overdueDebt']),
-      overduePeriodAmount: json['overduePeriodAmount'] == null ? null : _asNum(json['overduePeriodAmount']),
+      overduePeriodAmount: json['overduePeriodAmount'] == null
+          ? null
+          : _asNum(json['overduePeriodAmount']),
       overdueSinceDate: json['overdueSinceDate'] as String?,
       overdueUntilDate: json['overdueUntilDate'] as String?,
       yandexBalance: _asNum(json['yandexBalance']),
@@ -264,7 +266,7 @@ class ManagerVehicleDto {
 
   factory ManagerVehicleDto.fromJson(Map<String, dynamic> json) {
     return ManagerVehicleDto(
-      incidentComment:json['incidentComment'] as String?,
+      incidentComment: json['incidentComment'] as String?,
       id: json['id'] as String,
       plateNumber: json['plateNumber'] as String,
       vin: json['vin'] as String,
@@ -499,8 +501,8 @@ class ManagerDriverIncidentDto {
       occurredAt: json['occurredAt'] as String?,
       periodLabel: json['periodLabel'] as String?,
       statusHistory: _incidentStatusHistory(json['statusHistory']),
-      serviceDetails: json['serviceDetails'] as Map<String,dynamic>?,
-      accidentDetails: json['accidentDetails'] as Map<String,dynamic>?,
+      serviceDetails: json['serviceDetails'] as Map<String, dynamic>?,
+      accidentDetails: json['accidentDetails'] as Map<String, dynamic>?,
       serviceStage: json['serviceStage'] as String?,
       serviceCaseType: json['serviceCaseType'] as String?,
       repairNote: json['repairNote'] as String?,
@@ -516,8 +518,8 @@ class ManagerDriverIncidentDto {
   final String? occurredAt;
   final String? periodLabel;
   final List<ManagerIncidentStatusHistoryDto> statusHistory;
-  final Map<String,dynamic>? serviceDetails;
-  final Map<String,dynamic>? accidentDetails;
+  final Map<String, dynamic>? serviceDetails;
+  final Map<String, dynamic>? accidentDetails;
   final String? serviceStage;
   final String? serviceCaseType;
   final String? repairNote;
@@ -737,8 +739,8 @@ class ManagerIncidentDto {
       occurredAt: json['occurredAt'] as String?,
       periodLabel: json['periodLabel'] as String?,
       statusHistory: _incidentStatusHistory(json['statusHistory']),
-      serviceDetails: json['serviceDetails'] as Map<String,dynamic>?,
-      accidentDetails: json['accidentDetails'] as Map<String,dynamic>?,
+      serviceDetails: json['serviceDetails'] as Map<String, dynamic>?,
+      accidentDetails: json['accidentDetails'] as Map<String, dynamic>?,
       serviceStage: json['serviceStage'] as String?,
       serviceCaseType: json['serviceCaseType'] as String?,
       repairNote: json['repairNote'] as String?,
@@ -756,8 +758,8 @@ class ManagerIncidentDto {
   final String? occurredAt;
   final String? periodLabel;
   final List<ManagerIncidentStatusHistoryDto> statusHistory;
-  final Map<String,dynamic>? serviceDetails;
-  final Map<String,dynamic>? accidentDetails;
+  final Map<String, dynamic>? serviceDetails;
+  final Map<String, dynamic>? accidentDetails;
   final String? serviceStage;
   final String? serviceCaseType;
   final String? repairNote;
@@ -993,10 +995,12 @@ class ManagerApiClient {
   }
 
   Future<http.Response> _authorizedGet(Uri uri) {
-    return _sendAuthorized((headers) => client.get(uri, headers: headers).timeout(
-      const Duration(seconds: 20),
-      onTimeout: () => throw TimeoutException('Сервер не ответил. Проверьте соединение и повторите загрузку.'),
-    ));
+    return _sendAuthorized(
+        (headers) => client.get(uri, headers: headers).timeout(
+              const Duration(seconds: 20),
+              onTimeout: () => throw TimeoutException(
+                  'Сервер не ответил. Проверьте соединение и повторите загрузку.'),
+            ));
   }
 
   Future<http.Response> _authorizedPost(
@@ -1048,7 +1052,8 @@ class ManagerApiClient {
     return ManagerSummaryDto.fromJson(_decodeObject(response));
   }
 
-  Future<List<ManagerAssignedDriverDto>> getDrivers({String? from, String? to}) async {
+  Future<List<ManagerAssignedDriverDto>> getDrivers(
+      {String? from, String? to}) async {
     final response = await _authorizedGet(
       Uri.parse('$baseUrl/mobile/manager/drivers').replace(queryParameters: {
         if (from != null) 'dueDateFrom': from,
@@ -1188,8 +1193,21 @@ class ManagerApiClient {
     return _decodeList(response).map(ManagerIncidentDto.fromJson).toList();
   }
 
-  Future<Map<String,dynamic>> getDriverCalendar(String driverId, String month) async {
-    final response=await _authorizedGet(Uri.parse('$baseUrl/mobile/manager/drivers/$driverId/calendar?month=$month'));
+  Future<Map<String, dynamic>> getDriverCalendar(
+      String driverId, String month) async {
+    final response = await _authorizedGet(Uri.parse(
+        '$baseUrl/mobile/manager/drivers/$driverId/calendar?month=$month'));
+    return _decodeObject(response);
+  }
+
+  Future<Map<String, dynamic>> saveDriverCalendarComment(
+      String driverId, String day, String comment) async {
+    final response = await _authorizedPatch(
+        Uri.parse(
+            '$baseUrl/mobile/manager/drivers/$driverId/calendar/$day/comment'),
+        headers: const {'content-type': 'application/json'},
+        body: jsonEncode(
+            {'comment': comment})).timeout(const Duration(seconds: 20));
     return _decodeObject(response);
   }
 
@@ -1198,13 +1216,13 @@ class ManagerApiClient {
     String action, {
     String? note,
     String? accidentPhotoUrl,
-    Map<String,dynamic>? accidentDetails,
+    Map<String, dynamic>? accidentDetails,
   }) async {
     final trimmedNote = note?.trim();
     final trimmedAccidentPhotoUrl = accidentPhotoUrl?.trim();
     final payload = {
       'action': action,
-      if(accidentDetails!=null) 'accidentDetails':accidentDetails,
+      if (accidentDetails != null) 'accidentDetails': accidentDetails,
       if (trimmedNote?.isNotEmpty == true) 'note': trimmedNote,
       if (trimmedAccidentPhotoUrl?.isNotEmpty == true)
         'accidentPhotoUrl': trimmedAccidentPhotoUrl,
@@ -1345,7 +1363,8 @@ class ManagerApiClient {
   Map<String, dynamic> _decodeObject(http.Response response) {
     final decoded = _decodeNullableObject(response);
     if (decoded == null) {
-      throw const ManagerApiException('Сервер вернул пустой ответ. Попробуйте ещё раз.');
+      throw const ManagerApiException(
+          'Сервер вернул пустой ответ. Попробуйте ещё раз.');
     }
     return decoded;
   }
@@ -1436,7 +1455,8 @@ String _translateManagerApiError(String message, int statusCode) {
   if (normalized.contains('field "') && normalized.contains('required')) {
     return 'Заполните обязательные поля.';
   }
-  if (normalized.contains('insufficient role') || normalized.contains('forbidden')) {
+  if (normalized.contains('insufficient role') ||
+      normalized.contains('forbidden')) {
     return 'Недостаточно прав для этого действия.';
   }
   if (normalized.contains('not found')) {

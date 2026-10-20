@@ -151,6 +151,7 @@ model User {
   status          UserStatus  @default(invited)
   firstName       String      @map("first_name")
   lastName        String      @map("last_name")
+  middleName      String?     @map("middle_name")
   mfaEnabled      Boolean     @default(false) @map("mfa_enabled")
   lastLoginAt     DateTime?   @map("last_login_at")
   createdAt       DateTime    @default(now()) @map("created_at")
@@ -162,6 +163,7 @@ model User {
   driverRiskStatusChanges DriverRiskStatusChange[]
   devicePushTokens DevicePushToken[]
   paymentCalendarDayOverrides PaymentCalendarDayOverride[]
+  managerCalendarComments ManagerCalendarComment[]
 
   @@map("users")
 }
@@ -233,6 +235,7 @@ model Driver {
   obligations    Obligation[]
   payments       Payment[]
   paymentCalendarDayOverrides PaymentCalendarDayOverride[]
+  managerCalendarComments ManagerCalendarComment[]
   payouts        Payout[]
   yandexBalances YandexBalance[]
   creditBalance  DriverCreditBalance?
@@ -719,4 +722,20 @@ model AuditLog {
   actorUser     User?    @relation(fields: [actorUserId], references: [id])
 
   @@map("audit_logs")
+}
+
+model ManagerCalendarComment {
+  id              String   @id @default(uuid()) @db.Uuid
+  driverId        String   @db.Uuid @map("driver_id")
+  date            DateTime @db.Date
+  comment         String
+  updatedByUserId String?  @db.Uuid @map("updated_by_user_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  driver          Driver   @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  updatedByUser   User?    @relation(fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([driverId, date])
+  @@index([date])
+  @@map("manager_calendar_comments")
 }

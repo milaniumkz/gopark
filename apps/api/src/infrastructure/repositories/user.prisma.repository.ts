@@ -1,5 +1,13 @@
-import type { CreateAdminUserRequest, UpdateAdminUserRequest, UserAdminListItem, UserRole } from "@gopark/contracts";
-import type { CreateDriverAccountInput, UserRepository } from "../../common/repositories/index.js";
+import type {
+  CreateAdminUserRequest,
+  UpdateAdminUserRequest,
+  UserAdminListItem,
+  UserRole,
+} from "@gopark/contracts";
+import type {
+  CreateDriverAccountInput,
+  UserRepository,
+} from "../../common/repositories/index.js";
 import { seedDrivers, seedUsers } from "../../data/seed.js";
 import type { PrismaService } from "../prisma/prisma.service.js";
 import { joinName } from "../prisma/prisma.utils.js";
@@ -39,12 +47,19 @@ export class UserPrismaRepository implements UserRepository {
         status: "active" as const,
         firstName: input.firstName,
         lastName: input.lastName,
+        middleName: input.middleName?.trim() || null,
         mfaEnabled: false,
       };
       const managerCreateData = {
         title: joinName(input.firstName, input.lastName) || "Бригадир",
-        level: input.managerLevel === "senior" ? "senior" as const : "regular" as const,
-        seniorManagerId: input.managerLevel === "senior" ? null : input.seniorManagerId?.trim() || null,
+        level:
+          input.managerLevel === "senior"
+            ? ("senior" as const)
+            : ("regular" as const),
+        seniorManagerId:
+          input.managerLevel === "senior"
+            ? null
+            : input.seniorManagerId?.trim() || null,
       };
       const updateData = {
         ...baseData,
@@ -61,7 +76,9 @@ export class UserPrismaRepository implements UserRepository {
       };
       const createData = {
         ...baseData,
-        ...(input.role === "manager" ? { manager: { create: managerCreateData } } : {}),
+        ...(input.role === "manager"
+          ? { manager: { create: managerCreateData } }
+          : {}),
       };
 
       const user = existing
@@ -79,6 +96,7 @@ export class UserPrismaRepository implements UserRepository {
               mfaEnabled: true,
               firstName: true,
               lastName: true,
+              middleName: true,
               manager: {
                 select: {
                   id: true,
@@ -101,6 +119,7 @@ export class UserPrismaRepository implements UserRepository {
               mfaEnabled: true,
               firstName: true,
               lastName: true,
+              middleName: true,
               manager: {
                 select: {
                   id: true,
@@ -119,6 +138,9 @@ export class UserPrismaRepository implements UserRepository {
         status: user.status,
         mfaEnabled: user.mfaEnabled,
         displayName: joinName(user.firstName, user.lastName),
+        firstName: user.firstName,
+        lastName: user.lastName,
+        middleName: user.middleName ?? null,
         managerProfileId: user.manager?.id ?? null,
         managerLevel: user.manager?.level ?? null,
         seniorManagerProfileId: user.manager?.seniorManagerId ?? null,
@@ -144,8 +166,10 @@ export class UserPrismaRepository implements UserRepository {
       mfaEnabled: false,
       displayName: joinName(input.firstName, input.lastName),
       companyName: input.companyName ?? null,
-      managerLevel: input.role === "manager" ? input.managerLevel ?? "regular" : null,
-      seniorManagerId: input.role === "manager" ? input.seniorManagerId ?? null : null,
+      managerLevel:
+        input.role === "manager" ? (input.managerLevel ?? "regular") : null,
+      seniorManagerId:
+        input.role === "manager" ? (input.seniorManagerId ?? null) : null,
     };
 
     if (existing) {
@@ -162,9 +186,12 @@ export class UserPrismaRepository implements UserRepository {
       status: user.status,
       mfaEnabled: user.mfaEnabled,
       displayName: user.displayName,
-      managerProfileId: user.role === "manager" ? (user.requestUserId ?? user.id) : null,
-      managerLevel: input.role === "manager" ? input.managerLevel ?? "regular" : null,
-      seniorManagerProfileId: input.role === "manager" ? input.seniorManagerId ?? null : null,
+      managerProfileId:
+        user.role === "manager" ? (user.requestUserId ?? user.id) : null,
+      managerLevel:
+        input.role === "manager" ? (input.managerLevel ?? "regular") : null,
+      seniorManagerProfileId:
+        input.role === "manager" ? (input.seniorManagerId ?? null) : null,
       companyName: user.companyName ?? null,
     };
   }
@@ -181,6 +208,7 @@ export class UserPrismaRepository implements UserRepository {
             companyName: true,
             firstName: true,
             lastName: true,
+            middleName: true,
             driver: {
               select: { id: true },
             },
@@ -208,7 +236,9 @@ export class UserPrismaRepository implements UserRepository {
           }
         }
 
-        const shouldDetachManager = (input.status === "blocked" || input.role === "driver") && current?.manager?.id;
+        const shouldDetachManager =
+          (input.status === "blocked" || input.role === "driver") &&
+          current?.manager?.id;
         const assignedDriversCount = current?.manager?.drivers.length ?? 0;
         if (shouldDetachManager && assignedDriversCount > 0) {
           const nextManagerId = input.reassignManagerId?.trim() || null;
@@ -221,7 +251,9 @@ export class UserPrismaRepository implements UserRepository {
               id: nextManagerId,
               user: {
                 status: { not: "blocked" },
-                ...(current.companyName ? { companyName: current.companyName } : {}),
+                ...(current.companyName
+                  ? { companyName: current.companyName }
+                  : {}),
               },
             },
             select: { id: true },
@@ -244,7 +276,9 @@ export class UserPrismaRepository implements UserRepository {
           const existingDriver = await tx.driver.findFirst({
             where: {
               phone: driverPhone,
-              ...(current?.driver?.id ? { id: { not: current.driver.id } } : {}),
+              ...(current?.driver?.id
+                ? { id: { not: current.driver.id } }
+                : {}),
             },
             select: { id: true },
           });
@@ -268,13 +302,20 @@ export class UserPrismaRepository implements UserRepository {
               status: input.status,
               mfaEnabled: input.mfaEnabled,
               companyName: input.companyName,
+              middleName:
+                input.middleName === undefined
+                  ? undefined
+                  : input.middleName?.trim() || null,
               driver: current?.driver
                 ? {
                     update: {
                       phone: driverPhone,
                       firstName: current.firstName,
                       lastName: current.lastName,
-                      companyName: input.companyName !== undefined ? input.companyName : current.companyName,
+                      companyName:
+                        input.companyName !== undefined
+                          ? input.companyName
+                          : current.companyName,
                     },
                   }
                 : {
@@ -282,7 +323,10 @@ export class UserPrismaRepository implements UserRepository {
                       firstName: current?.firstName ?? "",
                       lastName: current?.lastName ?? "",
                       phone: driverPhone,
-                      companyName: input.companyName !== undefined ? input.companyName : current?.companyName ?? null,
+                      companyName:
+                        input.companyName !== undefined
+                          ? input.companyName
+                          : (current?.companyName ?? null),
                       status: "active",
                       riskStatus: "normal",
                     },
@@ -299,6 +343,7 @@ export class UserPrismaRepository implements UserRepository {
               mfaEnabled: true,
               firstName: true,
               lastName: true,
+              middleName: true,
               manager: {
                 select: {
                   id: true,
@@ -315,23 +360,43 @@ export class UserPrismaRepository implements UserRepository {
           data: {
             role: input.role,
             phone: nextPhone || undefined,
-            customRoleKey: input.customRoleKey === undefined ? undefined : input.customRoleKey?.trim() || null,
+            customRoleKey:
+              input.customRoleKey === undefined
+                ? undefined
+                : input.customRoleKey?.trim() || null,
             status: input.status,
             mfaEnabled: input.mfaEnabled,
             companyName: input.companyName,
+            middleName:
+              input.middleName === undefined
+                ? undefined
+                : input.middleName?.trim() || null,
             ...(input.role === "manager"
               ? {
                   manager: {
                     upsert: {
                       create: {
                         title: "Бригадир",
-                        level: input.managerLevel === "senior" ? "senior" : "regular",
-                        seniorManagerId: input.managerLevel === "senior" ? null : input.seniorManagerId?.trim() || null,
+                        level:
+                          input.managerLevel === "senior"
+                            ? "senior"
+                            : "regular",
+                        seniorManagerId:
+                          input.managerLevel === "senior"
+                            ? null
+                            : input.seniorManagerId?.trim() || null,
                       },
                       update: {
-                        ...(input.managerLevel ? { level: input.managerLevel } : {}),
+                        ...(input.managerLevel
+                          ? { level: input.managerLevel }
+                          : {}),
                         ...(input.seniorManagerId !== undefined
-                          ? { seniorManagerId: input.managerLevel === "senior" ? null : input.seniorManagerId?.trim() || null }
+                          ? {
+                              seniorManagerId:
+                                input.managerLevel === "senior"
+                                  ? null
+                                  : input.seniorManagerId?.trim() || null,
+                            }
                           : {}),
                       },
                     },
@@ -350,6 +415,7 @@ export class UserPrismaRepository implements UserRepository {
             mfaEnabled: true,
             firstName: true,
             lastName: true,
+            middleName: true,
             manager: {
               select: {
                 id: true,
@@ -369,6 +435,9 @@ export class UserPrismaRepository implements UserRepository {
         status: user.status,
         mfaEnabled: user.mfaEnabled,
         displayName: joinName(user.firstName, user.lastName),
+        firstName: user.firstName,
+        lastName: user.lastName,
+        middleName: user.middleName ?? null,
         managerProfileId: user.manager?.id ?? null,
         managerLevel: user.manager?.level ?? null,
         seniorManagerProfileId: user.manager?.seniorManagerId ?? null,
@@ -385,7 +454,12 @@ export class UserPrismaRepository implements UserRepository {
       user.role = input.role;
     }
     if (input.phone?.trim() && input.phone.trim() !== user.login) {
-      const existing = seedUsers.find((item) => item.id !== userId && item.login === input.phone?.trim() && item.status !== "blocked");
+      const existing = seedUsers.find(
+        (item) =>
+          item.id !== userId &&
+          item.login === input.phone?.trim() &&
+          item.status !== "blocked",
+      );
       if (existing) {
         throw new Error("USER_PHONE_ALREADY_EXISTS");
       }
@@ -399,7 +473,9 @@ export class UserPrismaRepository implements UserRepository {
     }
     if (input.status === "blocked" && user.role === "manager") {
       const managerProfileId = user.requestUserId ?? user.id;
-      const assignedDrivers = seedDrivers.filter((item) => item.managerId === managerProfileId);
+      const assignedDrivers = seedDrivers.filter(
+        (item) => item.managerId === managerProfileId,
+      );
       if (assignedDrivers.length) {
         const nextManagerId = input.reassignManagerId?.trim() || null;
         if (!nextManagerId || nextManagerId === managerProfileId) {
@@ -418,7 +494,10 @@ export class UserPrismaRepository implements UserRepository {
     }
     if (user.role === "manager") {
       user.managerLevel = input.managerLevel ?? user.managerLevel ?? "regular";
-      user.seniorManagerId = user.managerLevel === "senior" ? null : input.seniorManagerId ?? user.seniorManagerId ?? null;
+      user.seniorManagerId =
+        user.managerLevel === "senior"
+          ? null
+          : (input.seniorManagerId ?? user.seniorManagerId ?? null);
     } else {
       user.managerLevel = null;
       user.seniorManagerId = null;
@@ -432,9 +511,12 @@ export class UserPrismaRepository implements UserRepository {
       status: user.status,
       mfaEnabled: user.mfaEnabled,
       displayName: user.displayName,
-      managerProfileId: user.role === "manager" ? (user.requestUserId ?? user.id) : null,
-      managerLevel: user.role === "manager" ? user.managerLevel ?? "regular" : null,
-      seniorManagerProfileId: user.role === "manager" ? user.seniorManagerId ?? null : null,
+      managerProfileId:
+        user.role === "manager" ? (user.requestUserId ?? user.id) : null,
+      managerLevel:
+        user.role === "manager" ? (user.managerLevel ?? "regular") : null,
+      seniorManagerProfileId:
+        user.role === "manager" ? (user.seniorManagerId ?? null) : null,
       companyName: user.companyName ?? null,
     };
   }
@@ -495,6 +577,7 @@ export class UserPrismaRepository implements UserRepository {
           mfaEnabled: true,
           firstName: true,
           lastName: true,
+          middleName: true,
           passwordHash: true,
           mustChangePassword: true,
           driver: {
@@ -528,7 +611,10 @@ export class UserPrismaRepository implements UserRepository {
       };
     }
 
-    const existing = seedUsers.find((item) => item.login === input.phone || item.requestUserId === input.phone);
+    const existing = seedUsers.find(
+      (item) =>
+        item.login === input.phone || item.requestUserId === input.phone,
+    );
     if (existing || seedDrivers.some((item) => item.phone === input.phone)) {
       throw new Error("DRIVER_PHONE_ALREADY_EXISTS");
     }
@@ -578,7 +664,8 @@ export class UserPrismaRepository implements UserRepository {
       displayName,
       companyName: input.companyName ?? null,
       passwordHash: seedUsers[seedUsers.length - 1].passwordHash ?? null,
-      mustChangePassword: seedUsers[seedUsers.length - 1].mustChangePassword ?? false,
+      mustChangePassword:
+        seedUsers[seedUsers.length - 1].mustChangePassword ?? false,
       requestUserId: nextDriverId,
       refreshTokenVersion: 0,
     };
@@ -606,6 +693,7 @@ export class UserPrismaRepository implements UserRepository {
           mfaEnabled: true,
           firstName: true,
           lastName: true,
+          middleName: true,
           passwordHash: true,
           mustChangePassword: true,
           driver: {
@@ -631,6 +719,9 @@ export class UserPrismaRepository implements UserRepository {
         status: user.status,
         mfaEnabled: user.mfaEnabled,
         displayName: joinName(user.firstName, user.lastName),
+        firstName: user.firstName,
+        lastName: user.lastName,
+        middleName: user.middleName ?? null,
         companyName: user.companyName ?? null,
         passwordHash: user.passwordHash,
         mustChangePassword: user.mustChangePassword,
@@ -700,6 +791,7 @@ export class UserPrismaRepository implements UserRepository {
           mfaEnabled: true,
           firstName: true,
           lastName: true,
+          middleName: true,
           passwordHash: true,
           mustChangePassword: true,
           driver: {
@@ -725,6 +817,9 @@ export class UserPrismaRepository implements UserRepository {
         status: user.status,
         mfaEnabled: user.mfaEnabled,
         displayName: joinName(user.firstName, user.lastName),
+        firstName: user.firstName,
+        lastName: user.lastName,
+        middleName: user.middleName ?? null,
         companyName: user.companyName ?? null,
         passwordHash: user.passwordHash,
         mustChangePassword: user.mustChangePassword,
@@ -733,7 +828,9 @@ export class UserPrismaRepository implements UserRepository {
       };
     }
 
-    const user = seedUsers.find((item) => item.role === "driver" && item.requestUserId === driverId);
+    const user = seedUsers.find(
+      (item) => item.role === "driver" && item.requestUserId === driverId,
+    );
     if (!user) {
       return null;
     }
@@ -776,6 +873,7 @@ export class UserPrismaRepository implements UserRepository {
           mfaEnabled: true,
           firstName: true,
           lastName: true,
+          middleName: true,
           manager: {
             select: {
               id: true,
@@ -802,36 +900,56 @@ export class UserPrismaRepository implements UserRepository {
     }
 
     return seedUsers
-      .filter((item) => !companyName || (item.companyName ?? null) === companyName)
+      .filter(
+        (item) => !companyName || (item.companyName ?? null) === companyName,
+      )
       .map((item) => ({
-      id: item.id,
-      login: item.login,
-      role: item.role,
-      customRoleKey: item.customRoleKey ?? null,
-      status: item.status,
-      mfaEnabled: item.mfaEnabled,
-      displayName: item.displayName,
-      managerProfileId: item.role === "manager" ? (item.requestUserId ?? item.id) : null,
-      managerLevel: item.role === "manager" ? item.managerLevel ?? "regular" : null,
-      seniorManagerProfileId: item.role === "manager" ? item.seniorManagerId ?? null : null,
-      companyName: item.companyName ?? null,
-    }));
+        id: item.id,
+        login: item.login,
+        role: item.role,
+        customRoleKey: item.customRoleKey ?? null,
+        status: item.status,
+        mfaEnabled: item.mfaEnabled,
+        displayName: item.displayName,
+        managerProfileId:
+          item.role === "manager" ? (item.requestUserId ?? item.id) : null,
+        managerLevel:
+          item.role === "manager" ? (item.managerLevel ?? "regular") : null,
+        seniorManagerProfileId:
+          item.role === "manager" ? (item.seniorManagerId ?? null) : null,
+        companyName: item.companyName ?? null,
+      }));
   }
 
-  async getManagerProfile(requestUserId: string, companyName?: string | null): Promise<UserAdminListItem | null> {
-    const users = companyName ? await this.listAdminByCompany(companyName) : await this.listAdmin();
-    return users.find((item: UserAdminListItem) => (
-      item.role === "manager"
-      && (item.id === requestUserId || item.managerProfileId === requestUserId)
-    )) ?? null;
+  async getManagerProfile(
+    requestUserId: string,
+    companyName?: string | null,
+  ): Promise<UserAdminListItem | null> {
+    const users = companyName
+      ? await this.listAdminByCompany(companyName)
+      : await this.listAdmin();
+    return (
+      users.find(
+        (item: UserAdminListItem) =>
+          item.role === "manager" &&
+          (item.id === requestUserId ||
+            item.managerProfileId === requestUserId),
+      ) ?? null
+    );
   }
 
-  async getManagerScopeIds(requestUserId: string, companyName?: string | null): Promise<Set<string>> {
-    const users = companyName ? await this.listAdminByCompany(companyName) : await this.listAdmin();
-    const manager = users.find((item: UserAdminListItem) => (
-      item.role === "manager"
-      && (item.id === requestUserId || item.managerProfileId === requestUserId)
-    ));
+  async getManagerScopeIds(
+    requestUserId: string,
+    companyName?: string | null,
+  ): Promise<Set<string>> {
+    const users = companyName
+      ? await this.listAdminByCompany(companyName)
+      : await this.listAdmin();
+    const manager = users.find(
+      (item: UserAdminListItem) =>
+        item.role === "manager" &&
+        (item.id === requestUserId || item.managerProfileId === requestUserId),
+    );
     const ids = new Set<string>([requestUserId]);
     if (!manager) {
       return ids;
@@ -846,7 +964,10 @@ export class UserPrismaRepository implements UserRepository {
 
     if (manager.managerLevel === "senior") {
       users
-        .filter((item: UserAdminListItem) => item.role === "manager" && item.managerLevel !== "senior")
+        .filter(
+          (item: UserAdminListItem) =>
+            item.role === "manager" && item.managerLevel !== "senior",
+        )
         .forEach((item: UserAdminListItem) => {
           ids.add(item.id);
           if (item.managerProfileId) {
@@ -863,10 +984,7 @@ export class UserPrismaRepository implements UserRepository {
     if (prisma) {
       const user = await prisma.user.findFirst({
         where: {
-          OR: [
-            { email: login },
-            { phone: login },
-          ],
+          OR: [{ email: login }, { phone: login }],
         },
         select: {
           id: true,
@@ -879,6 +997,7 @@ export class UserPrismaRepository implements UserRepository {
           mfaEnabled: true,
           firstName: true,
           lastName: true,
+          middleName: true,
           passwordHash: true,
           mustChangePassword: true,
           driver: {
@@ -904,6 +1023,9 @@ export class UserPrismaRepository implements UserRepository {
             status: user.status,
             mfaEnabled: user.mfaEnabled,
             displayName: joinName(user.firstName, user.lastName),
+            firstName: user.firstName,
+            lastName: user.lastName,
+            middleName: user.middleName ?? null,
             companyName: user.companyName ?? null,
             passwordHash: user.passwordHash,
             mustChangePassword: user.mustChangePassword,
@@ -932,7 +1054,8 @@ export class UserPrismaRepository implements UserRepository {
       legacyPassword: user.password,
       mustChangePassword: user.mustChangePassword ?? false,
       requestUserId: user.requestUserId ?? user.id,
-      managerLevel: user.role === "manager" ? user.managerLevel ?? "regular" : null,
+      managerLevel:
+        user.role === "manager" ? (user.managerLevel ?? "regular") : null,
       refreshTokenVersion: user.refreshTokenVersion ?? 0,
     };
   }
@@ -954,6 +1077,7 @@ export class UserPrismaRepository implements UserRepository {
           mfaEnabled: true,
           firstName: true,
           lastName: true,
+          middleName: true,
           passwordHash: true,
           mustChangePassword: true,
           driver: {
@@ -979,6 +1103,9 @@ export class UserPrismaRepository implements UserRepository {
             status: user.status,
             mfaEnabled: user.mfaEnabled,
             displayName: joinName(user.firstName, user.lastName),
+            firstName: user.firstName,
+            lastName: user.lastName,
+            middleName: user.middleName ?? null,
             companyName: user.companyName ?? null,
             passwordHash: user.passwordHash,
             mustChangePassword: user.mustChangePassword,
@@ -989,7 +1116,10 @@ export class UserPrismaRepository implements UserRepository {
         : null;
     }
 
-    const user = seedUsers.find((item) => item.requestUserId === requestUserId && item.role === role) ?? null;
+    const user =
+      seedUsers.find(
+        (item) => item.requestUserId === requestUserId && item.role === role,
+      ) ?? null;
     if (!user) {
       return null;
     }
@@ -1006,7 +1136,8 @@ export class UserPrismaRepository implements UserRepository {
       legacyPassword: user.password,
       mustChangePassword: user.mustChangePassword ?? false,
       requestUserId: user.requestUserId ?? user.id,
-      managerLevel: user.role === "manager" ? user.managerLevel ?? "regular" : null,
+      managerLevel:
+        user.role === "manager" ? (user.managerLevel ?? "regular") : null,
       refreshTokenVersion: user.refreshTokenVersion ?? 0,
     };
   }

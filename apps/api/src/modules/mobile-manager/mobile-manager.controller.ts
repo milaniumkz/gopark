@@ -1,5 +1,13 @@
 import type { AccidentDetails } from "@gopark/contracts";
-import { Body, Controller, Get, Param, Patch, Post, Query } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from "@nestjs/common";
 import type {
   ManagerAssignedDriverItem,
   ManagerAlertItem,
@@ -32,7 +40,9 @@ export class MobileManagerController {
 
   @Get("summary")
   @Roles("owner", "admin", "finance", "manager")
-  getSummary(@CurrentUser() currentUser: RequestUser | null): Promise<ManagerDashboardSummary> {
+  getSummary(
+    @CurrentUser() currentUser: RequestUser | null,
+  ): Promise<ManagerDashboardSummary> {
     return this.mobileManagerService.getSummary(currentUser);
   }
 
@@ -43,18 +53,26 @@ export class MobileManagerController {
     @Query("dueDateFrom") dueDateFrom?: string,
     @Query("dueDateTo") dueDateTo?: string,
   ): Promise<ManagerAssignedDriverItem[]> {
-    return this.mobileManagerService.getDrivers(currentUser, dueDateFrom, dueDateTo);
+    return this.mobileManagerService.getDrivers(
+      currentUser,
+      dueDateFrom,
+      dueDateTo,
+    );
   }
 
   @Get("idle-vehicles")
   @Roles("owner", "admin", "finance", "manager")
-  getIdleVehicles(@CurrentUser() currentUser: RequestUser | null): Promise<ManagerIdleVehicleItem[]> {
+  getIdleVehicles(
+    @CurrentUser() currentUser: RequestUser | null,
+  ): Promise<ManagerIdleVehicleItem[]> {
     return this.mobileManagerService.getIdleVehicles(currentUser);
   }
 
   @Get("vehicles")
   @Roles("owner", "admin", "finance", "manager")
-  getVehicles(@CurrentUser() currentUser: RequestUser | null): Promise<VehicleListItem[]> {
+  getVehicles(
+    @CurrentUser() currentUser: RequestUser | null,
+  ): Promise<VehicleListItem[]> {
     return this.mobileManagerService.getVehicles(currentUser);
   }
 
@@ -69,7 +87,9 @@ export class MobileManagerController {
 
   @Get("managers")
   @Roles("owner", "admin", "finance", "manager")
-  getManagers(@CurrentUser() currentUser: RequestUser | null): Promise<ManagerTeamItem[]> {
+  getManagers(
+    @CurrentUser() currentUser: RequestUser | null,
+  ): Promise<ManagerTeamItem[]> {
     return this.mobileManagerService.getManagers(currentUser);
   }
 
@@ -89,7 +109,11 @@ export class MobileManagerController {
     @Body() body: { riskStatus?: string; note?: string },
     @CurrentUser() currentUser: RequestUser | null,
   ): Promise<ManagerAssignedDriverItem | null> {
-    return this.mobileManagerService.updateDriverRiskStatus(driverId, body, currentUser);
+    return this.mobileManagerService.updateDriverRiskStatus(
+      driverId,
+      body,
+      currentUser,
+    );
   }
 
   @Get("drivers/:driverId/payments")
@@ -103,18 +127,47 @@ export class MobileManagerController {
 
   @Get("drivers/:driverId/calendar")
   @Roles("owner", "admin", "finance", "manager")
-  getDriverCalendar(@Param("driverId") driverId: string, @Query("month") month: string, @CurrentUser() currentUser: RequestUser | null) {
-    return this.mobileManagerService.getDriverCalendar(driverId, month, currentUser);
+  getDriverCalendar(
+    @Param("driverId") driverId: string,
+    @Query("month") month: string,
+    @CurrentUser() currentUser: RequestUser | null,
+  ) {
+    return this.mobileManagerService.getDriverCalendar(
+      driverId,
+      month,
+      currentUser,
+    );
+  }
+
+  @Patch("drivers/:driverId/calendar/:day/comment")
+  @Roles("owner", "admin", "finance", "manager")
+  saveDriverCalendarComment(
+    @Param("driverId") driverId: string,
+    @Param("day") day: string,
+    @Body() body: { comment?: unknown },
+    @CurrentUser() currentUser: RequestUser | null,
+  ) {
+    return this.mobileManagerService.saveDriverCalendarComment(
+      driverId,
+      day,
+      body?.comment,
+      currentUser,
+    );
   }
 
   @Post("drivers/:driverId/incidents")
   @Roles("owner", "admin", "finance", "manager")
   createDriverIncidentAction(
     @Param("driverId") driverId: string,
-    @Body() body: { action?: string; note?: string; accidentDetails?: AccidentDetails },
+    @Body()
+    body: { action?: string; note?: string; accidentDetails?: AccidentDetails },
     @CurrentUser() currentUser: RequestUser | null,
   ): Promise<ManagerIncidentItem> {
-    return this.mobileManagerService.createDriverIncidentAction(driverId, body, currentUser);
+    return this.mobileManagerService.createDriverIncidentAction(
+      driverId,
+      body,
+      currentUser,
+    );
   }
 
   @Post("drivers/:driverId/photo-review")
@@ -124,7 +177,11 @@ export class MobileManagerController {
     @Body() body: { action?: string; note?: string },
     @CurrentUser() currentUser: RequestUser | null,
   ): Promise<ManagerDriverDetail | null> {
-    return this.mobileManagerService.reviewDriverPhoto(driverId, body, currentUser);
+    return this.mobileManagerService.reviewDriverPhoto(
+      driverId,
+      body,
+      currentUser,
+    );
   }
 
   @Post("drivers/:driverId/terminate-contract")
@@ -133,24 +190,33 @@ export class MobileManagerController {
     @Param("driverId") driverId: string,
     @CurrentUser() currentUser: RequestUser | null,
   ): Promise<ManagerDriverDetail | null> {
-    return this.mobileManagerService.terminateDriverContract(driverId, currentUser);
+    return this.mobileManagerService.terminateDriverContract(
+      driverId,
+      currentUser,
+    );
   }
 
   @Get("alerts")
   @Roles("owner", "admin", "finance", "manager")
-  getAlerts(@CurrentUser() currentUser: RequestUser | null): Promise<ManagerAlertItem[]> {
+  getAlerts(
+    @CurrentUser() currentUser: RequestUser | null,
+  ): Promise<ManagerAlertItem[]> {
     return this.mobileManagerService.getAlerts(currentUser);
   }
 
   @Get("status-requests")
   @Roles("owner", "admin", "finance", "manager")
-  getStatusRequests(@CurrentUser() currentUser: RequestUser | null): Promise<ManagerStatusRequestItem[]> {
+  getStatusRequests(
+    @CurrentUser() currentUser: RequestUser | null,
+  ): Promise<ManagerStatusRequestItem[]> {
     return this.mobileManagerService.getStatusRequests(currentUser);
   }
 
   @Get("risk-status-requests")
   @Roles("owner", "admin", "finance", "manager")
-  getRiskStatusRequests(@CurrentUser() currentUser: RequestUser | null): Promise<ManagerRiskStatusReviewItem[]> {
+  getRiskStatusRequests(
+    @CurrentUser() currentUser: RequestUser | null,
+  ): Promise<ManagerRiskStatusReviewItem[]> {
     return this.mobileManagerService.getRiskStatusRequests(currentUser);
   }
 
@@ -160,7 +226,11 @@ export class MobileManagerController {
     @Param("requestId") requestId: string,
     @CurrentUser() currentUser: RequestUser | null,
   ): Promise<ManagerRiskStatusReviewItem | null> {
-    return this.mobileManagerService.reviewRiskStatusRequest(requestId, "approve", currentUser);
+    return this.mobileManagerService.reviewRiskStatusRequest(
+      requestId,
+      "approve",
+      currentUser,
+    );
   }
 
   @Post("risk-status-requests/:requestId/reject")
@@ -169,7 +239,11 @@ export class MobileManagerController {
     @Param("requestId") requestId: string,
     @CurrentUser() currentUser: RequestUser | null,
   ): Promise<ManagerRiskStatusReviewItem | null> {
-    return this.mobileManagerService.reviewRiskStatusRequest(requestId, "reject", currentUser);
+    return this.mobileManagerService.reviewRiskStatusRequest(
+      requestId,
+      "reject",
+      currentUser,
+    );
   }
 
   @Post("status-requests/:requestId/approve")
@@ -192,13 +266,17 @@ export class MobileManagerController {
 
   @Get("quick-actions")
   @Roles("owner", "admin", "finance", "manager")
-  getQuickActions(@CurrentUser() currentUser: RequestUser | null): Promise<ManagerQuickActionItem[]> {
+  getQuickActions(
+    @CurrentUser() currentUser: RequestUser | null,
+  ): Promise<ManagerQuickActionItem[]> {
     return this.mobileManagerService.getQuickActions(currentUser);
   }
 
   @Get("incidents")
   @Roles("owner", "admin", "finance", "manager")
-  getIncidents(@CurrentUser() currentUser: RequestUser | null): Promise<ManagerIncidentItem[]> {
+  getIncidents(
+    @CurrentUser() currentUser: RequestUser | null,
+  ): Promise<ManagerIncidentItem[]> {
     return this.mobileManagerService.getIncidents(currentUser);
   }
 
@@ -206,10 +284,15 @@ export class MobileManagerController {
   @Roles("owner", "admin", "finance", "manager")
   updateIncidentAction(
     @Param("incidentId") incidentId: string,
-    @Body() body: { action?: string; note?: string; accidentDetails?: AccidentDetails },
+    @Body()
+    body: { action?: string; note?: string; accidentDetails?: AccidentDetails },
     @CurrentUser() currentUser: RequestUser | null,
   ): Promise<ManagerIncidentItem> {
-    return this.mobileManagerService.updateIncidentAction(incidentId, body, currentUser);
+    return this.mobileManagerService.updateIncidentAction(
+      incidentId,
+      body,
+      currentUser,
+    );
   }
 
   @Post("quick-actions/execute")

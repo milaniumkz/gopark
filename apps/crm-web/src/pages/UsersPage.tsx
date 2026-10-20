@@ -6,9 +6,24 @@ import { patchJson } from "../lib/api";
 import { AsyncState } from "../ui/AsyncState";
 import { EmptyStatePanel } from "../ui/EmptyStatePanel";
 import { StatCard } from "../ui/StatCard";
-import { DriversIcon, FinanceIcon, ShieldIcon, WalletIcon } from "../ui/CrmIcons";
-import { downloadCsvTable, formatShortId, getStatusLabel, getStatusTone, getUserRoleLabel } from "../lib/utils";
-import type { DriverListItem, SettingsOverview, UserAdminListItem } from "@gopark/contracts";
+import {
+  DriversIcon,
+  FinanceIcon,
+  ShieldIcon,
+  WalletIcon,
+} from "../ui/CrmIcons";
+import {
+  downloadCsvTable,
+  formatShortId,
+  getStatusLabel,
+  getStatusTone,
+  getUserRoleLabel,
+} from "../lib/utils";
+import type {
+  DriverListItem,
+  SettingsOverview,
+  UserAdminListItem,
+} from "@gopark/contracts";
 
 export function UsersPage() {
   const [companyFilter, setCompanyFilter] = useState("all");
@@ -21,36 +36,58 @@ export function UsersPage() {
   const [createPhone, setCreatePhone] = useState("");
   const [createPassword, setCreatePassword] = useState("");
   const [createFirstName, setCreateFirstName] = useState("");
+  const [createMiddleName, setCreateMiddleName] = useState("");
   const [createLastName, setCreateLastName] = useState("");
-  const [createRole, setCreateRole] = useState<UserAdminListItem["role"]>("manager");
+  const [createRole, setCreateRole] =
+    useState<UserAdminListItem["role"]>("manager");
   const [createCustomRoleKey, setCreateCustomRoleKey] = useState("");
   const [createCompanyName, setCreateCompanyName] = useState("");
-  const [createManagerLevel, setCreateManagerLevel] = useState<"regular" | "senior">("regular");
+  const [createManagerLevel, setCreateManagerLevel] = useState<
+    "regular" | "senior"
+  >("regular");
   const [createMessage, setCreateMessage] = useState<string | null>(null);
   const [editUserId, setEditUserId] = useState<string | null>(null);
+  const [editMiddleName, setEditMiddleName] = useState("");
   const [editPhone, setEditPhone] = useState("");
   const [editRole, setEditRole] = useState<UserAdminListItem["role"]>("admin");
   const [editCustomRoleKey, setEditCustomRoleKey] = useState("");
   const [editStatus, setEditStatus] = useState("active");
   const [editCompanyName, setEditCompanyName] = useState("");
-  const [editManagerLevel, setEditManagerLevel] = useState<"regular" | "senior">("regular");
+  const [editManagerLevel, setEditManagerLevel] = useState<
+    "regular" | "senior"
+  >("regular");
   const [editMfaEnabled, setEditMfaEnabled] = useState(false);
   const [editMessage, setEditMessage] = useState<string | null>(null);
   const [editSaving, setEditSaving] = useState(false);
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
-  const [archiveCandidate, setArchiveCandidate] = useState<UserAdminListItem | null>(null);
+  const [archiveCandidate, setArchiveCandidate] =
+    useState<UserAdminListItem | null>(null);
   const [reassignManagerId, setReassignManagerId] = useState("");
-  const [userActionMessage, setUserActionMessage] = useState<string | null>(null);
-  const [bulkRole, setBulkRole] = useState<"keep" | UserAdminListItem["role"]>("keep");
-  const [bulkCustomRoleKey, setBulkCustomRoleKey] = useState<"keep" | string>("keep");
-  const [bulkStatus, setBulkStatus] = useState<"keep" | "active" | "blocked" | "invited">("keep");
+  const [userActionMessage, setUserActionMessage] = useState<string | null>(
+    null,
+  );
+  const [bulkRole, setBulkRole] = useState<"keep" | UserAdminListItem["role"]>(
+    "keep",
+  );
+  const [bulkCustomRoleKey, setBulkCustomRoleKey] = useState<"keep" | string>(
+    "keep",
+  );
+  const [bulkStatus, setBulkStatus] = useState<
+    "keep" | "active" | "blocked" | "invited"
+  >("keep");
   const [bulkCompanyName, setBulkCompanyName] = useState<string>("keep");
-  const [bulkMfaMode, setBulkMfaMode] = useState<"keep" | "enabled" | "disabled">("keep");
-  const [bulkManagerLevel, setBulkManagerLevel] = useState<"regular" | "senior">("regular");
+  const [bulkMfaMode, setBulkMfaMode] = useState<
+    "keep" | "enabled" | "disabled"
+  >("keep");
+  const [bulkManagerLevel, setBulkManagerLevel] = useState<
+    "regular" | "senior"
+  >("regular");
   const [bulkMessage, setBulkMessage] = useState<string | null>(null);
   const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
-  const [activeAdminForm, setActiveAdminForm] = useState<"none" | "bulk" | "create">("none");
+  const [activeAdminForm, setActiveAdminForm] = useState<
+    "none" | "bulk" | "create"
+  >("none");
   const api = useApiQuery<UserAdminListItem[]>("users");
   const driversApi = useApiQuery<DriverListItem[]>("drivers");
   const settingsApi = useApiQuery<SettingsOverview>("settings/overview");
@@ -61,6 +98,7 @@ export function UsersPage() {
       password: string;
       firstName: string;
       lastName: string;
+      middleName?: string | null;
       role: UserAdminListItem["role"];
       customRoleKey?: string | null;
       companyName?: string | null;
@@ -71,7 +109,9 @@ export function UsersPage() {
   const companies = settingsApi.data?.companies ?? [];
   const customRoles = settingsApi.data?.customCrmRoles ?? [];
   const baseUsers = (api.data ?? []).filter(
-    (item) => item.status !== "blocked" && (companyFilter === "all" || (item.companyName ?? "") === companyFilter),
+    (item) =>
+      item.status !== "blocked" &&
+      (companyFilter === "all" || (item.companyName ?? "") === companyFilter),
   );
   const drivers = driversApi.data ?? [];
   const users = useMemo(() => {
@@ -85,7 +125,8 @@ export function UsersPage() {
           .includes(normalizedQuery);
       const roleKey = item.customRoleKey || item.role;
       const matchesRole = roleFilter === "all" || roleKey === roleFilter;
-      const matchesStatus = statusFilter === "all" || item.status === statusFilter;
+      const matchesStatus =
+        statusFilter === "all" || item.status === statusFilter;
       const matchesMfa =
         mfaFilter === "all" ||
         (mfaFilter === "enabled" ? item.mfaEnabled : !item.mfaEnabled);
@@ -97,11 +138,20 @@ export function UsersPage() {
         case "name_desc":
           return right.displayName.localeCompare(left.displayName, "ru");
         case "role_asc":
-          return getDisplayRoleLabel(left).localeCompare(getDisplayRoleLabel(right), "ru");
+          return getDisplayRoleLabel(left).localeCompare(
+            getDisplayRoleLabel(right),
+            "ru",
+          );
         case "company_asc":
-          return (left.companyName ?? "").localeCompare(right.companyName ?? "", "ru");
+          return (left.companyName ?? "").localeCompare(
+            right.companyName ?? "",
+            "ru",
+          );
         case "status_asc":
-          return getStatusLabel(left.status).localeCompare(getStatusLabel(right.status), "ru");
+          return getStatusLabel(left.status).localeCompare(
+            getStatusLabel(right.status),
+            "ru",
+          );
         case "login_asc":
           return left.login.localeCompare(right.login, "ru");
         case "name_asc":
@@ -125,9 +175,15 @@ export function UsersPage() {
   }
   for (const driver of drivers) {
     if (driver.managerId) {
-      driverCountByManager.set(driver.managerId, (driverCountByManager.get(driver.managerId) ?? 0) + 1);
+      driverCountByManager.set(
+        driver.managerId,
+        (driverCountByManager.get(driver.managerId) ?? 0) + 1,
+      );
       if (driver.activeContractId) {
-        vehicleCountByManager.set(driver.managerId, (vehicleCountByManager.get(driver.managerId) ?? 0) + 1);
+        vehicleCountByManager.set(
+          driver.managerId,
+          (vehicleCountByManager.get(driver.managerId) ?? 0) + 1,
+        );
       }
     }
   }
@@ -138,7 +194,9 @@ export function UsersPage() {
       item.status !== "blocked" &&
       item.id !== archiveCandidate?.id &&
       item.managerProfileId &&
-      (archiveCandidate?.companyName ? item.companyName === archiveCandidate.companyName : true),
+      (archiveCandidate?.companyName
+        ? item.companyName === archiveCandidate.companyName
+        : true),
   );
 
   function getCustomRoleLabel(roleKey?: string | null): string | null {
@@ -158,7 +216,9 @@ export function UsersPage() {
 
   function toggleUserSelection(userId: string): void {
     setSelectedUserIds((current) =>
-      current.includes(userId) ? current.filter((id) => id !== userId) : [...current, userId],
+      current.includes(userId)
+        ? current.filter((id) => id !== userId)
+        : [...current, userId],
     );
   }
 
@@ -226,7 +286,9 @@ export function UsersPage() {
     );
   }
 
-  async function handleCreateUser(event: FormEvent<HTMLFormElement>): Promise<void> {
+  async function handleCreateUser(
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> {
     event.preventDefault();
     setCreateMessage(null);
 
@@ -235,6 +297,7 @@ export function UsersPage() {
       password: createPassword,
       firstName: createFirstName.trim(),
       lastName: createLastName.trim(),
+      middleName: createMiddleName.trim() || null,
       role: createRole,
       customRoleKey: createCustomRoleKey || null,
       companyName: createCompanyName || undefined,
@@ -249,6 +312,7 @@ export function UsersPage() {
     setCreatePhone("");
     setCreatePassword("");
     setCreateFirstName("");
+    setCreateMiddleName("");
     setCreateLastName("");
     setCreateRole("manager");
     setCreateCustomRoleKey("");
@@ -256,12 +320,15 @@ export function UsersPage() {
     setCreateManagerLevel("regular");
     setActiveAdminForm("none");
     await api.refetch();
-    setCreateMessage(`Пользователь ${created.displayName} зарегистрирован по номеру ${created.login}.`);
+    setCreateMessage(
+      `Пользователь ${created.displayName} зарегистрирован по номеру ${created.login}.`,
+    );
   }
 
   function handleStartEdit(user: UserAdminListItem): void {
     setEditUserId(user.id);
     setEditPhone(user.login);
+    setEditMiddleName(user.middleName ?? "");
     setEditRole(user.role);
     setEditCustomRoleKey(user.customRoleKey ?? "");
     setEditStatus(user.status);
@@ -288,6 +355,7 @@ export function UsersPage() {
       await patchJson(`users/${editUserId}`, {
         role: editRole,
         phone: editPhone.trim(),
+        middleName: editMiddleName.trim() || null,
         customRoleKey: editCustomRoleKey || null,
         status: editStatus,
         mfaEnabled: editMfaEnabled,
@@ -302,31 +370,47 @@ export function UsersPage() {
       await api.refetch();
       setEditMessage("Карточка пользователя обновлена.");
     } catch (error) {
-      setEditMessage(error instanceof Error ? error.message : "Не удалось обновить пользователя.");
+      setEditMessage(
+        error instanceof Error
+          ? error.message
+          : "Не удалось обновить пользователя.",
+      );
     } finally {
-    setEditSaving(false);
-  }
+      setEditSaving(false);
+    }
   }
 
-  async function archiveUser(user: UserAdminListItem, nextManagerId?: string | null): Promise<void> {
+  async function archiveUser(
+    user: UserAdminListItem,
+    nextManagerId?: string | null,
+  ): Promise<void> {
     setDeletingUserId(user.id);
     setUserActionMessage(null);
     try {
-      await patchJson(`users/${user.id}`, { status: "blocked", reassignManagerId: nextManagerId ?? null });
+      await patchJson(`users/${user.id}`, {
+        status: "blocked",
+        reassignManagerId: nextManagerId ?? null,
+      });
       await api.refetch();
       await driversApi.refetch();
       setUserActionMessage("Пользователь удалён из списка.");
       setArchiveCandidate(null);
       setReassignManagerId("");
     } catch (error) {
-      setUserActionMessage(error instanceof Error ? error.message : "Не удалось удалить пользователя.");
+      setUserActionMessage(
+        error instanceof Error
+          ? error.message
+          : "Не удалось удалить пользователя.",
+      );
     } finally {
       setDeletingUserId(null);
     }
   }
 
   async function handleArchiveUser(user: UserAdminListItem): Promise<void> {
-    const assignedDriversCount = user.managerProfileId ? driverCountByManager.get(user.managerProfileId) ?? 0 : 0;
+    const assignedDriversCount = user.managerProfileId
+      ? (driverCountByManager.get(user.managerProfileId) ?? 0)
+      : 0;
     if (user.role === "manager" && assignedDriversCount > 0) {
       const firstTarget =
         users.find(
@@ -353,7 +437,11 @@ export function UsersPage() {
       return;
     }
 
-    if (!window.confirm(`Удалить пользователя ${user.displayName}? Он будет скрыт из списка и заблокирован.`)) {
+    if (
+      !window.confirm(
+        `Удалить пользователя ${user.displayName}? Он будет скрыт из списка и заблокирован.`,
+      )
+    ) {
       return;
     }
 
@@ -365,7 +453,11 @@ export function UsersPage() {
       setBulkMessage("Выберите хотя бы одного пользователя.");
       return;
     }
-    if (!window.confirm(`Удалить выбранных пользователей: ${selectedUserIds.length}? Они будут скрыты из списка и заблокированы.`)) {
+    if (
+      !window.confirm(
+        `Удалить выбранных пользователей: ${selectedUserIds.length}? Они будут скрыты из списка и заблокированы.`,
+      )
+    ) {
       return;
     }
 
@@ -382,7 +474,11 @@ export function UsersPage() {
       setSelectedUserIds([]);
       setBulkMessage(`Удалено из списка: ${updatedCount}.`);
     } catch (error) {
-      setBulkMessage(error instanceof Error ? error.message : "Не удалось удалить выбранных пользователей.");
+      setBulkMessage(
+        error instanceof Error
+          ? error.message
+          : "Не удалось удалить выбранных пользователей.",
+      );
     } finally {
       setBulkDeleting(false);
     }
@@ -413,7 +509,9 @@ export function UsersPage() {
       for (const userId of selectedUserIds) {
         await patchJson(`users/${userId}`, {
           ...(bulkRole !== "keep" ? { role: bulkRole } : {}),
-          ...(bulkCustomRoleKey !== "keep" ? { customRoleKey: bulkCustomRoleKey || null } : {}),
+          ...(bulkCustomRoleKey !== "keep"
+            ? { customRoleKey: bulkCustomRoleKey || null }
+            : {}),
           ...(bulkRole === "manager"
             ? {
                 managerLevel: bulkManagerLevel,
@@ -421,8 +519,12 @@ export function UsersPage() {
               }
             : {}),
           ...(bulkStatus !== "keep" ? { status: bulkStatus } : {}),
-          ...(bulkCompanyName !== "keep" ? { companyName: bulkCompanyName || null } : {}),
-          ...(bulkMfaMode !== "keep" ? { mfaEnabled: bulkMfaMode === "enabled" } : {}),
+          ...(bulkCompanyName !== "keep"
+            ? { companyName: bulkCompanyName || null }
+            : {}),
+          ...(bulkMfaMode !== "keep"
+            ? { mfaEnabled: bulkMfaMode === "enabled" }
+            : {}),
         });
         updatedCount += 1;
       }
@@ -437,7 +539,11 @@ export function UsersPage() {
       setBulkManagerLevel("regular");
       setBulkMessage(`Массово обновлено ${updatedCount} пользователей.`);
     } catch (error) {
-      setBulkMessage(error instanceof Error ? error.message : "Не удалось массово обновить пользователей.");
+      setBulkMessage(
+        error instanceof Error
+          ? error.message
+          : "Не удалось массово обновить пользователей.",
+      );
     } finally {
       setBulkSaving(false);
     }
@@ -451,7 +557,10 @@ export function UsersPage() {
         <p>Роли, статусы и защита входа.</p>
         {api.data?.length ? (
           <div className="toolbar">
-            <select value={companyFilter} onChange={(event) => setCompanyFilter(event.target.value)}>
+            <select
+              value={companyFilter}
+              onChange={(event) => setCompanyFilter(event.target.value)}
+            >
               <option value="all">Все компании</option>
               {companies.map((item) => (
                 <option key={item} value={item}>
@@ -470,8 +579,12 @@ export function UsersPage() {
         ) : null}
       </div>
       <div className="parkpro-tabs">
-        <Link className="parkpro-tab parkpro-tab--active" to="/users">Пользователи</Link>
-        <Link className="parkpro-tab" to="/audit">Журнал действий</Link>
+        <Link className="parkpro-tab parkpro-tab--active" to="/users">
+          Пользователи
+        </Link>
+        <Link className="parkpro-tab" to="/audit">
+          Журнал действий
+        </Link>
       </div>
 
       {archiveCandidate ? (
@@ -493,7 +606,9 @@ export function UsersPage() {
                 <p>
                   У {archiveCandidate.displayName} водителей:{" "}
                   {archiveCandidate.managerProfileId
-                    ? driverCountByManager.get(archiveCandidate.managerProfileId) ?? 0
+                    ? (driverCountByManager.get(
+                        archiveCandidate.managerProfileId,
+                      ) ?? 0)
                     : 0}
                 </p>
               </div>
@@ -509,25 +624,42 @@ export function UsersPage() {
             </div>
             <div className="entity-modal__body">
               <div className="quick-form">
-                <select value={reassignManagerId} onChange={(event) => setReassignManagerId(event.target.value)}>
+                <select
+                  value={reassignManagerId}
+                  onChange={(event) => setReassignManagerId(event.target.value)}
+                >
                   <option value="">Выберите нового бригадира</option>
                   {archiveTargetManagers.map((manager) => (
-                    <option key={manager.id} value={manager.managerProfileId ?? ""}>
+                    <option
+                      key={manager.id}
+                      value={manager.managerProfileId ?? ""}
+                    >
                       {manager.displayName} · {getDisplayRoleLabel(manager)}
                     </option>
                   ))}
                 </select>
                 {archiveTargetManagers.length ? null : (
-                  <div className="panel-note">Нет доступного бригадира для переноса водителей.</div>
+                  <div className="panel-note">
+                    Нет доступного бригадира для переноса водителей.
+                  </div>
                 )}
-                {userActionMessage ? <div className="panel-note">{userActionMessage}</div> : null}
+                {userActionMessage ? (
+                  <div className="panel-note">{userActionMessage}</div>
+                ) : null}
                 <div className="toolbar">
                   <button
                     type="button"
-                    disabled={!reassignManagerId || deletingUserId === archiveCandidate.id}
-                    onClick={() => void archiveUser(archiveCandidate, reassignManagerId)}
+                    disabled={
+                      !reassignManagerId ||
+                      deletingUserId === archiveCandidate.id
+                    }
+                    onClick={() =>
+                      void archiveUser(archiveCandidate, reassignManagerId)
+                    }
                   >
-                    {deletingUserId === archiveCandidate.id ? "Удаляем..." : "Передать и удалить"}
+                    {deletingUserId === archiveCandidate.id
+                      ? "Удаляем..."
+                      : "Передать и удалить"}
                   </button>
                   <button
                     type="button"
@@ -600,12 +732,18 @@ export function UsersPage() {
           <div className="summary-list user-roles-list">
             {[...roleCounts.entries()].map(([role, count]) => (
               <div key={role}>
-                <span>{getCustomRoleLabel(role) ?? getUserRoleLabel(role)}</span>
+                <span>
+                  {getCustomRoleLabel(role) ?? getUserRoleLabel(role)}
+                </span>
                 <strong>{count}</strong>
                 {roleActionMap[role]?.length ? (
                   <div className="toolbar">
                     {roleActionMap[role].map((action) => (
-                      <Link key={`${role}-${action.to}`} className="table-link" to={action.to}>
+                      <Link
+                        key={`${role}-${action.to}`}
+                        className="table-link"
+                        to={action.to}
+                      >
                         {action.label}
                       </Link>
                     ))}
@@ -625,74 +763,124 @@ export function UsersPage() {
             <h3>Массовое администрирование</h3>
           </div>
           <div className="toolbar">
-            <button type="button" className="button-secondary" onClick={() => setActiveAdminForm((current) => current === "bulk" ? "none" : "bulk")}>
-              {activeAdminForm === "bulk" ? "Скрыть массовые действия" : "Открыть массовые действия"}
+            <button
+              type="button"
+              className="button-secondary"
+              onClick={() =>
+                setActiveAdminForm((current) =>
+                  current === "bulk" ? "none" : "bulk",
+                )
+              }
+            >
+              {activeAdminForm === "bulk"
+                ? "Скрыть массовые действия"
+                : "Открыть массовые действия"}
             </button>
             <span className="panel-note">Выбрано: {selectedCount}</span>
           </div>
           {activeAdminForm === "bulk" ? (
-          <div className="quick-form">
-            <p className="quick-form__meta">Роли, статус, компания и MFA для группы пользователей.</p>
-            <div className="toolbar">
-              <button type="button" onClick={toggleSelectAll}>
-                {allSelected ? "Снять выбор" : "Выбрать всех"}
-              </button>
-              <span className="panel-note">Выбрано: {selectedCount}</span>
-            </div>
-            <div className="form-grid">
-              <select value={bulkRole} onChange={(event) => setBulkRole(event.target.value as typeof bulkRole)}>
-                <option value="keep">Роль без изменений</option>
-                <option value="admin">Администратор</option>
-                <option value="owner">Владелец</option>
-                <option value="finance">Финансы</option>
-                <option value="operator">Оператор</option>
-                <option value="auditor">Аудитор</option>
-                <option value="manager">Бригадир</option>
-              </select>
-              <select value={bulkCustomRoleKey} onChange={(event) => setBulkCustomRoleKey(event.target.value)}>
-                <option value="keep">Кастомная роль без изменений</option>
-                <option value="">Без кастомной роли</option>
-                {customRoles.map((role) => (
-                  <option key={role.key} value={role.key}>
-                    {role.label}
-                  </option>
-                ))}
-              </select>
-              {bulkRole === "manager" ? (
-                <select value={bulkManagerLevel} onChange={(event) => setBulkManagerLevel(event.target.value as "regular" | "senior")}>
-                  <option value="regular">Обычный бригадир</option>
-                  <option value="senior">Старший бригадир</option>
+            <div className="quick-form">
+              <p className="quick-form__meta">
+                Роли, статус, компания и MFA для группы пользователей.
+              </p>
+              <div className="toolbar">
+                <button type="button" onClick={toggleSelectAll}>
+                  {allSelected ? "Снять выбор" : "Выбрать всех"}
+                </button>
+                <span className="panel-note">Выбрано: {selectedCount}</span>
+              </div>
+              <div className="form-grid">
+                <select
+                  value={bulkRole}
+                  onChange={(event) =>
+                    setBulkRole(event.target.value as typeof bulkRole)
+                  }
+                >
+                  <option value="keep">Роль без изменений</option>
+                  <option value="admin">Администратор</option>
+                  <option value="owner">Владелец</option>
+                  <option value="finance">Финансы</option>
+                  <option value="operator">Оператор</option>
+                  <option value="auditor">Аудитор</option>
+                  <option value="manager">Бригадир</option>
                 </select>
+                <select
+                  value={bulkCustomRoleKey}
+                  onChange={(event) => setBulkCustomRoleKey(event.target.value)}
+                >
+                  <option value="keep">Кастомная роль без изменений</option>
+                  <option value="">Без кастомной роли</option>
+                  {customRoles.map((role) => (
+                    <option key={role.key} value={role.key}>
+                      {role.label}
+                    </option>
+                  ))}
+                </select>
+                {bulkRole === "manager" ? (
+                  <select
+                    value={bulkManagerLevel}
+                    onChange={(event) =>
+                      setBulkManagerLevel(
+                        event.target.value as "regular" | "senior",
+                      )
+                    }
+                  >
+                    <option value="regular">Обычный бригадир</option>
+                    <option value="senior">Старший бригадир</option>
+                  </select>
+                ) : null}
+                <select
+                  value={bulkStatus}
+                  onChange={(event) =>
+                    setBulkStatus(event.target.value as typeof bulkStatus)
+                  }
+                >
+                  <option value="keep">Статус без изменений</option>
+                  <option value="active">Активный</option>
+                  <option value="blocked">Заблокирован</option>
+                  <option value="invited">Приглашён</option>
+                </select>
+                <select
+                  value={bulkCompanyName}
+                  onChange={(event) => setBulkCompanyName(event.target.value)}
+                >
+                  <option value="keep">Компания без изменений</option>
+                  <option value="">Без компании</option>
+                  {companies.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={bulkMfaMode}
+                  onChange={(event) =>
+                    setBulkMfaMode(event.target.value as typeof bulkMfaMode)
+                  }
+                >
+                  <option value="keep">MFA без изменений</option>
+                  <option value="enabled">MFA включить</option>
+                  <option value="disabled">MFA выключить</option>
+                </select>
+              </div>
+              {bulkMessage ? (
+                <div className="panel-note">{bulkMessage}</div>
               ) : null}
-              <select value={bulkStatus} onChange={(event) => setBulkStatus(event.target.value as typeof bulkStatus)}>
-                <option value="keep">Статус без изменений</option>
-                <option value="active">Активный</option>
-                <option value="blocked">Заблокирован</option>
-                <option value="invited">Приглашён</option>
-              </select>
-              <select value={bulkCompanyName} onChange={(event) => setBulkCompanyName(event.target.value)}>
-                <option value="keep">Компания без изменений</option>
-                <option value="">Без компании</option>
-                {companies.map((item) => (
-                  <option key={item} value={item}>
-                    {item}
-                  </option>
-                ))}
-              </select>
-              <select value={bulkMfaMode} onChange={(event) => setBulkMfaMode(event.target.value as typeof bulkMfaMode)}>
-                <option value="keep">MFA без изменений</option>
-                <option value="enabled">MFA включить</option>
-                <option value="disabled">MFA выключить</option>
-              </select>
+              <button
+                type="button"
+                disabled={bulkSaving || !selectedCount}
+                onClick={() => void handleBulkSave()}
+              >
+                {bulkSaving ? "Сохраняем..." : "Применить массово"}
+              </button>
+              <button
+                type="button"
+                disabled={bulkDeleting || !selectedCount}
+                onClick={() => void handleBulkArchive()}
+              >
+                {bulkDeleting ? "Удаляем..." : "Удалить выбранных"}
+              </button>
             </div>
-            {bulkMessage ? <div className="panel-note">{bulkMessage}</div> : null}
-            <button type="button" disabled={bulkSaving || !selectedCount} onClick={() => void handleBulkSave()}>
-              {bulkSaving ? "Сохраняем..." : "Применить массово"}
-            </button>
-            <button type="button" disabled={bulkDeleting || !selectedCount} onClick={() => void handleBulkArchive()}>
-              {bulkDeleting ? "Удаляем..." : "Удалить выбранных"}
-            </button>
-          </div>
           ) : null}
         </article>
         <article className="panel">
@@ -701,58 +889,127 @@ export function UsersPage() {
             <h3>Регистрация по номеру</h3>
           </div>
           <div className="toolbar">
-            <button type="button" className="button-secondary" onClick={() => setActiveAdminForm((current) => current === "create" ? "none" : "create")}>
-              {activeAdminForm === "create" ? "Скрыть регистрацию" : "Открыть регистрацию"}
+            <button
+              type="button"
+              className="button-secondary"
+              onClick={() =>
+                setActiveAdminForm((current) =>
+                  current === "create" ? "none" : "create",
+                )
+              }
+            >
+              {activeAdminForm === "create"
+                ? "Скрыть регистрацию"
+                : "Открыть регистрацию"}
             </button>
-            {createMessage ? <span className="panel-note">{createMessage}</span> : null}
+            {createMessage ? (
+              <span className="panel-note">{createMessage}</span>
+            ) : null}
           </div>
           {activeAdminForm === "create" ? (
-          <form className="quick-form" onSubmit={(event) => void handleCreateUser(event)}>
-            <p className="quick-form__meta">Новая учётка сотрудника создаётся сразу по номеру телефона и дальше входит без email.</p>
-            <input value={createFirstName} onChange={(event) => setCreateFirstName(event.target.value)} placeholder="Имя" />
-            <input value={createLastName} onChange={(event) => setCreateLastName(event.target.value)} placeholder="Фамилия" />
-            <input value={createPhone} onChange={(event) => setCreatePhone(event.target.value)} placeholder="+996555123456" />
-            <input value={createPassword} onChange={(event) => setCreatePassword(event.target.value)} type="password" placeholder="Пароль" />
-            <select value={createRole} onChange={(event) => setCreateRole(event.target.value as UserAdminListItem["role"])}>
-              <option value="manager">Бригадир</option>
-              <option value="admin">Администратор</option>
-              <option value="owner">Владелец</option>
-              <option value="finance">Финансы</option>
-              <option value="operator">Оператор</option>
-              <option value="auditor">Аудитор</option>
-            </select>
-            <select value={createCustomRoleKey} onChange={(event) => setCreateCustomRoleKey(event.target.value)}>
-              <option value="">Без кастомной роли</option>
-              {customRoles.map((role) => (
-                <option key={role.key} value={role.key}>
-                  {role.label}
-                </option>
-              ))}
-            </select>
-            {createRole === "manager" ? (
-              <select value={createManagerLevel} onChange={(event) => setCreateManagerLevel(event.target.value as "regular" | "senior")}>
-                <option value="regular">Обычный бригадир</option>
-                <option value="senior">Старший бригадир</option>
+            <form
+              className="quick-form"
+              onSubmit={(event) => void handleCreateUser(event)}
+            >
+              <p className="quick-form__meta">
+                Новая учётка сотрудника создаётся сразу по номеру телефона и
+                дальше входит без email.
+              </p>
+              <input
+                value={createFirstName}
+                onChange={(event) => setCreateFirstName(event.target.value)}
+                placeholder="Имя"
+              />
+              <input
+                value={createMiddleName}
+                onChange={(event) => setCreateMiddleName(event.target.value)}
+                placeholder="Отчество (если есть)"
+                maxLength={100}
+              />
+              <input
+                value={createLastName}
+                onChange={(event) => setCreateLastName(event.target.value)}
+                placeholder="Фамилия"
+              />
+              <input
+                value={createPhone}
+                onChange={(event) => setCreatePhone(event.target.value)}
+                placeholder="+996555123456"
+              />
+              <input
+                value={createPassword}
+                onChange={(event) => setCreatePassword(event.target.value)}
+                type="password"
+                placeholder="Пароль"
+              />
+              <select
+                value={createRole}
+                onChange={(event) =>
+                  setCreateRole(event.target.value as UserAdminListItem["role"])
+                }
+              >
+                <option value="manager">Бригадир</option>
+                <option value="admin">Администратор</option>
+                <option value="owner">Владелец</option>
+                <option value="finance">Финансы</option>
+                <option value="operator">Оператор</option>
+                <option value="auditor">Аудитор</option>
               </select>
-            ) : null}
-            <select value={createCompanyName} onChange={(event) => setCreateCompanyName(event.target.value)}>
-              <option value="">Без компании</option>
-              {companies.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-            </select>
-            {createMessage ? <div className="panel-note">{createMessage}</div> : null}
-            {createUser.error ? <div className="panel-note">Ошибка регистрации: {createUser.error}</div> : null}
-            <button type="submit" disabled={createUser.loading}>
-              {createUser.loading ? "Регистрируем..." : "Зарегистрировать по номеру"}
-            </button>
-          </form>
+              <select
+                value={createCustomRoleKey}
+                onChange={(event) => setCreateCustomRoleKey(event.target.value)}
+              >
+                <option value="">Без кастомной роли</option>
+                {customRoles.map((role) => (
+                  <option key={role.key} value={role.key}>
+                    {role.label}
+                  </option>
+                ))}
+              </select>
+              {createRole === "manager" ? (
+                <select
+                  value={createManagerLevel}
+                  onChange={(event) =>
+                    setCreateManagerLevel(
+                      event.target.value as "regular" | "senior",
+                    )
+                  }
+                >
+                  <option value="regular">Обычный бригадир</option>
+                  <option value="senior">Старший бригадир</option>
+                </select>
+              ) : null}
+              <select
+                value={createCompanyName}
+                onChange={(event) => setCreateCompanyName(event.target.value)}
+              >
+                <option value="">Без компании</option>
+                {companies.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+              {createMessage ? (
+                <div className="panel-note">{createMessage}</div>
+              ) : null}
+              {createUser.error ? (
+                <div className="panel-note">
+                  Ошибка регистрации: {createUser.error}
+                </div>
+              ) : null}
+              <button type="submit" disabled={createUser.loading}>
+                {createUser.loading
+                  ? "Регистрируем..."
+                  : "Зарегистрировать по номеру"}
+              </button>
+            </form>
           ) : null}
         </article>
         <article className="panel">
-          {userActionMessage ? <div className="panel-note">{userActionMessage}</div> : null}
+          {userActionMessage ? (
+            <div className="panel-note">{userActionMessage}</div>
+          ) : null}
           <h3>Список пользователей</h3>
           <div className="quick-form">
             <div className="form-grid">
@@ -761,7 +1018,10 @@ export function UsersPage() {
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Поиск по имени, телефону, роли или ID"
               />
-              <select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}>
+              <select
+                value={roleFilter}
+                onChange={(event) => setRoleFilter(event.target.value)}
+              >
                 <option value="all">Все роли</option>
                 <option value="driver">Водители</option>
                 <option value="manager">Бригадиры</option>
@@ -776,17 +1036,26 @@ export function UsersPage() {
                   </option>
                 ))}
               </select>
-              <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+              <select
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value)}
+              >
                 <option value="all">Все статусы</option>
                 <option value="active">Активные</option>
                 <option value="invited">Приглашённые</option>
               </select>
-              <select value={mfaFilter} onChange={(event) => setMfaFilter(event.target.value)}>
+              <select
+                value={mfaFilter}
+                onChange={(event) => setMfaFilter(event.target.value)}
+              >
                 <option value="all">Любая защита</option>
                 <option value="enabled">MFA включена</option>
                 <option value="disabled">MFA выключена</option>
               </select>
-              <select value={sortKey} onChange={(event) => setSortKey(event.target.value)}>
+              <select
+                value={sortKey}
+                onChange={(event) => setSortKey(event.target.value)}
+              >
                 <option value="name_asc">Имя А-Я</option>
                 <option value="name_desc">Имя Я-А</option>
                 <option value="role_asc">По роли</option>
@@ -827,149 +1096,242 @@ export function UsersPage() {
               </thead>
               <tbody>
                 {users.map((item) => (
-                <tr key={item.id}>
-                  <td>
-                    <input
-                      type="checkbox"
-                      checked={selectedUserIds.includes(item.id)}
-                      onChange={() => toggleUserSelection(item.id)}
-                    />
-                  </td>
-                  <td>
-                    <div className="identity-cell">
-                      <strong>{formatShortId(item.id)}</strong>
-                    </div>
-                  </td>
-                  <td>
-                    <div className="amount-stack">
-                      <strong>{item.displayName}</strong>
-                      {editUserId === item.id ? (
-                        <select value={editCompanyName} onChange={(event) => setEditCompanyName(event.target.value)}>
-                          <option value="">Без компании</option>
-                          {companies.map((company) => (
-                            <option key={company} value={company}>
-                              {company}
-                            </option>
-                          ))}
-                        </select>
-                      ) : item.companyName ? (
-                        <span>{item.companyName}</span>
-                      ) : null}
-                    </div>
-                  </td>
-                  <td>
-                    {editUserId === item.id ? (
-                      <input value={editPhone} onChange={(event) => setEditPhone(event.target.value)} placeholder="+996..." />
-                    ) : (
-                      item.login
-                    )}
-                  </td>
-                  <td>
-                    <div className="identity-cell">
-                      {editUserId === item.id ? (
-                        <>
-                          <select value={editRole} onChange={(event) => setEditRole(event.target.value as UserAdminListItem["role"])}>
-                            <option value="admin">Администратор</option>
-                            <option value="owner">Владелец</option>
-                            <option value="finance">Финансы</option>
-                            <option value="operator">Оператор</option>
-                            <option value="auditor">Аудитор</option>
-                            <option value="manager">Бригадир</option>
-                            <option value="driver">Водитель</option>
-                          </select>
-                          <select value={editCustomRoleKey} onChange={(event) => setEditCustomRoleKey(event.target.value)}>
-                            <option value="">Без кастомной роли</option>
-                            {customRoles.map((role) => (
-                              <option key={role.key} value={role.key}>
-                                {role.label}
+                  <tr key={item.id}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={selectedUserIds.includes(item.id)}
+                        onChange={() => toggleUserSelection(item.id)}
+                      />
+                    </td>
+                    <td>
+                      <div className="identity-cell">
+                        <strong>{formatShortId(item.id)}</strong>
+                      </div>
+                    </td>
+                    <td>
+                      <div className="amount-stack">
+                        <strong>{item.displayName}</strong>
+                        {editUserId === item.id ? (
+                          <select
+                            value={editCompanyName}
+                            onChange={(event) =>
+                              setEditCompanyName(event.target.value)
+                            }
+                          >
+                            <option value="">Без компании</option>
+                            {companies.map((company) => (
+                              <option key={company} value={company}>
+                                {company}
                               </option>
                             ))}
                           </select>
-                          {editRole === "manager" ? (
-                            <select value={editManagerLevel} onChange={(event) => setEditManagerLevel(event.target.value as "regular" | "senior")}>
-                              <option value="regular">Обычный бригадир</option>
-                              <option value="senior">Старший бригадир</option>
-                            </select>
-                          ) : null}
+                        ) : item.companyName ? (
+                          <span>{item.companyName}</span>
+                        ) : null}
+                      </div>
+                    </td>
+                    <td>
+                      {editUserId === item.id ? (
+                        <>
+                          <input
+                            value={editMiddleName}
+                            onChange={(event) =>
+                              setEditMiddleName(event.target.value)
+                            }
+                            placeholder="Отчество (если есть)"
+                            maxLength={100}
+                          />
+                          <input
+                            value={editPhone}
+                            onChange={(event) =>
+                              setEditPhone(event.target.value)
+                            }
+                            placeholder="+996..."
+                          />
                         </>
                       ) : (
-                        <strong>{getDisplayRoleLabel(item)}</strong>
+                        item.login
                       )}
-                      {item.role === "manager" && item.managerProfileId && editUserId !== item.id ? (
-                        <span>
-                          Водители: {driverCountByManager.get(item.managerProfileId) ?? 0} · Машины:{" "}
-                          {vehicleCountByManager.get(item.managerProfileId) ?? 0}
+                    </td>
+                    <td>
+                      <div className="identity-cell">
+                        {editUserId === item.id ? (
+                          <>
+                            <select
+                              value={editRole}
+                              onChange={(event) =>
+                                setEditRole(
+                                  event.target
+                                    .value as UserAdminListItem["role"],
+                                )
+                              }
+                            >
+                              <option value="admin">Администратор</option>
+                              <option value="owner">Владелец</option>
+                              <option value="finance">Финансы</option>
+                              <option value="operator">Оператор</option>
+                              <option value="auditor">Аудитор</option>
+                              <option value="manager">Бригадир</option>
+                              <option value="driver">Водитель</option>
+                            </select>
+                            <select
+                              value={editCustomRoleKey}
+                              onChange={(event) =>
+                                setEditCustomRoleKey(event.target.value)
+                              }
+                            >
+                              <option value="">Без кастомной роли</option>
+                              {customRoles.map((role) => (
+                                <option key={role.key} value={role.key}>
+                                  {role.label}
+                                </option>
+                              ))}
+                            </select>
+                            {editRole === "manager" ? (
+                              <select
+                                value={editManagerLevel}
+                                onChange={(event) =>
+                                  setEditManagerLevel(
+                                    event.target.value as "regular" | "senior",
+                                  )
+                                }
+                              >
+                                <option value="regular">
+                                  Обычный бригадир
+                                </option>
+                                <option value="senior">Старший бригадир</option>
+                              </select>
+                            ) : null}
+                          </>
+                        ) : (
+                          <strong>{getDisplayRoleLabel(item)}</strong>
+                        )}
+                        {item.role === "manager" &&
+                        item.managerProfileId &&
+                        editUserId !== item.id ? (
+                          <span>
+                            Водители:{" "}
+                            {driverCountByManager.get(item.managerProfileId) ??
+                              0}{" "}
+                            · Машины:{" "}
+                            {vehicleCountByManager.get(item.managerProfileId) ??
+                              0}
+                          </span>
+                        ) : null}
+                        {roleRouteMap[item.role] &&
+                        !roleActionMap[item.role]?.length &&
+                        editUserId !== item.id ? (
+                          <Link
+                            className="table-link"
+                            to={roleRouteMap[item.role]}
+                          >
+                            Открыть раздел
+                          </Link>
+                        ) : null}
+                        {roleActionMap[item.role]?.length &&
+                        editUserId !== item.id ? (
+                          <div className="users-table__role-links">
+                            {roleActionMap[item.role].map((action) => (
+                              <Link
+                                key={action.to}
+                                className="inline-pill inline-pill--accent"
+                                to={action.to}
+                              >
+                                {action.label}
+                              </Link>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    </td>
+                    <td>
+                      {editUserId === item.id ? (
+                        <select
+                          value={editStatus}
+                          onChange={(event) =>
+                            setEditStatus(event.target.value)
+                          }
+                        >
+                          <option value="active">Активный</option>
+                          <option value="blocked">Заблокирован</option>
+                          <option value="invited">Приглашён</option>
+                        </select>
+                      ) : (
+                        <span className={getStatusTone(item.status)}>
+                          {getStatusLabel(item.status)}
                         </span>
-                      ) : null}
-                      {roleRouteMap[item.role] && !roleActionMap[item.role]?.length && editUserId !== item.id ? (
-                        <Link className="table-link" to={roleRouteMap[item.role]}>
-                          Открыть раздел
-                        </Link>
-                      ) : null}
-                      {roleActionMap[item.role]?.length && editUserId !== item.id ? (
-                        <div className="users-table__role-links">
-                          {roleActionMap[item.role].map((action) => (
-                            <Link key={action.to} className="inline-pill inline-pill--accent" to={action.to}>
-                              {action.label}
-                            </Link>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
-                  </td>
-                  <td>
-                    {editUserId === item.id ? (
-                      <select value={editStatus} onChange={(event) => setEditStatus(event.target.value)}>
-                        <option value="active">Активный</option>
-                        <option value="blocked">Заблокирован</option>
-                        <option value="invited">Приглашён</option>
-                      </select>
-                    ) : (
-                      <span className={getStatusTone(item.status)}>{getStatusLabel(item.status)}</span>
-                    )}
-                  </td>
-                  <td>
-                    <div className="identity-cell">
-                      {editUserId === item.id ? (
-                        <label className="checkbox-row">
-                          <input type="checkbox" checked={editMfaEnabled} onChange={(event) => setEditMfaEnabled(event.target.checked)} />
-                          <span>{editMfaEnabled ? "Включена" : "Выключена"}</span>
-                        </label>
-                      ) : (
-                        <strong>{item.mfaEnabled ? "Включена" : "Выключена"}</strong>
                       )}
-                      {!item.mfaEnabled && editUserId !== item.id ? (
-                        <Link className="table-link" to="/settings">
-                          Открыть настройки
-                        </Link>
-                      ) : null}
-                    </div>
-                  </td>
-                  <td>
-                    <div className="identity-cell users-table__actions">
-                      {editUserId === item.id ? (
-                        <div className="toolbar">
-                          <button type="button" disabled={editSaving} onClick={() => void handleSaveEdit()}>
-                            {editSaving ? "Сохраняем..." : "Сохранить"}
-                          </button>
-                          <button type="button" onClick={handleCancelEdit}>
-                            Отменить
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="toolbar">
-                          <button type="button" title="Редактировать пользователя" onClick={() => handleStartEdit(item)}>
-                            Править
-                          </button>
-                          <button type="button" title="Удалить пользователя" disabled={deletingUserId === item.id} onClick={() => void handleArchiveUser(item)}>
-                            {deletingUserId === item.id ? "Удаляем..." : "Удалить"}
-                          </button>
-                        </div>
-                      )}
-                      {editUserId === item.id && editMessage ? <span>{editMessage}</span> : null}
-                    </div>
-                  </td>
-                </tr>
+                    </td>
+                    <td>
+                      <div className="identity-cell">
+                        {editUserId === item.id ? (
+                          <label className="checkbox-row">
+                            <input
+                              type="checkbox"
+                              checked={editMfaEnabled}
+                              onChange={(event) =>
+                                setEditMfaEnabled(event.target.checked)
+                              }
+                            />
+                            <span>
+                              {editMfaEnabled ? "Включена" : "Выключена"}
+                            </span>
+                          </label>
+                        ) : (
+                          <strong>
+                            {item.mfaEnabled ? "Включена" : "Выключена"}
+                          </strong>
+                        )}
+                        {!item.mfaEnabled && editUserId !== item.id ? (
+                          <Link className="table-link" to="/settings">
+                            Открыть настройки
+                          </Link>
+                        ) : null}
+                      </div>
+                    </td>
+                    <td>
+                      <div className="identity-cell users-table__actions">
+                        {editUserId === item.id ? (
+                          <div className="toolbar">
+                            <button
+                              type="button"
+                              disabled={editSaving}
+                              onClick={() => void handleSaveEdit()}
+                            >
+                              {editSaving ? "Сохраняем..." : "Сохранить"}
+                            </button>
+                            <button type="button" onClick={handleCancelEdit}>
+                              Отменить
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="toolbar">
+                            <button
+                              type="button"
+                              title="Редактировать пользователя"
+                              onClick={() => handleStartEdit(item)}
+                            >
+                              Править
+                            </button>
+                            <button
+                              type="button"
+                              title="Удалить пользователя"
+                              disabled={deletingUserId === item.id}
+                              onClick={() => void handleArchiveUser(item)}
+                            >
+                              {deletingUserId === item.id
+                                ? "Удаляем..."
+                                : "Удалить"}
+                            </button>
+                          </div>
+                        )}
+                        {editUserId === item.id && editMessage ? (
+                          <span>{editMessage}</span>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
                 ))}
               </tbody>
             </table>
