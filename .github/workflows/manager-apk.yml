@@ -2,6 +2,10 @@ name: manager-apk
 on:
   workflow_dispatch:
     inputs:
+      signing_diagnostics:
+        description: Inspect public certificate fingerprints without building or publishing
+        type: boolean
+        default: false
       source_ref:
         description: Exact already deployed commit to build (empty uses workflow branch)
         type: string
@@ -53,20 +57,44 @@ jobs:
             echo '::warning::Existing Android debug signing key was not found on the server; signature compatibility must be checked.'
           fi
           scp -i ~/.ssh/id_ed25519 -P "$PROD_SSH_PORT" "$PROD_SSH_USER@$PROD_SSH_HOST:/home/client/gopark-current/gopark-manager.apk" /tmp/previous-manager.apk
+      - name: Diagnose public signing fingerprints only
+        if: inputs.signing_diagnostics == true
+        env:
+          PROD_SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+          PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          PROD_SSH_PORT: ${{ secrets.PROD_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          apksigner=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
+          "$apksigner" verify --print-certs /tmp/previous-manager.apk | sed -n '/certificate SHA-256 digest:/p'
+          remote="$PROD_SSH_USER@$PROD_SSH_HOST"
+          ssh -p "$PROD_SSH_PORT" "$remote" 'find /home/client/gopark/secrets /home/client/.android /home/client/.config/.android /home/client/gopark-releases -type f \( -name "*.keystore" -o -name "*.jks" \) -print 2>/dev/null || true' > /tmp/signing-candidate-paths
+          while IFS= read -r candidate; do
+            private_copy=$(mktemp)
+            scp -q -P "$PROD_SSH_PORT" "$remote:$candidate" "$private_copy"
+            chmod 600 "$private_copy"
+            echo "Certificate candidate: $candidate"
+            keytool -exportcert -keystore "$private_copy" -storepass android -alias androiddebugkey 2>/dev/null | openssl x509 -inform DER -noout -fingerprint -sha256 || echo 'Not a default Android debug key.'
+            rm -f "$private_copy"
+          done < /tmp/signing-candidate-paths
       - name: Resolve manager dependencies
+        if: inputs.signing_diagnostics != true
         working-directory: apps/manager-app
         run: flutter pub get --enforce-lockfile
       - uses: actions/upload-artifact@v4
+        if: inputs.signing_diagnostics != true
         with:
           name: manager-resolved-lockfile
           path: apps/manager-app/pubspec.lock
           if-no-files-found: error
       - name: Analyze and test manager app
+        if: inputs.signing_diagnostics != true
         working-directory: apps/manager-app
         run: |
           flutter analyze
           flutter test
       - name: Build manager APK
+        if: inputs.signing_diagnostics != true
         env:
           ANDROID_USER_HOME: /home/runner/.android
           GOPARK_MANAGER_KEYSTORE: /home/runner/.android/debug.keystore
@@ -76,9 +104,11 @@ jobs:
           build_number=$(( $(date +%s) / 60 ))
           flutter build apk --release --dart-define=API_BASE_URL=http://185.138.185.36/api --build-number="$build_number"
       - name: Build matching manager web application
+        if: inputs.signing_diagnostics != true
         working-directory: apps/manager-app
         run: flutter build web --release --base-href=/manager/ --pwa-strategy=none --no-web-resources-cdn
       - name: Verify APK and compare signing certificate
+        if: inputs.signing_diagnostics != true
         run: |
           apksigner=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
           "$apksigner" verify --verbose --print-certs apps/manager-app/build/app/outputs/flutter-apk/app-release.apk > /tmp/new-manager-cert.txt
@@ -92,17 +122,18 @@ jobs:
             exit 1
           fi
       - uses: actions/upload-artifact@v4
+        if: inputs.signing_diagnostics != true
         with:
           name: gopark-manager-apk
           path: apps/manager-app/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
       - name: Prepare download files
-        if: inputs.publish == true
+        if: inputs.publish == true && inputs.signing_diagnostics != true
         run: |
           python3 scripts/prepare_manager_download.py apps/manager-app/build/app/outputs/flutter-apk/app-release.apk /tmp/manager-upload
           tar -czf /tmp/manager-upload/manager-web.tar.gz -C apps/manager-app/build/web .
       - name: Publish verified APK with rollback
-        if: inputs.publish == true
+        if: inputs.publish == true && inputs.signing_diagnostics != true
         env:
           PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
           PROD_SSH_KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
