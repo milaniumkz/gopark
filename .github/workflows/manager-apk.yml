@@ -113,8 +113,8 @@ jobs:
           apksigner=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
           "$apksigner" verify --verbose --print-certs apps/manager-app/build/app/outputs/flutter-apk/app-release.apk > /tmp/new-manager-cert.txt
           "$apksigner" verify --verbose --print-certs /tmp/previous-manager.apk > /tmp/old-manager-cert.txt
-          old_cert=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' /tmp/old-manager-cert.txt)
-          new_cert=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' /tmp/new-manager-cert.txt)
+          old_cert=$(sed -n 's/.*certificate SHA-256 digest: //p' /tmp/old-manager-cert.txt | sort -u)
+          new_cert=$(sed -n 's/.*certificate SHA-256 digest: //p' /tmp/new-manager-cert.txt | sort -u)
           if [ -n "$old_cert" ] && [ "$old_cert" = "$new_cert" ]; then
             echo 'APK signing certificate matches the existing manager APK.'
           else
