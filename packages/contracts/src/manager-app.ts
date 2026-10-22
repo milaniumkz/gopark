@@ -36,7 +36,13 @@ export interface ManagerAssignedDriverItem {
   photoStatus?: "missing" | "pending" | "approved" | "rejected" | string;
 }
 
-export type ManagerIdleVehicleCategory = "office" | "accident" | "insurance_gps" | "service" | "impound" | "written_off";
+export type ManagerIdleVehicleCategory =
+  | "office"
+  | "accident"
+  | "insurance_gps"
+  | "service"
+  | "impound"
+  | "written_off";
 
 export interface ManagerIdleVehicleItem {
   id: string;
@@ -195,6 +201,7 @@ export interface ServicePaymentEntry {
   amount: number;
   paidAt: string;
   payer: "company" | "driver" | "insurance";
+  insurer?: "gosstrakh" | "nsk" | "alma";
 }
 export interface ServiceRepairDetails {
   reason: string;
@@ -207,6 +214,13 @@ export interface ServiceRepairDetails {
   serviceCost?: number;
   costDate?: string;
   payments?: ServicePaymentEntry[];
+  insurance?: {
+    insurer: "gosstrakh" | "nsk" | "alma";
+    paid: boolean;
+    paidAt?: string;
+  };
+  beforePhoto?: string;
+  afterPhoto?: string;
 }
 export interface AccidentDetails {
   location: string;

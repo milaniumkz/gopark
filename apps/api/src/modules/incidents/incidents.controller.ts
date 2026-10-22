@@ -52,6 +52,7 @@ export class IncidentsController {
     }
     if(body.serviceStage === "completed" && (!body.serviceDetails?.orderNumber?.trim() || !body.serviceDetails.works?.some(w=>w.trim()))) throw new BadRequestException("Для завершения нужны номер заказ-наряда и работы");
     if(currentUser?.role === "manager" && body.incidentType === "repair" && body.serviceStage !== "sent_to_service") throw new ForbiddenException("Бригадир отправляет машину на СТО; дальнейшие этапы подтверждает СТО");
+    if (currentUser?.role === "manager" && (body.serviceDetails?.beforePhoto || body.serviceDetails?.afterPhoto)) throw new ForbiddenException("Фото при приёмке и завершении добавляет сотрудник СТО");
     return this.incidentsService.create(body);
   }
 
@@ -85,6 +86,7 @@ export class IncidentsController {
     assertSameCompanyPair(driver?.companyName, car?.companyName, "Driver and car in incident must belong to the same company");
 
     if(currentUser?.role === "manager" && (existing.incidentType === "repair" || existing.serviceDetails || existing.incidentType === "accident" && body.serviceStage !== "sent_to_service") && (body.serviceDetails || body.serviceStage && body.serviceStage !== existing.serviceStage || body.status && body.status !== existing.status)) throw new ForbiddenException("Этапы ремонта и заказ-наряд заполняет сотрудник СТО");
+    if (currentUser?.role === "manager" && (body.serviceDetails?.beforePhoto || body.serviceDetails?.afterPhoto)) throw new ForbiddenException("Фото при приёмке и завершении добавляет сотрудник СТО");
     return this.incidentsService.update(incidentId, body);
   }
 }

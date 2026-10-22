@@ -28,3 +28,17 @@ test("returning a repair car checks company access before completing it", async 
   await controller.completeUntrackedRepair("car", {...user,role:"operator"});
   assert.equal(completions, 1);
 });
+
+test("brigadier cannot supply STO reception photos when dispatching an accident", async () => {
+  let updates = 0;
+  const controller = new IncidentsController({
+    list: async () => [{ id: "case", incidentType: "accident", serviceStage: "accident" }],
+    update: async () => { updates++; },
+    create: async () => { updates++; },
+  } as never);
+  const user = { id: "manager", role: "manager" as const };
+  const details = { reason: "ДТП", beforePhoto: "data:image/png;base64,aGVsbG8=" };
+  await assert.rejects(controller.update("case", { serviceStage: "sent_to_service", serviceDetails: details }, user), /сотрудник СТО/);
+  await assert.rejects(controller.create({ title: "ДТП", incidentType: "accident", status: "open", priority: "high", serviceDetails: details }, user), /сотрудник СТО/);
+  assert.equal(updates, 0);
+});

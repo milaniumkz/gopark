@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type {
+  AccidentDetails,
   DriverListItem,
   ManagerIncidentItem,
   ServiceRepairDetails,
@@ -20,6 +21,7 @@ const labels: Record<string, string> = {
   completed: "Завершён",
   written_off: "Списан",
 };
+const insurerLabels = { nsk: "НСК", alma: "Альма", gosstrakh: "Госстрах" };
 const payerLabels = {
   company: "GoPark",
   driver: "Водитель",
@@ -58,11 +60,29 @@ export function ServicePage() {
   const [filter, setFilter] = useState("active");
   const [company, setCompany] = useState(session.companyName || "all");
   const [caseType, setCaseType] = useState("all");
+  const [kind, setKind] = useState("all");
   const [managerFilter, setManagerFilter] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [payer, setPayer] = useState("all");
+  const detailRef = useRef<HTMLElement>(null);
+  const [accidentDraft, setAccidentDraft] = useState<AccidentDetails>({
+    location: "",
+    occurredAt: "",
+    fault: "unknown",
+    insurer: "gosstrakh",
+    otherPlate: "",
+    otherMake: "",
+    otherModel: "",
+  });
+  const [openVersion, setOpenVersion] = useState(0);
   const [selected, setSelected] = useState<ManagerIncidentItem | null>(null);
+  useEffect(() => {
+    if (selected) {
+      detailRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+      detailRef.current?.focus({ preventScroll: true });
+    }
+  }, [openVersion]);
   const [details, setDetails] = useState<ServiceRepairDetails>({ reason: "" });
   const [payment, setPayment] = useState({
     amount: "",
@@ -88,6 +108,10 @@ export function ServicePage() {
     return (
       (company === "all" || companyName === company) &&
       (caseType === "all" || i.serviceCaseType === caseType) &&
+      (kind === "all" ||
+        (kind === "accident"
+          ? i.incidentType === "accident"
+          : i.incidentType !== "accident")) &&
       (!managerFilter ||
         (i.managerLabel ?? "")
           .toLowerCase()
@@ -120,6 +144,7 @@ export function ServicePage() {
     (c) =>
       (company === "all" || c.companyName === company) &&
       caseType === "all" &&
+      kind !== "accident" &&
       payer === "all" &&
       (!managerFilter ||
         (c.managerName ?? "")
@@ -149,6 +174,10 @@ export function ServicePage() {
       return (
         (company === "all" || name === company) &&
         (caseType === "all" || i.serviceCaseType === caseType) &&
+        (kind === "all" ||
+          (kind === "accident"
+            ? i.incidentType === "accident"
+            : i.incidentType !== "accident")) &&
         (!managerFilter ||
           (i.managerLabel ?? "")
             .toLowerCase()
@@ -168,6 +197,19 @@ export function ServicePage() {
   }
   function open(i: ManagerIncidentItem) {
     setSelected(i);
+    setOpenVersion((v) => v + 1);
+    setAccidentDraft(
+      i.accidentDetails ?? {
+        location: "",
+        occurredAt: i.occurredAt ?? "",
+        fault: "unknown",
+        insurer: "gosstrakh",
+        otherPlate: "",
+        otherMake: "",
+        otherModel: "",
+      },
+    );
+    setPayment({ amount: "", paidAt: today(), payer: "company" });
     setDetails(
       i.serviceDetails ?? { reason: i.repairNote ?? i.description ?? "" },
     );
@@ -182,6 +224,9 @@ export function ServicePage() {
         `incidents/${selected.id}`,
         {
           serviceDetails: details,
+          ...(selected.incidentType === "accident"
+            ? { accidentDetails: accidentDraft }
+            : {}),
           ...(stage
             ? {
                 serviceStage: stage,
@@ -264,6 +309,15 @@ export function ServicePage() {
       setMessage("Укажите сумму оплаты больше нуля");
       return;
     }
+    if (
+      payment.payer === "insurance" &&
+      (!details.insurance?.insurer ||
+        !details.insurance.paid ||
+        !details.insurance.paidAt)
+    ) {
+      setMessage("Выберите страховую, отметьте оплату и укажите дату");
+      return;
+    }
     setDetails({
       ...details,
       payments: [
@@ -273,332 +327,479 @@ export function ServicePage() {
           amount,
           paidAt: payment.paidAt,
           payer: payment.payer,
+          ...(payment.payer === "insurance"
+            ? { insurer: details.insurance!.insurer }
+            : {}),
         },
       ],
     });
     setPayment({ ...payment, amount: "" });
     setMessage("Оплата добавлена в форму. Нажмите «Сохранить».");
   }
+  async function loadPhoto(
+    file: File | undefined,
+    key: "beforePhoto" | "afterPhoto",
+  ) {
+    if (!file) return;
+    if (
+      !["image/jpeg", "image/png", "image/webp"].includes(file.type) ||
+      file.size > 1024 * 1024
+    ) {
+      setMessage("Выберите JPEG, PNG или WebP до 1 МБ");
+      return;
+    }
+    try {
+      const photo = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      setDetails((current) => ({ ...current, [key]: photo }));
+    } catch {
+      setMessage("Не удалось прочитать фотографию");
+    }
+  }
+  const accidents = (incidents.data ?? []).filter(
+    (i) =>
+      i.incidentType === "accident" &&
+      (company === "all" ||
+        (i.carId
+          ? carById.get(i.carId)?.companyName
+          : driverById.get(i.driverId ?? "")?.companyName) === company) &&
+      (!from ||
+        (i.accidentDetails?.occurredAt ?? i.occurredAt ?? "").slice(0, 10) >=
+          from) &&
+      (!to ||
+        (!!(i.accidentDetails?.occurredAt ?? i.occurredAt) &&
+          (i.accidentDetails?.occurredAt ?? i.occurredAt ?? "").slice(0, 10) <=
+            to)),
+  );
+  const guilty = accidents.filter((i) =>
+    ["driver", "both"].includes(i.accidentDetails?.fault ?? ""),
+  ).length;
+  const innocent = accidents.filter(
+    (i) => i.accidentDetails?.fault === "other",
+  ).length;
+  const knownFault = guilty + innocent;
+  const percent = (n: number) =>
+    knownFault ? `${((n / knownFault) * 100).toFixed(1)}%` : "—";
   const error = incidents.error || cars.error || drivers.error;
   return (
     <section className="page-stack service-page">
-      <div className="hero-card hero-card--dashboard">
-        <div className="hero-card__main">
-          <p className="eyebrow">Ремонт и услуги</p>
-          <h2>СТО</h2>
-          <p>Причина, этапы ремонта, заказ-наряд и оплата в одной карточке.</p>
-        </div>
-        <div className="hero-card__actions">
-          <Link className="button button--secondary" to="/incidents">
-            Инциденты
-          </Link>
-          <button
-            className="button button--secondary"
-            onClick={() =>
-              downloadCsvTable(
-                "gopark-service.csv",
-                [
-                  "Автомобиль",
-                  "Статус",
-                  "Причина",
-                  "Отправлен",
-                  "Прибыл",
-                  "Начало ремонта",
-                  "Завершён",
-                  "Заказ-наряд",
-                  "Работы",
-                  "Стоимость услуг",
-                  "Дата стоимости",
-                  "Оплачено",
-                  "Остаток",
-                  "Прибыль СТО",
-                  "Оплаты с датами и плательщиками",
-                ],
-                rows.map((i) => [
-                  vehicleLabel(i),
-                  labels[i.serviceStage ?? ""] ?? i.status,
-                  i.serviceDetails?.reason ?? i.repairNote ?? "",
-                  i.serviceDetails?.sentAt ?? "",
-                  i.serviceDetails?.arrivedAt ?? "",
-                  i.serviceDetails?.repairStartedAt ?? "",
-                  i.serviceDetails?.completedAt ?? "",
-                  i.serviceDetails?.orderNumber ?? "",
-                  i.serviceDetails?.works?.join("; ") ?? "",
-                  i.serviceDetails?.serviceCost ?? "",
-                  i.serviceDetails?.costDate ?? "",
-                  paid(i),
-                  Math.max(0, cost(i) - paid(i)),
-                  cost(i) * 0.3,
-                  JSON.stringify(i.serviceDetails?.payments ?? []),
-                ]),
-              )
-            }
-          >
-            Скачать CSV
-          </button>
-        </div>
-      </div>
-      <div className="sto-stats">
-        {[
-          [
-            "Автомобили в ремонте",
-            String((cars.data ?? []).filter(c => c.status === "maintenance" && (company === "all" || c.companyName === company)).length),
-          ],
-          ["Стоимость услуг", formatCurrency(sums.cost)],
-          ["Оплачено", formatCurrency(sums.paid)],
-          ["Не оплачено", formatCurrency(Math.max(0, sums.cost - sums.paid))],
-          ["Прибыль СТО · 30%", formatCurrency(sums.cost * 0.3)],
-        ].map(([label, value]) => (
-          <div className="sto-stat" key={label}>
-            <span>{label}</span>
-            <strong>{value}</strong>
+      {!selected && (
+        <>
+          <div className="hero-card hero-card--dashboard">
+            <div className="hero-card__main">
+              <p className="eyebrow">Ремонт и услуги</p>
+              <h2>СТО</h2>
+              <p>
+                Причина, этапы ремонта, заказ-наряд и оплата в одной карточке.
+              </p>
+            </div>
+            <div className="hero-card__actions">
+              <Link className="button button--secondary" to="/incidents">
+                Инциденты
+              </Link>
+              <button
+                className="button button--secondary"
+                onClick={() =>
+                  downloadCsvTable(
+                    "gopark-service.csv",
+                    [
+                      "Автомобиль",
+                      "Статус",
+                      "Причина",
+                      "Отправлен",
+                      "Прибыл",
+                      "Начало ремонта",
+                      "Завершён",
+                      "Заказ-наряд",
+                      "Работы",
+                      "Стоимость услуг",
+                      "Дата стоимости",
+                      "Оплачено",
+                      "Остаток",
+                      "Прибыль СТО",
+                      "Оплаты с датами и плательщиками",
+                    ],
+                    rows.map((i) => [
+                      vehicleLabel(i),
+                      labels[i.serviceStage ?? ""] ?? i.status,
+                      i.serviceDetails?.reason ?? i.repairNote ?? "",
+                      i.serviceDetails?.sentAt ?? "",
+                      i.serviceDetails?.arrivedAt ?? "",
+                      i.serviceDetails?.repairStartedAt ?? "",
+                      i.serviceDetails?.completedAt ?? "",
+                      i.serviceDetails?.orderNumber ?? "",
+                      i.serviceDetails?.works?.join("; ") ?? "",
+                      i.serviceDetails?.serviceCost ?? "",
+                      i.serviceDetails?.costDate ?? "",
+                      paid(i),
+                      Math.max(0, cost(i) - paid(i)),
+                      cost(i) * 0.3,
+                      JSON.stringify(i.serviceDetails?.payments ?? []),
+                    ]),
+                  )
+                }
+              >
+                Скачать CSV
+              </button>
+            </div>
           </div>
-        ))}
-      </div>
-      <div className="panel sto-filters">
-        <label>
-          Компания
-          <select value={company} onChange={(e) => setCompany(e.target.value)}>
-            <option value="all">Все компании</option>
+          <div className="sto-stats">
             {[
-              ...new Set(
-                (cars.data ?? []).map((c) => c.companyName).filter(Boolean),
-              ),
-            ].map((c) => (
-              <option key={c!} value={c!}>
-                {c}
-              </option>
+              [
+                "Автомобили в ремонте",
+                String(
+                  (cars.data ?? []).filter(
+                    (c) =>
+                      c.status === "maintenance" &&
+                      (company === "all" || c.companyName === company),
+                  ).length,
+                ),
+              ],
+              ["Стоимость услуг", formatCurrency(sums.cost)],
+              ["Оплачено", formatCurrency(sums.paid)],
+              [
+                "Не оплачено",
+                formatCurrency(Math.max(0, sums.cost - sums.paid)),
+              ],
+              ["Прибыль СТО · 30%", formatCurrency(sums.cost * 0.3)],
+            ].map(([label, value]) => (
+              <div className="sto-stat" key={label}>
+                <span>{label}</span>
+                <strong>{value}</strong>
+              </div>
             ))}
-          </select>
-        </label>
-        <label>
-          Случай
-          <select
-            value={caseType}
-            onChange={(e) => setCaseType(e.target.value)}
-          >
-            <option value="all">Все случаи</option>
-            <option value="insurance">Страховой</option>
-            <option value="non_insurance">Нестраховой</option>
-          </select>
-        </label>
-        <label>
-          Бригадир
-          <input
-            value={managerFilter}
-            onChange={(e) => setManagerFilter(e.target.value)}
-            placeholder="Имя бригадира"
-          />
-        </label>
-        <label>
-          Поиск
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Машина, водитель, причина"
-          />
-        </label>
-        <label>
-          Статус
-          <select value={filter} onChange={(e) => setFilter(e.target.value)}>
-            <option value="active">Активные ремонты</option>
-            <option value="all">Все ремонты</option>
-            {stages.slice(0, 3).map((s) => (
-              <option key={s} value={s}>
-                {labels[s]}
-              </option>
+          </div>
+          <div className="sto-stats" aria-label="Статистика ДТП">
+            {[
+              ["Всего ДТП", String(accidents.length)],
+              [
+                "Водитель виновен · включая обоюдную",
+                `${guilty} · ${percent(guilty)}`,
+              ],
+              ["Водитель не виновен", `${innocent} · ${percent(innocent)}`],
+              [
+                "Виновность не установлена",
+                String(accidents.length - knownFault),
+              ],
+              [
+                "Стоимость ДТП",
+                formatCurrency(
+                  accidents.reduce(
+                    (sum, i) =>
+                      sum + (i.serviceDetails?.serviceCost ?? i.amount ?? 0),
+                    0,
+                  ),
+                ),
+              ],
+            ].map(([label, value]) => (
+              <div className="sto-stat" key={label}>
+                <span>{label}</span>
+                <strong>{value}</strong>
+              </div>
             ))}
-            <option value="archived">Завершённые / архив</option>
-          </select>
-        </label>
-        <label>
-          Плательщик
-          <select value={payer} onChange={(e) => setPayer(e.target.value)}>
-            <option value="all">Все плательщики</option>
-            {Object.entries(payerLabels).map(([v, l]) => (
-              <option key={v} value={v}>
-                {l}
-              </option>
+          </div>
+          <p className="muted">
+            ДТП — за период по дате происшествия. Проценты — среди случаев с
+            установленной виновностью. Стоимость: услуги, а для старых записей —
+            исторический расход; без суммы:{" "}
+            {
+              accidents.filter(
+                (i) =>
+                  i.serviceDetails?.serviceCost == null && i.amount == null,
+              ).length
+            }
+            .
+          </p>
+          <div className="panel sto-filters">
+            <label>
+              Компания
+              <select
+                value={company}
+                onChange={(e) => setCompany(e.target.value)}
+              >
+                <option value="all">Все компании</option>
+                {[
+                  ...new Set(
+                    (cars.data ?? []).map((c) => c.companyName).filter(Boolean),
+                  ),
+                ].map((c) => (
+                  <option key={c!} value={c!}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Тип обращения
+              <select value={kind} onChange={(e) => setKind(e.target.value)}>
+                <option value="all">Ремонт и ДТП</option>
+                <option value="repair">Только ремонт</option>
+                <option value="accident">После ДТП</option>
+              </select>
+            </label>
+            <label>
+              Случай
+              <select
+                value={caseType}
+                onChange={(e) => setCaseType(e.target.value)}
+              >
+                <option value="all">Все случаи</option>
+                <option value="insurance">Страховой</option>
+                <option value="non_insurance">Нестраховой</option>
+              </select>
+            </label>
+            <label>
+              Бригадир
+              <input
+                value={managerFilter}
+                onChange={(e) => setManagerFilter(e.target.value)}
+                placeholder="Имя бригадира"
+              />
+            </label>
+            <label>
+              Поиск
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Машина, водитель, причина"
+              />
+            </label>
+            <label>
+              Статус
+              <select
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+              >
+                <option value="active">Активные ремонты</option>
+                <option value="all">Все ремонты</option>
+                {stages.slice(0, 3).map((s) => (
+                  <option key={s} value={s}>
+                    {labels[s]}
+                  </option>
+                ))}
+                <option value="archived">Завершённые / архив</option>
+              </select>
+            </label>
+            <label>
+              Плательщик
+              <select value={payer} onChange={(e) => setPayer(e.target.value)}>
+                <option value="all">Все плательщики</option>
+                {Object.entries(payerLabels).map(([v, l]) => (
+                  <option key={v} value={v}>
+                    {l}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Стоимость услуг с
+              <input
+                type="date"
+                value={from}
+                onChange={(e) => setFrom(e.target.value)}
+              />
+            </label>
+            <label>
+              По
+              <input
+                type="date"
+                value={to}
+                onChange={(e) => setTo(e.target.value)}
+              />
+            </label>
+            <p className="muted sto-wide">
+              Записей без указанной стоимости услуг:{" "}
+              {
+                periodRecords.filter(
+                  (i) => i.serviceDetails?.serviceCost === undefined,
+                ).length
+              }
+              . Исторические расходы не включаются в прибыль без стоимости
+              услуг.
+              <br />
+              Прибыль начисленная: {formatCurrency(sums.cost * 0.3)} ·
+              полученная: {formatCurrency(sums.paid * 0.3)} · ожидаемая:{" "}
+              {formatCurrency(Math.max(0, sums.cost - sums.paid) * 0.3)}. Период
+              применяется к дате стоимости услуг; для старых записей — к дате
+              инцидента.
+              <br />
+              Поступило по датам оплаты за выбранный период:{" "}
+              {formatCurrency(receipts)} · прибыль с поступлений:{" "}
+              {formatCurrency(receipts * 0.3)}.
+            </p>
+          </div>
+          {error && (
+            <div role="alert" className="panel">
+              Не удалось загрузить журнал.{" "}
+              <button onClick={() => void refresh()}>Повторить</button>
+            </div>
+          )}
+          {incidents.loading && <div className="panel">Загрузка ремонтов…</div>}
+          {message && (
+            <div role="status" className="panel">
+              {message}
+            </div>
+          )}
+          <div className="sto-cards">
+            {rows.map((i) => (
+              <article className="sto-card" key={i.id}>
+                <div className="sto-card-heading">
+                  <h3>
+                    {vehicleLabel(i)}{" "}
+                    <small
+                      className={
+                        i.incidentType === "accident"
+                          ? "sto-kind sto-kind--accident"
+                          : "sto-kind"
+                      }
+                    >
+                      {i.incidentType === "accident" ? "После ДТП" : "Ремонт"}
+                    </small>
+                  </h3>
+                  <span
+                    className={`sto-badge ${closed(i) ? "sto-badge--done" : ""}`}
+                  >
+                    {labels[i.serviceStage ?? ""] ?? i.status}
+                  </span>
+                </div>
+                <p className="muted">
+                  {i.driverId
+                    ? (driverById.get(i.driverId)?.fullName ??
+                      "Водитель не указан")
+                    : "Без водителя"}{" "}
+                  · {i.managerLabel ?? "Бригадир не указан"}
+                </p>
+                <div className="sto-reason">
+                  {i.serviceDetails?.reason ??
+                    i.repairNote ??
+                    i.description ??
+                    "Причина не указана"}
+                </div>
+                <p className="muted">
+                  Отправлен: {stamp(i.serviceDetails?.sentAt)}
+                  <br />
+                  Прибыл: {stamp(i.serviceDetails?.arrivedAt)}
+                </p>
+                <div className="sto-line">
+                  <span>Услуги</span>
+                  <b>
+                    {i.serviceDetails?.serviceCost !== undefined
+                      ? formatCurrency(cost(i))
+                      : "Не указана"}
+                  </b>
+                </div>
+                <div className="sto-line">
+                  <span>Оплачено / остаток</span>
+                  <b>
+                    {formatCurrency(paid(i))} /{" "}
+                    {formatCurrency(Math.max(0, cost(i) - paid(i)))}
+                  </b>
+                </div>
+                <button
+                  className="button button--secondary"
+                  onClick={() => open(i)}
+                >
+                  Открыть карточку
+                </button>
+              </article>
             ))}
-          </select>
-        </label>
-        <label>
-          Стоимость услуг с
-          <input
-            type="date"
-            value={from}
-            onChange={(e) => setFrom(e.target.value)}
-          />
-        </label>
-        <label>
-          По
-          <input
-            type="date"
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-          />
-        </label>
-        <p className="muted sto-wide">
-          Записей без указанной стоимости услуг:{" "}
-          {
-            periodRecords.filter(
-              (i) => i.serviceDetails?.serviceCost === undefined,
-            ).length
-          }
-          . Исторические расходы не включаются в прибыль без стоимости услуг.
-          <br />
-          Прибыль начисленная: {formatCurrency(sums.cost * 0.3)} · полученная:{" "}
-          {formatCurrency(sums.paid * 0.3)} · ожидаемая:{" "}
-          {formatCurrency(Math.max(0, sums.cost - sums.paid) * 0.3)}. Период
-          применяется к дате стоимости услуг; для старых записей — к дате
-          инцидента.
-          <br />
-          Поступило по датам оплаты за выбранный период:{" "}
-          {formatCurrency(receipts)} · прибыль с поступлений:{" "}
-          {formatCurrency(receipts * 0.3)}.
-        </p>
-      </div>
-      {error && (
-        <div role="alert" className="panel">
-          Не удалось загрузить журнал.{" "}
-          <button onClick={() => void refresh()}>Повторить</button>
-        </div>
+            {untracked.map((c) => (
+              <article className="sto-card" key={c.id}>
+                <div className="sto-card-heading">
+                  <h3>{c.plateNumber}</h3>
+                  <span className="sto-badge">В ремонте</span>
+                </div>
+                <p>
+                  {c.make} {c.model}
+                </p>
+                <p className="muted">
+                  Открытый кейс не найден. Укажите причину, заказ-наряд и работы
+                  перед завершением.
+                </p>
+                {canEdit && (
+                  <button
+                    className="button button--secondary"
+                    onClick={() => {
+                      setSendCar(c.id);
+                      setReason("");
+                    }}
+                  >
+                    Оформить ремонт
+                  </button>
+                )}
+              </article>
+            ))}
+          </div>
+          {!rows.length &&
+            !untracked.length &&
+            !incidents.loading &&
+            !error && <div className="panel">Ремонтов по фильтру нет.</div>}
+          {canSend && (
+            <section className="panel">
+              <h3>
+                {carById.get(sendCar)?.status === "maintenance"
+                  ? "Оформить текущий ремонт"
+                  : "Отправить на СТО"}
+              </h3>
+              <div className="sto-filters">
+                <label>
+                  Автомобиль
+                  <select
+                    value={sendCar}
+                    onChange={(e) => setSendCar(e.target.value)}
+                  >
+                    <option value="">Выберите автомобиль</option>
+                    {(cars.data ?? [])
+                      .filter(
+                        (c) => !["sold", "written_off"].includes(c.status),
+                      )
+                      .map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.plateNumber} · {c.make} {c.model}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <label className="sto-wide">
+                  Причина *
+                  <textarea
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                    placeholder="Что произошло и что требуется проверить"
+                  />
+                </label>
+              </div>
+              <p className="muted">
+                Если СТО не подтвердит прибытие за 24 часа, бригадир получит
+                уведомление.
+              </p>
+              <button
+                className="button"
+                disabled={busy || !sendCar || !reason.trim()}
+                onClick={() => void send()}
+              >
+                {busy ? "Сохранение…" : "Сохранить и уведомить"}
+              </button>
+            </section>
+          )}
+        </>
       )}
-      {incidents.loading && <div className="panel">Загрузка ремонтов…</div>}
-      {message && (
+      {selected && message && (
         <div role="status" className="panel">
           {message}
         </div>
       )}
-      <div className="sto-cards">
-        {rows.map((i) => (
-          <article className="sto-card" key={i.id}>
-            <div className="sto-card-heading">
-              <h3>{vehicleLabel(i)}</h3>
-              <span
-                className={`sto-badge ${closed(i) ? "sto-badge--done" : ""}`}
-              >
-                {labels[i.serviceStage ?? ""] ?? i.status}
-              </span>
-            </div>
-            <p className="muted">
-              {i.driverId
-                ? (driverById.get(i.driverId)?.fullName ?? "Водитель не указан")
-                : "Без водителя"}{" "}
-              · {i.managerLabel ?? "Бригадир не указан"}
-            </p>
-            <div className="sto-reason">
-              {i.serviceDetails?.reason ??
-                i.repairNote ??
-                i.description ??
-                "Причина не указана"}
-            </div>
-            <p className="muted">
-              Отправлен: {stamp(i.serviceDetails?.sentAt)}
-              <br />
-              Прибыл: {stamp(i.serviceDetails?.arrivedAt)}
-            </p>
-            <div className="sto-line">
-              <span>Услуги</span>
-              <b>
-                {i.serviceDetails?.serviceCost !== undefined
-                  ? formatCurrency(cost(i))
-                  : "Не указана"}
-              </b>
-            </div>
-            <div className="sto-line">
-              <span>Оплачено / остаток</span>
-              <b>
-                {formatCurrency(paid(i))} /{" "}
-                {formatCurrency(Math.max(0, cost(i) - paid(i)))}
-              </b>
-            </div>
-            <button
-              className="button button--secondary"
-              onClick={() => open(i)}
-            >
-              Открыть карточку
-            </button>
-          </article>
-        ))}
-        {untracked.map((c) => (
-          <article className="sto-card" key={c.id}>
-            <div className="sto-card-heading">
-              <h3>{c.plateNumber}</h3>
-              <span className="sto-badge">В ремонте</span>
-            </div>
-            <p>
-              {c.make} {c.model}
-            </p>
-            <p className="muted">
-              Открытый кейс не найден. Укажите причину, заказ-наряд и работы
-              перед завершением.
-            </p>
-            {canEdit && (
-              <button
-                className="button button--secondary"
-                onClick={() => {
-                  setSendCar(c.id);
-                  setReason("");
-                }}
-              >
-                Оформить ремонт
-              </button>
-            )}
-          </article>
-        ))}
-      </div>
-      {!rows.length && !untracked.length && !incidents.loading && !error && (
-        <div className="panel">Ремонтов по фильтру нет.</div>
-      )}
-      {canSend && (
-        <section className="panel">
-          <h3>
-            {carById.get(sendCar)?.status === "maintenance"
-              ? "Оформить текущий ремонт"
-              : "Отправить на СТО"}
-          </h3>
-          <div className="sto-filters">
-            <label>
-              Автомобиль
-              <select
-                value={sendCar}
-                onChange={(e) => setSendCar(e.target.value)}
-              >
-                <option value="">Выберите автомобиль</option>
-                {(cars.data ?? [])
-                  .filter((c) => !["sold", "written_off"].includes(c.status))
-                  .map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.plateNumber} · {c.make} {c.model}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <label className="sto-wide">
-              Причина *
-              <textarea
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder="Что произошло и что требуется проверить"
-              />
-            </label>
-          </div>
-          <p className="muted">
-            Если СТО не подтвердит прибытие за 24 часа, бригадир получит
-            уведомление.
-          </p>
-          <button
-            className="button"
-            disabled={busy || !sendCar || !reason.trim()}
-            onClick={() => void send()}
-          >
-            {busy ? "Сохранение…" : "Сохранить и уведомить"}
-          </button>
-        </section>
-      )}
       {selected && (
-        <section className="panel sto-detail" aria-label="Карточка ремонта">
+        <section
+          ref={detailRef}
+          tabIndex={-1}
+          className="panel sto-detail"
+          aria-label="Карточка ремонта"
+        >
           <div className="sto-card-heading">
             <h3>Карточка ремонта · {vehicleLabel(selected)}</h3>
             <button
@@ -637,6 +838,113 @@ export function ServicePage() {
             ))}
           </div>
           <fieldset disabled={!canEdit || busy}>
+            {selected.incidentType === "accident" && (
+              <div className="sto-filters">
+                <label>
+                  Виновность водителя
+                  <select
+                    value={accidentDraft.fault}
+                    onChange={(e) =>
+                      setAccidentDraft({
+                        ...accidentDraft,
+                        fault: e.target.value as AccidentDetails["fault"],
+                      })
+                    }
+                  >
+                    <option value="unknown">Не установлена</option>
+                    <option value="driver">Виновен</option>
+                    <option value="other">Не виновен</option>
+                    <option value="both">Обоюдная вина</option>
+                  </select>
+                </label>
+                {!selected.accidentDetails && (
+                  <>
+                    {(
+                      [
+                        ["location", "Место ДТП"],
+                        ["otherPlate", "Госномер второго участника"],
+                        ["otherMake", "Марка второго участника"],
+                        ["otherModel", "Модель второго участника"],
+                      ] as const
+                    ).map(([key, label]) => (
+                      <label key={key}>
+                        {label} *
+                        <input
+                          value={accidentDraft[key]}
+                          onChange={(e) =>
+                            setAccidentDraft({
+                              ...accidentDraft,
+                              [key]: e.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                    ))}
+                    <label>
+                      Дата и время ДТП *
+                      <input
+                        type="datetime-local"
+                        value={
+                          accidentDraft.occurredAt
+                            ? accidentDraft.occurredAt.slice(0, 16)
+                            : ""
+                        }
+                        onChange={(e) =>
+                          setAccidentDraft({
+                            ...accidentDraft,
+                            occurredAt: e.target.value,
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Страховая ДТП
+                      <select
+                        value={accidentDraft.insurer}
+                        onChange={(e) =>
+                          setAccidentDraft({
+                            ...accidentDraft,
+                            insurer: e.target
+                              .value as AccidentDetails["insurer"],
+                          })
+                        }
+                      >
+                        {Object.entries(insurerLabels).map(([v, l]) => (
+                          <option key={v} value={v}>
+                            {l}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </>
+                )}
+                {(["beforePhoto", "afterPhoto"] as const).map((key) => (
+                  <label key={key}>
+                    {key === "beforePhoto"
+                      ? "Фото до ремонта · при приёмке *"
+                      : "Фото после ремонта · при завершении *"}
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={(e) => void loadPhoto(e.target.files?.[0], key)}
+                    />
+                    {details[key] && (
+                      <a href={details[key]} target="_blank" rel="noreferrer">
+                        <img
+                          className="sto-photo"
+                          src={details[key]}
+                          alt={
+                            key === "beforePhoto"
+                              ? "До ремонта"
+                              : "После ремонта"
+                          }
+                        />
+                      </a>
+                    )}
+                  </label>
+                ))}
+              </div>
+            )}
             <div className="sto-filters">
               <label className="sto-wide">
                 Причина *
@@ -709,10 +1017,83 @@ export function ServicePage() {
                 </p>
               )}
             <h4>Оплаты</h4>
+            {(payment.payer === "insurance" || details.insurance) && (
+              <div className="sto-filters">
+                <label>
+                  Страховая компания
+                  <select
+                    value={details.insurance?.insurer ?? ""}
+                    onChange={(e) =>
+                      setDetails({
+                        ...details,
+                        insurance: {
+                          ...details.insurance,
+                          insurer: e.target.value as
+                            | "nsk"
+                            | "alma"
+                            | "gosstrakh",
+                          paid: details.insurance?.paid ?? false,
+                        },
+                      })
+                    }
+                  >
+                    <option value="">Выберите компанию</option>
+                    {Object.entries(insurerLabels).map(([v, l]) => (
+                      <option key={v} value={v}>
+                        {l}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="sto-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={details.insurance?.paid ?? false}
+                    disabled={!details.insurance?.insurer}
+                    onChange={(e) =>
+                      setDetails({
+                        ...details,
+                        insurance: {
+                          insurer: details.insurance!.insurer,
+                          paid: e.target.checked,
+                          ...(e.target.checked ? { paidAt: today() } : {}),
+                        },
+                      })
+                    }
+                  />
+                  Оплатила страховая
+                </label>
+                {details.insurance?.paid && (
+                  <label>
+                    Дата оплаты страховой *
+                    <input
+                      type="date"
+                      max={today()}
+                      required
+                      value={details.insurance.paidAt ?? ""}
+                      onChange={(e) =>
+                        setDetails({
+                          ...details,
+                          insurance: {
+                            ...details.insurance!,
+                            paidAt: e.target.value,
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                )}
+                <p className="muted sto-wide">
+                  Отметка страховой хранится отдельно. Для учёта поступивших
+                  денег добавьте сумму оплаты в журнал ниже.
+                </p>
+              </div>
+            )}
             {(details.payments ?? []).map((p) => (
               <div className="sto-line" key={p.id}>
                 <span>
-                  {formatDateOnly(p.paidAt)} · {payerLabels[p.payer]}
+                  {formatDateOnly(p.paidAt)} · {payerLabels[p.payer]}{" "}
+                  {p.insurer ? `· ${insurerLabels[p.insurer]}` : ""}
                 </span>
                 <b>{formatCurrency(p.amount)}</b>
               </div>
@@ -785,6 +1166,11 @@ export function ServicePage() {
                   className="button"
                   disabled={
                     busy ||
+                    (selected.incidentType === "accident" &&
+                      ((selected.serviceStage === "sent_to_service" &&
+                        !details.beforePhoto) ||
+                        (selected.serviceStage === "in_repair" &&
+                          (!details.beforePhoto || !details.afterPhoto)))) ||
                     (selected.serviceStage === "in_repair" &&
                       (!details.orderNumber?.trim() ||
                         !details.works?.some((w) => w.trim())))

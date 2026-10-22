@@ -114,6 +114,166 @@ test("DTP requires structured data and date but does not require photos", () => 
   );
 });
 
-test("closing an inspection is independent of STO and does not require a repair order",()=>{
- assert.deepEqual(serviceWorkflow({serviceStage:"completed",status:"resolved"},{...previous,incidentType:"inspection",serviceStage:"inspection",serviceDetails:null}),{});
+test("closing an inspection is independent of STO and does not require a repair order", () => {
+  assert.deepEqual(
+    serviceWorkflow(
+      { serviceStage: "completed", status: "resolved" },
+      {
+        ...previous,
+        incidentType: "inspection",
+        serviceStage: "inspection",
+        serviceDetails: null,
+      },
+    ),
+    {},
+  );
+});
+
+test("STO accident reception and completion require separate before/after photos", () => {
+  const photo = "data:image/png;base64,aGVsbG8=";
+  const accident = { ...previous, incidentType: "accident" };
+  assert.throws(
+    () => serviceWorkflow({ serviceStage: "awaiting_repair" }, accident),
+    /фото до/,
+  );
+  const arrived = serviceWorkflow(
+    {
+      serviceStage: "awaiting_repair",
+      serviceDetails: { reason: "ДТП", beforePhoto: photo },
+    },
+    accident,
+  );
+  assert.ok(arrived.serviceDetails?.arrivedAt);
+  assert.throws(
+    () => serviceWorkflow({ status: "closed" }, accident),
+    /до и после/,
+  );
+  const repairing = {
+    ...accident,
+    serviceStage: "in_repair",
+    serviceDetails: {
+      ...arrived.serviceDetails!,
+      orderNumber: "STO-1",
+      works: ["Замена крыла"],
+    },
+  };
+  assert.throws(
+    () => serviceWorkflow({ serviceStage: "completed" }, repairing),
+    /до и после/,
+  );
+  assert.ok(
+    serviceWorkflow(
+      {
+        serviceStage: "completed",
+        serviceDetails: { ...repairing.serviceDetails, afterPhoto: photo },
+      },
+      repairing,
+    ).serviceDetails?.completedAt,
+  );
+  assert.throws(
+    () =>
+      serviceWorkflow(
+        {
+          serviceDetails: {
+            reason: "ДТП",
+            beforePhoto: "https://example.invalid/photo",
+          },
+        },
+        accident,
+      ),
+    /Фото/,
+  );
+});
+
+test("insurance status requires an insurer and a real paid date without changing financial payments", () => {
+  assert.throws(
+    () =>
+      serviceWorkflow(
+        {
+          serviceDetails: {
+            reason: "Ремонт",
+            insurance: { insurer: "nsk", paid: true },
+          },
+        },
+        previous,
+      ),
+    /Дата оплаты/,
+  );
+  assert.throws(
+    () =>
+      serviceWorkflow(
+        {
+          serviceDetails: {
+            reason: "Ремонт",
+            insurance: { insurer: "nsk", paid: true, paidAt: "2100-01-01" },
+          },
+        },
+        previous,
+      ),
+    /будущем/,
+  );
+  const saved = serviceWorkflow(
+    {
+      serviceDetails: {
+        reason: "Ремонт",
+        insurance: { insurer: "nsk", paid: true, paidAt: "2026-10-01" },
+      },
+    },
+    previous,
+  );
+  assert.equal(saved.serviceDetails?.insurance?.paid, true);
+  assert.equal(saved.servicePaymentStatus, "unpaid");
+  assert.equal(saved.serviceDetails?.payments, undefined);
+});
+
+test("insurer identity on saved payments is immutable and mandatory for new insurance receipts", () => {
+  const payment = {
+    id: "insurance-1",
+    payer: "insurance" as const,
+    amount: 500,
+    paidAt: "2026-10-01",
+    insurer: "nsk" as const,
+  };
+  const details = {
+    reason: "Кузов",
+    serviceCost: 1000,
+    costDate: "2026-10-01",
+    payments: [payment],
+  };
+  const saved = serviceWorkflow({ serviceDetails: details }, previous);
+  assert.equal(saved.serviceDetails?.payments?.[0]?.insurer, "nsk");
+  assert.throws(
+    () =>
+      serviceWorkflow(
+        {
+          serviceDetails: {
+            ...details,
+            payments: [{ ...payment, insurer: "alma" }],
+          },
+        },
+        { ...previous, serviceDetails: details },
+      ),
+    /нельзя удалять/,
+  );
+  assert.throws(
+    () =>
+      serviceWorkflow(
+        {
+          serviceDetails: {
+            ...details,
+            payments: [{ ...payment, insurer: undefined }],
+          },
+        },
+        previous,
+      ),
+    /страховую компанию/,
+  );
+  const legacy = { ...details, payments: [{ ...payment, insurer: undefined }] };
+  assert.equal(
+    serviceWorkflow(
+      { serviceDetails: legacy },
+      { ...previous, serviceDetails: legacy },
+    ).servicePaymentStatus,
+    "partial",
+  );
 });

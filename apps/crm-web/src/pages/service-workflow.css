@@ -200,3 +200,76 @@
 .service-page .sto-card > .button {
   width: 100%;
 }
+
+/* Compact cards retain readable text and full details in the editor. */
+.service-page .sto-card {
+  padding: 12px;
+  gap: 6px;
+  border-radius: 12px;
+}
+.service-page .sto-cards {
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr));
+}
+.service-page .sto-card h3 {
+  font-size: 16px;
+}
+.service-page .sto-card .sto-reason {
+  padding: 8px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.service-page .sto-card .sto-line {
+  padding: 4px 0;
+}
+.service-page .sto-detail {
+  scroll-margin-top: 20px;
+  padding: 16px;
+}
+.service-page .sto-detail .sto-filters {
+  gap: 10px;
+}
+.service-page .sto-detail textarea {
+  min-height: 56px;
+}
+.service-page .sto-detail .sto-timeline {
+  margin: 12px 0;
+  gap: 8px;
+}
+.service-page .sto-detail .sto-timeline > div {
+  padding-top: 6px;
+  gap: 4px;
+}
+.service-page .sto-detail input,
+.service-page .sto-detail select {
+  padding: 8px;
+}
+.sto-kind {
+  display: inline-block;
+  background: #edf4ff;
+  color: #2563eb;
+  border-radius: 6px;
+  padding: 3px 6px;
+  font-size: 11px;
+}
+.sto-kind--accident {
+  background: #fff0e8;
+  color: #b54708;
+}
+.sto-photo {
+  width: 100%;
+  max-width: 180px;
+  height: 110px;
+  object-fit: contain;
+  border-radius: 8px;
+}
+.service-page .sto-checkbox {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+.service-page .sto-checkbox input {
+  width: auto;
+}

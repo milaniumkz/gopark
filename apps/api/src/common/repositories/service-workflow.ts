@@ -32,9 +32,22 @@ export function validateAccident(value: AccidentDetails): AccidentDetails {
     fail("Укажите виновника и страховую компанию");
   return value;
 }
-export function isServiceRepair(incident: {incidentType?:string;serviceStage?:string|null;serviceDetails?:ServiceRepairDetails|null}): boolean {
-  if(["inspection","impound","insurance_gps"].includes(incident.incidentType??""))return false;
-  return incident.incidentType==="repair"||!!incident.serviceDetails||stages.includes(incident.serviceStage??"");
+export function isServiceRepair(incident: {
+  incidentType?: string;
+  serviceStage?: string | null;
+  serviceDetails?: ServiceRepairDetails | null;
+}): boolean {
+  if (
+    ["inspection", "impound", "insurance_gps"].includes(
+      incident.incidentType ?? "",
+    )
+  )
+    return false;
+  return (
+    incident.incidentType === "repair" ||
+    !!incident.serviceDetails ||
+    stages.includes(incident.serviceStage ?? "")
+  );
 }
 /** All writes, including mobile and repository callers, share these invariants. */
 export function serviceWorkflow(
@@ -56,6 +69,52 @@ export function serviceWorkflow(
   )
     fail("Неизвестный этап ремонта");
   const changed = stage !== previous?.serviceStage;
+  for (const key of ["beforePhoto", "afterPhoto"] as const) {
+    const photo = details[key];
+    if (
+      photo !== undefined &&
+      (typeof photo !== "string" ||
+        photo.length > 1400000 ||
+        !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(
+          photo,
+        ))
+    )
+      fail("Фото: загрузите JPEG, PNG или WebP размером до 1 МБ");
+  }
+  if (details.insurance) {
+    const insurance = details.insurance;
+    if (
+      !["gosstrakh", "nsk", "alma"].includes(insurance.insurer) ||
+      typeof insurance.paid !== "boolean"
+    )
+      fail("Укажите страховую компанию и статус оплаты");
+    if (insurance.paid) {
+      date(insurance.paidAt, "Дата оплаты страховой");
+      if (
+        !/^\d{4}-\d{2}-\d{2}$/.test(insurance.paidAt!) ||
+        new Date(insurance.paidAt!).toISOString().slice(0, 10) !==
+          insurance.paidAt
+      )
+        fail("Дата оплаты страховой указана неверно");
+      if (Date.parse(insurance.paidAt!) > Date.now())
+        fail("Дата оплаты не может быть в будущем");
+    } else if (insurance.paidAt)
+      fail("Дата оплаты указывается только после оплаты страховой");
+  }
+  if (merged.incidentType === "accident") {
+    if (changed && stage === "awaiting_repair" && !details.beforePhoto)
+      fail("При приёмке после ДТП добавьте фото до ремонта");
+    const closing =
+      !!previous &&
+      !["closed", "resolved", "archived"].includes(previous.status) &&
+      ["closed", "resolved", "archived"].includes(merged.status ?? "");
+    if (
+      ((changed && stage === "completed") || closing) &&
+      (!details.beforePhoto || !details.afterPhoto)
+    )
+      fail("Для завершения ДТП нужны фото до и после ремонта");
+  }
+
   // Historical records remain readable and are not assigned invented dates.
   if (
     !previous &&
@@ -128,6 +187,15 @@ export function serviceWorkflow(
         !["company", "driver", "insurance"].includes(payment.payer)
       )
         fail("Для оплаты укажите уникальный номер, сумму и плательщика");
+      const historical = previous?.serviceDetails?.payments?.some(
+        (p) => p.id === payment.id,
+      );
+      if (
+        payment.payer === "insurance" &&
+        (!historical || payment.insurer !== undefined) &&
+        !["nsk", "alma", "gosstrakh"].includes(payment.insurer ?? "")
+      )
+        fail("Для страховой оплаты укажите страховую компанию");
       ids.add(payment.id);
       date(payment.paidAt, "Дата оплаты");
       paid += payment.amount;
@@ -139,7 +207,8 @@ export function serviceWorkflow(
             p.id === old.id &&
             p.amount === old.amount &&
             p.paidAt === old.paidAt &&
-            p.payer === old.payer,
+            p.payer === old.payer &&
+            p.insurer === old.insurer,
         )
       )
         fail("Сохранённую оплату нельзя удалять или изменять");
