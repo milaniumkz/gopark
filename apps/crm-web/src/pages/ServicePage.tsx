@@ -90,6 +90,7 @@ export function ServicePage() {
     payer: "company" as ServicePaymentEntry["payer"],
   });
   const [message, setMessage] = useState("");
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [sendCar, setSendCar] = useState("");
   const [reason, setReason] = useState("");
@@ -387,6 +388,16 @@ export function ServicePage() {
   const error = incidents.error || cars.error || drivers.error;
   return (
     <section className="page-stack service-page">
+      {photoPreview && (
+        <button
+          type="button"
+          className="photo-lightbox"
+          aria-label="Закрыть фото"
+          onClick={() => setPhotoPreview(null)}
+        >
+          <img src={photoPreview} alt="Фото ремонта" />
+        </button>
+      )}
       {!selected && (
         <>
           <div className="hero-card hero-card--dashboard">
@@ -929,7 +940,13 @@ export function ServicePage() {
                       onChange={(e) => void loadPhoto(e.target.files?.[0], key)}
                     />
                     {details[key] && (
-                      <a href={details[key]} target="_blank" rel="noreferrer">
+                      <a
+                        href="#photo"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          setPhotoPreview(details[key] ?? null);
+                        }}
+                      >
                         <img
                           className="sto-photo"
                           src={details[key]}
