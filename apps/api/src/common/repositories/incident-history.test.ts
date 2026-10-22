@@ -11,7 +11,8 @@ for (const [name, repository] of [
 ] as const) {
   test(`${name}: preserves repeated incident transitions and their dates`, async () => {
     const incident = await repository.create({
-      title: "History test", incidentType: "accident", status: "open",
+      // This fixture exercises legacy repeated repair history, independently of ДТП photo rules.
+      title: "History test", incidentType: "repair", status: "open",
       priority: "high", occurredAt: "2025-01-01T00:00:00Z",
       serviceStage: "awaiting_repair",
     });
