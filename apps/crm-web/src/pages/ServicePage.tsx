@@ -39,6 +39,16 @@ function cost(item: ManagerIncidentItem) {
 function closed(item: ManagerIncidentItem) {
   return ["resolved", "closed", "archived"].includes(item.status);
 }
+// getRandomValues is available on HTTP as well; randomUUID requires HTTPS.
+function paymentId() {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join(
+    "",
+  );
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 const today = () =>
   new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Almaty" }).format(
     new Date(),
@@ -92,6 +102,8 @@ export function ServicePage() {
   const [message, setMessage] = useState("");
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const savingRef = useRef(false);
+  const paymentAttemptRef = useRef<{ key: string; id: string } | null>(null);
   const [sendCar, setSendCar] = useState("");
   const [reason, setReason] = useState("");
   const records = (incidents.data ?? []).filter(
@@ -198,6 +210,7 @@ export function ServicePage() {
   }
   function open(i: ManagerIncidentItem) {
     setSelected(i);
+    paymentAttemptRef.current = null;
     setOpenVersion((v) => v + 1);
     setAccidentDraft(
       i.accidentDetails ?? {
@@ -216,16 +229,17 @@ export function ServicePage() {
     );
     setMessage("");
   }
-  async function save(stage?: string) {
-    if (!selected || busy) return;
+  async function save(stage?: string, draft = details, includeAccident = true) {
+    if (!selected || busy || savingRef.current) return false;
+    savingRef.current = true;
     setBusy(true);
     setMessage("");
     try {
       const next = await patchJson<ManagerIncidentItem, unknown>(
         `incidents/${selected.id}`,
         {
-          serviceDetails: details,
-          ...(selected.incidentType === "accident"
+          serviceDetails: draft,
+          ...(includeAccident && selected.incidentType === "accident"
             ? { accidentDetails: accidentDraft }
             : {}),
           ...(stage
@@ -234,22 +248,29 @@ export function ServicePage() {
                 status: stage === "completed" ? "closed" : "open",
               }
             : {}),
-          repairNote: details.reason,
+          repairNote: draft.reason,
         },
       );
       setSelected(next);
-      setDetails(next.serviceDetails ?? details);
-      await refresh();
+      setDetails(next.serviceDetails ?? draft);
+      await Promise.allSettled([
+        incidents.refetch({ silent: true }),
+        cars.refetch({ silent: true }),
+        drivers.refetch({ silent: true }),
+      ]);
       setMessage(
         stage === "completed"
           ? "Ремонт завершён. Бригадир получит уведомление."
           : "Данные сохранены. Бригадир получит уведомление.",
       );
+      return true;
     } catch (e) {
       setMessage(
         e instanceof Error ? e.message : "Не удалось сохранить ремонт",
       );
+      return false;
     } finally {
+      savingRef.current = false;
       setBusy(false);
     }
   }
@@ -304,7 +325,8 @@ export function ServicePage() {
       setBusy(false);
     }
   }
-  function addPayment() {
+  async function addPayment() {
+    if (busy || savingRef.current || !selected) return;
     const amount = Number(payment.amount);
     if (!Number.isFinite(amount) || amount <= 0) {
       setMessage("Укажите сумму оплаты больше нуля");
@@ -319,12 +341,29 @@ export function ServicePage() {
       setMessage("Выберите страховую, отметьте оплату и укажите дату");
       return;
     }
-    setDetails({
+    if (
+      details.serviceCost === undefined ||
+      amount + paid({ ...selected, serviceDetails: details }) >
+        details.serviceCost + 0.001
+    ) {
+      setMessage(
+        "Укажите стоимость услуг. Сумма оплат не должна превышать её.",
+      );
+      return;
+    }
+    const attemptKey = JSON.stringify([
+      selected.id,
+      payment,
+      details.insurance?.insurer,
+    ]);
+    if (paymentAttemptRef.current?.key !== attemptKey)
+      paymentAttemptRef.current = { key: attemptKey, id: paymentId() };
+    const draft: ServiceRepairDetails = {
       ...details,
       payments: [
         ...(details.payments ?? []),
         {
-          id: crypto.randomUUID(),
+          id: paymentAttemptRef.current.id,
           amount,
           paidAt: payment.paidAt,
           payer: payment.payer,
@@ -333,9 +372,12 @@ export function ServicePage() {
             : {}),
         },
       ],
-    });
-    setPayment({ ...payment, amount: "" });
-    setMessage("Оплата добавлена в форму. Нажмите «Сохранить».");
+    };
+    if (await save(undefined, draft, false)) {
+      paymentAttemptRef.current = null;
+      setPayment({ ...payment, amount: "" });
+      setMessage("Оплата сохранена. Оплаченная сумма и остаток обновлены.");
+    }
   }
   async function loadPhoto(
     file: File | undefined,
@@ -1034,6 +1076,18 @@ export function ServicePage() {
                 </p>
               )}
             <h4>Оплаты</h4>
+            <p role="status">
+              Оплачено:{" "}
+              {formatCurrency(paid({ ...selected, serviceDetails: details }))} ·
+              Остаток:{" "}
+              {formatCurrency(
+                Math.max(
+                  0,
+                  (details.serviceCost ?? 0) -
+                    paid({ ...selected, serviceDetails: details }),
+                ),
+              )}
+            </p>
             {(payment.payer === "insurance" || details.insurance) && (
               <div className="sto-filters">
                 <label>
@@ -1159,7 +1213,8 @@ export function ServicePage() {
               <button
                 type="button"
                 className="button button--secondary"
-                onClick={addPayment}
+                disabled={busy}
+                onClick={() => void addPayment()}
               >
                 Добавить оплату
               </button>
