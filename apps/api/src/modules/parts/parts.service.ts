@@ -1,6 +1,13 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { PrismaService } from "../../infrastructure/prisma/prisma.service.js";
-import { decimalToNumber, toIsoString } from "../../infrastructure/prisma/prisma.utils.js";
+import {
+  decimalToNumber,
+  toIsoString,
+} from "../../infrastructure/prisma/prisma.utils.js";
 import type { CreatePartDto } from "./dto/create-part.dto.js";
 import type { ReceivePartDto } from "./dto/receive-part.dto.js";
 import type { WriteoffPartDto } from "./dto/writeoff-part.dto.js";
@@ -27,6 +34,7 @@ export interface PartMovementItem {
   id: string;
   partId: string;
   partName: string;
+  requesterCompany: string | null;
   carId: string | null;
   carLabel: string | null;
   type: "receive" | "writeoff";
@@ -49,7 +57,9 @@ function normalizeText(value: unknown): string | null {
 function normalizePositiveInt(value: unknown, fieldName: string): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new BadRequestException(`${fieldName} должно быть положительным целым числом.`);
+    throw new BadRequestException(
+      `${fieldName} должно быть положительным целым числом.`,
+    );
   }
 
   return parsed;
@@ -75,7 +85,9 @@ function normalizeYear(value: unknown): number | null {
   }
 
   const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed >= 1900 && parsed <= 2100 ? parsed : null;
+  return Number.isInteger(parsed) && parsed >= 1900 && parsed <= 2100
+    ? parsed
+    : null;
 }
 
 function mapPart(part: any): PartItem {
@@ -90,7 +102,10 @@ function mapPart(part: any): PartItem {
     unit: part.unit,
     quantity: part.quantity,
     minQuantity: part.minQuantity,
-    unitPrice: part.unitPrice === null || part.unitPrice === undefined ? null : decimalToNumber(part.unitPrice),
+    unitPrice:
+      part.unitPrice === null || part.unitPrice === undefined
+        ? null
+        : decimalToNumber(part.unitPrice),
     supplier: part.supplier ?? null,
     note: part.note ?? null,
     createdAt: toIsoString(part.createdAt),
@@ -101,18 +116,24 @@ function mapPart(part: any): PartItem {
 function mapMovement(movement: any): PartMovementItem {
   const carLabel =
     movement.car?.plateNumber || movement.car?.vin
-      ? [movement.car?.plateNumber, movement.car?.make, movement.car?.model].filter(Boolean).join(" ")
+      ? [movement.car?.plateNumber, movement.car?.make, movement.car?.model]
+          .filter(Boolean)
+          .join(" ")
       : null;
 
   return {
     id: movement.id,
     partId: movement.partId,
     partName: movement.part?.name ?? "Запчасть",
+    requesterCompany: movement.requesterCompany ?? null,
     carId: movement.carId ?? null,
     carLabel,
     type: movement.type,
     quantity: movement.quantity,
-    unitPrice: movement.unitPrice === null || movement.unitPrice === undefined ? null : decimalToNumber(movement.unitPrice),
+    unitPrice:
+      movement.unitPrice === null || movement.unitPrice === undefined
+        ? null
+        : decimalToNumber(movement.unitPrice),
     reason: movement.reason ?? null,
     note: movement.note ?? null,
     createdAt: toIsoString(movement.createdAt),
@@ -123,19 +144,45 @@ function mapMovement(movement: any): PartMovementItem {
 export class PartsService {
   private readonly prisma = new PrismaService();
 
-  async overview(companyName?: string | null): Promise<PartsOverview> {
+  async overview(
+    companyName?: string | null,
+    from?: string,
+    to?: string,
+  ): Promise<PartsOverview> {
     const client = this.prisma.client;
     if (!client) {
       return { parts: [], movements: [] };
     }
 
+    for (const value of [from, to])
+      if (
+        value &&
+        (!/^\d{4}-\d{2}-\d{2}$/.test(value) ||
+          !Number.isFinite(Date.parse(value)) ||
+          new Date(value).toISOString().slice(0, 10) !== value)
+      )
+        throw new BadRequestException("Укажите корректные даты периода.");
+    if (from && to && from > to)
+      throw new BadRequestException(
+        "Дата начала периода должна быть не позже даты окончания.",
+      );
+    const createdAt = {
+      ...(from ? { gte: new Date(`${from}T00:00:00Z`) } : {}),
+      ...(to ? { lt: new Date(Date.parse(`${to}T00:00:00Z`) + 86400000) } : {}),
+    };
     const partWhere = companyName ? { companyName } : {};
     const [parts, movements] = await Promise.all([
-      client.part.findMany({ where: partWhere, orderBy: [{ quantity: "asc" }, { name: "asc" }] }),
+      client.part.findMany({
+        where: partWhere,
+        orderBy: [{ quantity: "asc" }, { name: "asc" }],
+      }),
       client.partMovement.findMany({
-        where: companyName ? { part: { companyName } } : {},
+        where: {
+          ...(companyName ? { part: { companyName } } : {}),
+          ...(from || to ? { createdAt } : {}),
+        },
         orderBy: { createdAt: "desc" },
-        take: 100,
+
         include: { part: true, car: true },
       }),
     ]);
@@ -146,7 +193,10 @@ export class PartsService {
     };
   }
 
-  async create(input: CreatePartDto, companyName?: string | null): Promise<PartItem> {
+  async create(
+    input: CreatePartDto,
+    companyName?: string | null,
+  ): Promise<PartItem> {
     const client = this.prisma.client;
     if (!client) {
       throw new BadRequestException("База данных не подключена.");
@@ -177,17 +227,56 @@ export class PartsService {
     return mapPart(part);
   }
 
-  async receive(input: ReceivePartDto, companyName?: string | null): Promise<PartsOverview> {
+  private async requester(
+    value: unknown,
+    scope?: string | null,
+  ): Promise<string> {
+    const company = normalizeText(value);
+    if (!company)
+      throw new BadRequestException(
+        "Выберите компанию или СТО, которое заказывает запчасти.",
+      );
+    if (scope && company !== scope && company !== "СТО")
+      throw new BadRequestException(
+        "Выберите свою компанию или СТО из справочника.",
+      );
+    const settings = await this.prisma.client!.settings.findFirst({
+      select: { companies: true },
+    });
+    if (
+      company !== "СТО" &&
+      company !== scope &&
+      !settings?.companies.includes(company)
+    )
+      throw new BadRequestException(
+        "Выберите компанию из справочника CRM или СТО.",
+      );
+    return company;
+  }
+
+  async receive(
+    input: ReceivePartDto,
+    companyName?: string | null,
+  ): Promise<PartsOverview> {
     const client = this.prisma.client;
     if (!client) {
       throw new BadRequestException("База данных не подключена.");
     }
 
     const quantity = normalizePositiveInt(input.quantity, "Количество прихода");
+    const requesterCompany = await this.requester(
+      input.requesterCompany,
+      companyName,
+    );
     const unitPrice = normalizeMoney(input.unitPrice);
     const scopedCompanyName = normalizeText(companyName);
     const part = input.partId
-      ? await client.part.findFirst({ where: { id: input.partId, ...(scopedCompanyName ? { companyName: scopedCompanyName } : {}) } })
+      ? await client.part.findFirst({
+          where: {
+            id: input.partId,
+            ...(scopedCompanyName ? { companyName: scopedCompanyName } : {}),
+          },
+        })
       : null;
 
     if (input.partId && !part) {
@@ -196,7 +285,9 @@ export class PartsService {
 
     const name = normalizeText(input.name);
     if (!part && !name) {
-      throw new BadRequestException("Выберите существующую запчасть или укажите новую.");
+      throw new BadRequestException(
+        "Выберите существующую запчасть или укажите новую.",
+      );
     }
 
     await client.$transaction(async (tx: any) => {
@@ -208,7 +299,8 @@ export class PartsService {
               unitPrice: unitPrice ?? part.unitPrice,
               make: normalizeText(input.make) ?? part.make,
               model: normalizeText(input.model) ?? part.model,
-              productionYear: normalizeYear(input.productionYear) ?? part.productionYear,
+              productionYear:
+                normalizeYear(input.productionYear) ?? part.productionYear,
               supplier: normalizeText(input.supplier) ?? part.supplier,
               note: normalizeText(input.note) ?? part.note,
             },
@@ -233,9 +325,10 @@ export class PartsService {
       await tx.partMovement.create({
         data: {
           partId: target.id,
+          requesterCompany,
           type: "receive",
           quantity,
-          unitPrice,
+          unitPrice: unitPrice ?? target.unitPrice,
           reason: "Приход",
           note: normalizeText(input.note),
         },
@@ -245,28 +338,46 @@ export class PartsService {
     return this.overview(scopedCompanyName);
   }
 
-  async writeoff(input: WriteoffPartDto, companyName?: string | null): Promise<PartsOverview> {
+  async writeoff(
+    input: WriteoffPartDto,
+    companyName?: string | null,
+  ): Promise<PartsOverview> {
     const client = this.prisma.client;
     if (!client) {
       throw new BadRequestException("База данных не подключена.");
     }
 
-    const quantity = normalizePositiveInt(input.quantity, "Количество списания");
+    const quantity = normalizePositiveInt(
+      input.quantity,
+      "Количество списания",
+    );
+    const requesterCompany = await this.requester(
+      input.requesterCompany,
+      companyName,
+    );
     const scopedCompanyName = normalizeText(companyName);
     const part = await client.part.findFirst({
-      where: { id: input.partId, ...(scopedCompanyName ? { companyName: scopedCompanyName } : {}) },
+      where: {
+        id: input.partId,
+        ...(scopedCompanyName ? { companyName: scopedCompanyName } : {}),
+      },
     });
     if (!part) {
       throw new NotFoundException("Запчасть не найдена.");
     }
 
     if (part.quantity < quantity) {
-      throw new BadRequestException(`Недостаточно остатка: доступно ${part.quantity} ${part.unit}.`);
+      throw new BadRequestException(
+        `Недостаточно остатка: доступно ${part.quantity} ${part.unit}.`,
+      );
     }
 
     if (input.carId) {
       const car = await client.car.findFirst({
-        where: { id: input.carId, ...(scopedCompanyName ? { companyName: scopedCompanyName } : {}) },
+        where: {
+          id: input.carId,
+          ...(scopedCompanyName ? { companyName: scopedCompanyName } : {}),
+        },
       });
       if (!car) {
         throw new NotFoundException("Автомобиль не найден.");
@@ -274,14 +385,19 @@ export class PartsService {
     }
 
     await client.$transaction(async (tx: any) => {
-      await tx.part.update({
-        where: { id: part.id },
+      const updated = await tx.part.updateMany({
+        where: { id: part.id, quantity: { gte: quantity } },
         data: { quantity: { decrement: quantity } },
       });
+      if (updated.count !== 1)
+        throw new BadRequestException(
+          "Остаток изменился. Обновите склад и повторите списание.",
+        );
 
       await tx.partMovement.create({
         data: {
           partId: part.id,
+          requesterCompany,
           carId: normalizeText(input.carId),
           type: "writeoff",
           quantity,

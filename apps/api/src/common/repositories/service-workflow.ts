@@ -115,6 +115,39 @@ export function serviceWorkflow(
       fail("Для завершения ДТП нужны фото до и после ремонта");
   }
 
+  if (details.plannedRepairDate !== undefined) {
+    date(details.plannedRepairDate, "Плановая дата начала ремонта");
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(details.plannedRepairDate) ||
+      new Date(details.plannedRepairDate).toISOString().slice(0, 10) !==
+        details.plannedRepairDate
+    )
+      fail("Укажите корректную плановую дату начала ремонта");
+  }
+  if (changed && stage === "awaiting_repair") {
+    if (
+      typeof details.waitingComment !== "string" ||
+      !details.waitingComment.trim()
+    )
+      fail("Перед ожиданием укажите комментарий СТО");
+    if (!details.plannedRepairDate)
+      fail("Укажите плановую дату начала ремонта");
+    const today = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Almaty",
+    }).format(new Date());
+    if (details.plannedRepairDate! < today)
+      fail("Плановая дата начала ремонта не может быть в прошлом");
+  }
+  if (
+    previous?.serviceDetails?.plannedRepairDate &&
+    previous.serviceStage !== "sent_to_service" &&
+    input.serviceDetails?.plannedRepairDate !== undefined &&
+    input.serviceDetails.plannedRepairDate !==
+      previous.serviceDetails.plannedRepairDate
+  )
+    fail(
+      "Зафиксированную плановую дату нельзя менять: она используется для контроля просрочки",
+    );
   // Historical records remain readable and are not assigned invented dates.
   if (
     !previous &&

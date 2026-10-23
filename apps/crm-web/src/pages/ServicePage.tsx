@@ -49,6 +49,16 @@ function paymentId() {
   );
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
+function waitingLate(i: ManagerIncidentItem) {
+  const d = i.serviceDetails;
+  if (!d?.plannedRepairDate || (!d.repairStartedAt && closed(i))) return false;
+  const actual = d.repairStartedAt
+    ? new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Almaty" }).format(
+        new Date(d.repairStartedAt),
+      )
+    : today();
+  return actual > d.plannedRepairDate;
+}
 const today = () =>
   new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Almaty" }).format(
     new Date(),
@@ -72,6 +82,7 @@ export function ServicePage() {
   const [caseType, setCaseType] = useState("all");
   const [kind, setKind] = useState("all");
   const [managerFilter, setManagerFilter] = useState("");
+  const [carFilter, setCarFilter] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [payer, setPayer] = useState("all");
@@ -120,15 +131,16 @@ export function ServicePage() {
       (i.driverId ? driverById.get(i.driverId)?.companyName : null);
     return (
       (company === "all" || companyName === company) &&
+      (!carFilter || i.carId === carFilter) &&
       (caseType === "all" || i.serviceCaseType === caseType) &&
       (kind === "all" ||
         (kind === "accident"
           ? i.incidentType === "accident"
           : i.incidentType !== "accident")) &&
       (!managerFilter ||
-        (i.managerLabel ?? "")
-          .toLowerCase()
-          .includes(managerFilter.toLowerCase())) &&
+        (i.managerLabel ??
+          (i.carId ? carById.get(i.carId)?.managerName : null)) ===
+          managerFilter) &&
       (!from || day >= from) &&
       (!to || (!!day && day <= to)) &&
       (payer === "all" ||
@@ -140,6 +152,7 @@ export function ServicePage() {
       (filter === "all" ||
         (filter === "active" && !closed(i)) ||
         (filter === "archived" && closed(i)) ||
+        (filter === "overdue_start" && waitingLate(i)) ||
         i.serviceStage === filter) &&
       [
         vehicleLabel(i),
@@ -156,13 +169,11 @@ export function ServicePage() {
   const untracked = (cars.data ?? []).filter(
     (c) =>
       (company === "all" || c.companyName === company) &&
+      (!carFilter || c.id === carFilter) &&
       caseType === "all" &&
       kind !== "accident" &&
       payer === "all" &&
-      (!managerFilter ||
-        (c.managerName ?? "")
-          .toLowerCase()
-          .includes(managerFilter.toLowerCase())) &&
+      (!managerFilter || c.managerName === managerFilter) &&
       c.status === "maintenance" &&
       !records.some((i) => i.carId === c.id && !closed(i)) &&
       ["active", "all", "in_repair"].includes(filter) &&
@@ -186,15 +197,15 @@ export function ServicePage() {
         (i.driverId ? driverById.get(i.driverId)?.companyName : null);
       return (
         (company === "all" || name === company) &&
+        (!carFilter || i.carId === carFilter) &&
         (caseType === "all" || i.serviceCaseType === caseType) &&
         (kind === "all" ||
           (kind === "accident"
             ? i.incidentType === "accident"
             : i.incidentType !== "accident")) &&
         (!managerFilter ||
-          (i.managerLabel ?? "")
-            .toLowerCase()
-            .includes(managerFilter.toLowerCase()))
+          (i.managerLabel ?? carById.get(i.carId ?? "")?.managerName) ===
+            managerFilter)
       );
     })
     .flatMap((i) => i.serviceDetails?.payments ?? [])
@@ -427,6 +438,140 @@ export function ServicePage() {
   const knownFault = guilty + innocent;
   const percent = (n: number) =>
     knownFault ? `${((n / knownFault) * 100).toFixed(1)}%` : "—";
+  async function exportExcel() {
+    if (from && to && from > to) {
+      setMessage("Дата «с» должна быть не позже даты «по»");
+      return;
+    }
+    try {
+      const x = await import("xlsx");
+      const book = x.utils.book_new();
+      const cases = [
+        [
+          "Автомобиль",
+          "Водитель",
+          "Бригадир",
+          "Тип",
+          "Этап",
+          "Причина",
+          "Стоимость услуг",
+          "Оплачено всего",
+          "К оплате",
+          "Оплата",
+          "Плательщики",
+          "Дата стоимости",
+          "План начала ремонта",
+          "Начало фактически",
+          "Нарушен срок",
+        ],
+        ...rows.map((i) => [
+          vehicleLabel(i),
+          driverById.get(i.driverId ?? "")?.fullName ?? "",
+          i.managerLabel ?? "",
+          i.incidentType === "accident" ? "ДТП" : "Ремонт",
+          labels[i.serviceStage ?? ""] ?? i.status,
+          i.serviceDetails?.reason ?? "",
+          i.serviceDetails?.serviceCost ?? "",
+          paid(i),
+          i.serviceDetails?.serviceCost == null
+            ? "Стоимость не указана"
+            : Math.max(0, cost(i) - paid(i)),
+          !paid(i)
+            ? "Не оплачено"
+            : paid(i) >= cost(i)
+              ? "Оплачено"
+              : "Частично",
+          (i.serviceDetails?.payments ?? [])
+            .map(
+              (p) =>
+                payerLabels[p.payer] +
+                (p.insurer ? ` · ${insurerLabels[p.insurer]}` : ""),
+            )
+            .join("; "),
+          i.serviceDetails?.costDate ?? "",
+          i.serviceDetails?.plannedRepairDate ?? "",
+          i.serviceDetails?.repairStartedAt ?? "",
+          waitingLate(i) ? "Да" : "Нет",
+        ]),
+      ];
+      const cash: Array<Array<string | number>> = [
+        [
+          "Автомобиль",
+          "Водитель",
+          "Бригадир",
+          "Плательщик",
+          "Страховая",
+          "Дата оплаты",
+          "Сумма",
+          "Номер оплаты",
+        ],
+      ];
+      for (const i of records) {
+        const name =
+          (i.carId ? carById.get(i.carId)?.companyName : null) ??
+          driverById.get(i.driverId ?? "")?.companyName;
+        if (
+          (company !== "all" && company !== name) ||
+          (carFilter && i.carId !== carFilter) ||
+          (managerFilter &&
+            (i.managerLabel ?? carById.get(i.carId ?? "")?.managerName) !==
+              managerFilter) ||
+          (kind !== "all" &&
+            (kind === "accident") !== (i.incidentType === "accident")) ||
+          (caseType !== "all" && i.serviceCaseType !== caseType)
+        )
+          continue;
+        for (const p of i.serviceDetails?.payments ?? [])
+          if (
+            (!from || p.paidAt.slice(0, 10) >= from) &&
+            (!to || p.paidAt.slice(0, 10) <= to) &&
+            (payer === "all" || p.payer === payer)
+          )
+            cash.push([
+              vehicleLabel(i),
+              driverById.get(i.driverId ?? "")?.fullName ?? "",
+              i.managerLabel ?? "",
+              payerLabels[p.payer],
+              p.insurer ? insurerLabels[p.insurer] : "",
+              p.paidAt,
+              p.amount,
+              p.id,
+            ]);
+      }
+      x.utils.book_append_sheet(
+        book,
+        x.utils.aoa_to_sheet(cases),
+        "Ремонты и задолженность",
+      );
+      x.utils.book_append_sheet(
+        book,
+        x.utils.aoa_to_sheet(cash),
+        "Поступления за период",
+      );
+      x.utils.book_append_sheet(
+        book,
+        x.utils.aoa_to_sheet([
+          ["Период с", from || "Все даты"],
+          ["Период по", to || "Все даты"],
+          ["Стоимость услуг", rows.reduce((sum, i) => sum + cost(i), 0)],
+          ["Оплачено по ремонтам", rows.reduce((sum, i) => sum + paid(i), 0)],
+          [
+            "К оплате",
+            rows.reduce((sum, i) => sum + Math.max(0, cost(i) - paid(i)), 0),
+          ],
+          ["Прибыль СТО 30%", rows.reduce((sum, i) => sum + cost(i) * 0.3, 0)],
+          [
+            "Пояснение",
+            "Ремонты отобраны по дате стоимости; поступления — по дате оплаты. Пустая стоимость не равна нулевому обязательству.",
+          ],
+        ]),
+        "Итоги",
+      );
+      x.writeFile(book, `gopark-sto-${from || "all"}-${to || "all"}.xlsx`);
+    } catch {
+      setMessage("Не удалось подготовить Excel. Повторите выгрузку.");
+    }
+  }
   const error = incidents.error || cars.error || drivers.error;
   return (
     <section className="page-stack service-page">
@@ -451,6 +596,12 @@ export function ServicePage() {
               </p>
             </div>
             <div className="hero-card__actions">
+              <button
+                className="button button--secondary"
+                onClick={() => void exportExcel()}
+              >
+                Скачать Excel
+              </button>
               <Link className="button button--secondary" to="/incidents">
                 Инциденты
               </Link>
@@ -607,11 +758,57 @@ export function ServicePage() {
             </label>
             <label>
               Бригадир
-              <input
+              <select
+                aria-label="Бригадир"
                 value={managerFilter}
                 onChange={(e) => setManagerFilter(e.target.value)}
-                placeholder="Имя бригадира"
-              />
+              >
+                <option value="">Все бригадиры</option>
+                {[
+                  ...new Set(
+                    [
+                      ...records.map((i) => i.managerLabel),
+                      ...(cars.data ?? [])
+                        .filter((c) => c.status === "maintenance")
+                        .map((c) => c.managerName),
+                    ].filter((v): v is string => !!v),
+                  ),
+                ]
+                  .sort()
+                  .map((v) => (
+                    <option key={v} value={v}>
+                      {v}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label>
+              Машина в СТО
+              <select
+                aria-label="Машина в СТО"
+                value={carFilter}
+                onChange={(e) => setCarFilter(e.target.value)}
+              >
+                <option value="">Все машины</option>
+                {(cars.data ?? [])
+                  .filter(
+                    (c) =>
+                      c.status === "maintenance" ||
+                      records.some(
+                        (i) =>
+                          i.carId === c.id &&
+                          (!closed(i) ||
+                            filter === "archived" ||
+                            filter === "all"),
+                      ) ||
+                      c.id === carFilter,
+                  )
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.plateNumber} · {c.make} {c.model}
+                    </option>
+                  ))}
+              </select>
             </label>
             <label>
               Поиск
@@ -629,6 +826,9 @@ export function ServicePage() {
               >
                 <option value="active">Активные ремонты</option>
                 <option value="all">Все ремонты</option>
+                <option value="overdue_start">
+                  Нарушен срок начала ремонта
+                </option>
                 {stages.slice(0, 3).map((s) => (
                   <option key={s} value={s}>
                     {labels[s]}
@@ -732,26 +932,13 @@ export function ServicePage() {
                     i.description ??
                     "Причина не указана"}
                 </div>
-                <p className="muted">
-                  Отправлен: {stamp(i.serviceDetails?.sentAt)}
-                  <br />
-                  Прибыл: {stamp(i.serviceDetails?.arrivedAt)}
-                </p>
-                <div className="sto-line">
-                  <span>Услуги</span>
-                  <b>
-                    {i.serviceDetails?.serviceCost !== undefined
-                      ? formatCurrency(cost(i))
-                      : "Не указана"}
-                  </b>
-                </div>
-                <div className="sto-line">
-                  <span>Оплачено / остаток</span>
-                  <b>
-                    {formatCurrency(paid(i))} /{" "}
-                    {formatCurrency(Math.max(0, cost(i) - paid(i)))}
-                  </b>
-                </div>
+                {waitingLate(i) && (
+                  <span className="sto-late">
+                    {i.serviceDetails?.repairStartedAt
+                      ? "Начат с опозданием"
+                      : "Начало ремонта просрочено"}
+                  </span>
+                )}
                 <button
                   className="button button--secondary"
                   onClick={() => open(i)}
@@ -890,7 +1077,48 @@ export function ServicePage() {
               </div>
             ))}
           </div>
+          {selected.serviceDetails?.plannedRepairDate && (
+            <p className={waitingLate(selected) ? "sto-late" : "muted"}>
+              План начала ремонта:{" "}
+              {formatDateOnly(selected.serviceDetails.plannedRepairDate)} ·{" "}
+              {waitingLate(selected) ? "Срок нарушен" : "Срок не нарушен"}
+              <br />
+              Комментарий СТО: {selected.serviceDetails.waitingComment ?? "—"}
+            </p>
+          )}
           <fieldset disabled={!canEdit || busy}>
+            {(selected.serviceStage === "sent_to_service" ||
+              details.plannedRepairDate) && (
+              <div className="sto-filters">
+                <label>
+                  Комментарий ожидания *
+                  <textarea
+                    value={details.waitingComment ?? ""}
+                    onChange={(e) =>
+                      setDetails({ ...details, waitingComment: e.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  Плановая дата начала ремонта *
+                  <input
+                    type="date"
+                    min={today()}
+                    disabled={
+                      !!selected.serviceDetails?.plannedRepairDate &&
+                      selected.serviceStage !== "sent_to_service"
+                    }
+                    value={details.plannedRepairDate ?? ""}
+                    onChange={(e) =>
+                      setDetails({
+                        ...details,
+                        plannedRepairDate: e.target.value || undefined,
+                      })
+                    }
+                  />
+                </label>
+              </div>
+            )}
             {selected.incidentType === "accident" && (
               <div className="sto-filters">
                 <label>
@@ -1238,6 +1466,9 @@ export function ServicePage() {
                   className="button"
                   disabled={
                     busy ||
+                    (selected.serviceStage === "sent_to_service" &&
+                      (!details.waitingComment?.trim() ||
+                        !details.plannedRepairDate)) ||
                     (selected.incidentType === "accident" &&
                       ((selected.serviceStage === "sent_to_service" &&
                         !details.beforePhoto) ||

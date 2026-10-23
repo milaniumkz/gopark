@@ -115,7 +115,7 @@ test(
         1,
         "replayed event doesn't duplicate inbox notification",
       );
-      await repo.update(sent.id, { serviceStage: "awaiting_repair" });
+      await repo.update(sent.id, { serviceStage: "awaiting_repair", serviceDetails: { reason: sent.serviceDetails!.reason, waitingComment: "Ожидает мастера", plannedRepairDate: "2099-12-31" } });
       await integration.handle(reminder.topic, {
         ...reminder.payload,
         eventId: reminder.id,

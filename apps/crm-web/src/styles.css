@@ -8015,3 +8015,16 @@ a {
 .date-range-grid > span { text-align: center; font-size: 12px; padding: 5px; }
 .date-range-grid > button { padding: 8px 3px; background: #f2f5fa; color: #20334d; border: 1px solid transparent; }
 .date-range-grid > button[aria-pressed="true"] { background: #dbeafe; border-color: #3b82f6; }
+
+/* Parts dialogs stay centered and compact; only their contents scroll. */
+.parts-page .entity-modal { inset: auto; top: 50%; left: 50%; transform: translate(-50%, -50%); margin: 0; width: min(680px, calc(100vw - 32px)); max-height: min(760px, calc(100dvh - 48px)); padding: 20px; border-radius: 18px; grid-template-rows: auto minmax(0,1fr); }
+.parts-page .entity-modal__header { margin-bottom: 12px; }
+.parts-page .entity-modal__header h3 { font-size: 20px; }
+.parts-page .entity-modal__body { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; min-height: 0; }
+.parts-page .entity-modal__body .quick-form__meta, .parts-page .entity-modal__body button[type=submit] { grid-column: 1 / -1; }
+.parts-page .entity-modal__body input, .parts-page .entity-modal__body select { width: 100%; min-width: 0; padding: 10px 12px; border-radius: 10px; }
+.parts-period-stats { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; margin: 16px 0; }
+.parts-period-stats > div { padding: 12px; border: 1px solid #e4e9f0; border-radius: 12px; }
+.parts-period-stats strong { display: block; font-size: 22px; margin-top: 6px; }
+.parts-table-scroll { overflow-x: auto; }
+@media(max-width:600px) { .parts-page .entity-modal { padding: 14px; } .parts-page .entity-modal__body { grid-template-columns: 1fr; } .parts-period-stats { grid-template-columns: repeat(2,minmax(0,1fr)); } }

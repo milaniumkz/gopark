@@ -55,6 +55,16 @@ class ManagerRepository {
     return api.getDrivers();
   }
 
+  Future<List<ManagerAssignedDriverDto>> loadDriversDueYesterday(
+      {DateTime? now}) {
+    // Match the API's UTC obligation day; calendar dates remain read-only.
+    final current = (now ?? DateTime.now()).toUtc();
+    final day = DateTime.utc(current.year, current.month, current.day - 1);
+    final date =
+        '${day.year}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}';
+    return api.getDrivers(from: date, to: date);
+  }
+
   Future<List<ManagerIdleVehicleDto>> loadIdleVehicles() {
     return api.getIdleVehicles();
   }

@@ -120,6 +120,7 @@ jobs:
       CONTRACT_NUMBER_INTEGRATION: 'true'
       REPAIR_INTEGRATION: 'true'
       CALENDAR_INTEGRATION: 'true'
+      PARTS_INTEGRATION: 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -134,4 +135,4 @@ jobs:
       - name: Create isolated test schema
         run: pnpm --filter @gopark/api exec prisma db push --skip-generate
       - name: Verify numbering and atomic repair lifecycle on real PostgreSQL
-        run: pnpm --filter @gopark/api exec node --loader ts-node/esm --test src/infrastructure/repositories/contract-number.integration.test.ts src/infrastructure/repositories/repair-lifecycle.integration.test.ts src/infrastructure/repositories/calendar-comments.integration.test.ts
+        run: pnpm --filter @gopark/api exec node --loader ts-node/esm --test src/infrastructure/repositories/contract-number.integration.test.ts src/infrastructure/repositories/repair-lifecycle.integration.test.ts src/infrastructure/repositories/calendar-comments.integration.test.ts src/infrastructure/repositories/service-workflow.integration.test.ts src/modules/parts/parts.integration.test.ts

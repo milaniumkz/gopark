@@ -144,9 +144,13 @@ Future<Map<String, dynamic>?> showAccidentForm(BuildContext context) async {
 
 class ManagerPaymentCalendarPage extends StatefulWidget {
   const ManagerPaymentCalendarPage(
-      {super.key, required this.repository, this.driverId});
+      {super.key,
+      required this.repository,
+      this.driverId,
+      this.embedded = false});
   final ManagerRepository repository;
   final String? driverId;
+  final bool embedded;
   @override
   State<ManagerPaymentCalendarPage> createState() => _CalendarState();
 }
@@ -188,7 +192,9 @@ class _CalendarState extends State<ManagerPaymentCalendarPage> {
   void initState() {
     super.initState();
     driverId = widget.driverId;
-    drivers = widget.repository.loadDrivers();
+    drivers = widget.embedded
+        ? Future.value(<ManagerAssignedDriverDto>[])
+        : widget.repository.loadDrivers();
     if (driverId != null) reload();
   }
 
@@ -223,10 +229,14 @@ class _CalendarState extends State<ManagerPaymentCalendarPage> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-      backgroundColor: ManagerDesign.background,
-      appBar: AppBar(title: const Text('Календарь платежей')),
-      body: ListView(padding: const EdgeInsets.all(16), children: [
+  Widget build(BuildContext context) {
+    final children = <Widget>[
+      if (widget.embedded)
+        const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Text('Календарь платежей',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600))),
+      if (!widget.embedded)
         FutureBuilder<List<ManagerAssignedDriverDto>>(
             future: drivers,
             builder: (context, s) {
@@ -255,152 +265,156 @@ class _CalendarState extends State<ManagerPaymentCalendarPage> {
                         reload();
                       }));
             }),
-        const SizedBox(height: 12),
-        const Text('Нажмите на дату, чтобы добавить комментарий.',
-            style: TextStyle(color: ManagerDesign.muted, fontSize: 14)),
-        const SizedBox(height: 12),
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          IconButton(
-              tooltip: 'Предыдущий месяц',
-              onPressed: () => shift(-1),
-              icon: const Icon(Icons.chevron_left)),
-          Expanded(
-              child: Text(
-                  '${[
-                    'Январь',
-                    'Февраль',
-                    'Март',
-                    'Апрель',
-                    'Май',
-                    'Июнь',
-                    'Июль',
-                    'Август',
-                    'Сентябрь',
-                    'Октябрь',
-                    'Ноябрь',
-                    'Декабрь'
-                  ][month.month - 1]} ${month.year}',
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 20),
-                  textAlign: TextAlign.center)),
-          IconButton(
-              tooltip: 'Следующий месяц',
-              onPressed: () => shift(1),
-              icon: const Icon(Icons.chevron_right))
-        ]),
-        if (calendar == null)
-          const Padding(
-              padding: EdgeInsets.all(24),
-              child: Text(
-                  'Выберите водителя, чтобы увидеть платежи и статусы по дням.'))
-        else
-          FutureBuilder<Map<String, dynamic>>(
-              future: calendar,
-              builder: (context, s) {
-                if (s.connectionState != ConnectionState.done)
-                  return const Center(child: CircularProgressIndicator());
-                if (s.hasError)
-                  return TextButton(
-                      onPressed: () => setState(reload),
-                      child: const Text(
-                          'Не удалось загрузить календарь. Повторить'));
-                final data = s.data!;
-                final days =
-                    (data['days'] as List).cast<Map<String, dynamic>>();
-                final offset = (month.weekday + 6) % 7;
-                return Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                          'Договор № ${data['contractNumber'] ?? '—'} · ${data['rate']} сом / день',
-                          style: const TextStyle(color: ManagerDesign.muted)),
-                      const SizedBox(height: 14),
-                      Row(
-                          children: ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
-                              .map((d) =>
-                                  Expanded(child: Center(child: Text(d))))
-                              .toList()),
-                      const SizedBox(height: 8),
-                      GridView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          itemCount: offset + days.length,
-                          gridDelegate:
-                              const SliverGridDelegateWithFixedCrossAxisCount(
-                                  crossAxisCount: 7,
-                                  crossAxisSpacing: 5,
-                                  mainAxisSpacing: 5),
-                          itemBuilder: (context, n) {
-                            if (n < offset) return const SizedBox();
-                            final day = days[n - offset];
-                            final status = '${day['status']}';
-                            return Semantics(
-                                label:
-                                    '${day['day']}: ${labels[status] ?? status}${day['comment'] == null ? '' : ', есть комментарий'}',
-                                button: true,
-                                child: InkWell(
-                                    onTap: () => editDay(day),
-                                    child: Container(
-                                        alignment: Alignment.center,
-                                        decoration: BoxDecoration(
-                                            color: colors[status] ??
-                                                Colors.grey.shade100,
-                                            borderRadius:
-                                                BorderRadius.circular(8)),
-                                        child: Stack(
-                                            fit: StackFit.expand,
-                                            alignment: Alignment.center,
-                                            children: [
-                                              Center(
-                                                  child: Text(
-                                                      '${n - offset + 1}',
-                                                      style: const TextStyle(
-                                                          fontWeight:
-                                                              FontWeight.w600,
-                                                          color: ManagerDesign
-                                                              .text))),
-                                              if ((day['comment'] as String?)
-                                                      ?.isNotEmpty ==
-                                                  true)
-                                                const Positioned(
-                                                    right: 3,
-                                                    bottom: 3,
-                                                    child: Icon(
-                                                        Icons
-                                                            .chat_bubble_rounded,
-                                                        size: 9,
+      const SizedBox(height: 12),
+      const Text('Нажмите на дату, чтобы добавить комментарий.',
+          style: TextStyle(color: ManagerDesign.muted, fontSize: 14)),
+      const SizedBox(height: 12),
+      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        IconButton(
+            tooltip: 'Предыдущий месяц',
+            onPressed: () => shift(-1),
+            icon: const Icon(Icons.chevron_left)),
+        Expanded(
+            child: Text(
+                '${[
+                  'Январь',
+                  'Февраль',
+                  'Март',
+                  'Апрель',
+                  'Май',
+                  'Июнь',
+                  'Июль',
+                  'Август',
+                  'Сентябрь',
+                  'Октябрь',
+                  'Ноябрь',
+                  'Декабрь'
+                ][month.month - 1]} ${month.year}',
+                style:
+                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
+                textAlign: TextAlign.center)),
+        IconButton(
+            tooltip: 'Следующий месяц',
+            onPressed: () => shift(1),
+            icon: const Icon(Icons.chevron_right))
+      ]),
+      if (calendar == null)
+        const Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(
+                'Выберите водителя, чтобы увидеть платежи и статусы по дням.'))
+      else
+        FutureBuilder<Map<String, dynamic>>(
+            future: calendar,
+            builder: (context, s) {
+              if (s.connectionState != ConnectionState.done)
+                return const Center(child: CircularProgressIndicator());
+              if (s.hasError)
+                return TextButton(
+                    onPressed: () => setState(reload),
+                    child: const Text(
+                        'Не удалось загрузить календарь. Повторить'));
+              final data = s.data!;
+              final days = (data['days'] as List).cast<Map<String, dynamic>>();
+              final offset = (month.weekday + 6) % 7;
+              return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                        'Договор № ${data['contractNumber'] ?? '—'} · ${data['rate']} сом / день',
+                        style: const TextStyle(color: ManagerDesign.muted)),
+                    const SizedBox(height: 14),
+                    Row(
+                        children: ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
+                            .map((d) => Expanded(child: Center(child: Text(d))))
+                            .toList()),
+                    const SizedBox(height: 8),
+                    GridView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: offset + days.length,
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 7,
+                                crossAxisSpacing: 5,
+                                mainAxisSpacing: 5),
+                        itemBuilder: (context, n) {
+                          if (n < offset) return const SizedBox();
+                          final day = days[n - offset];
+                          final status = '${day['status']}';
+                          return Semantics(
+                              label:
+                                  '${day['day']}: ${labels[status] ?? status}${day['comment'] == null ? '' : ', есть комментарий'}',
+                              button: true,
+                              child: InkWell(
+                                  onTap: () => editDay(day),
+                                  child: Container(
+                                      alignment: Alignment.center,
+                                      decoration: BoxDecoration(
+                                          color: colors[status] ??
+                                              Colors.grey.shade100,
+                                          borderRadius:
+                                              BorderRadius.circular(8)),
+                                      child: Stack(
+                                          fit: StackFit.expand,
+                                          alignment: Alignment.center,
+                                          children: [
+                                            Center(
+                                                child: Text('${n - offset + 1}',
+                                                    style: const TextStyle(
+                                                        fontWeight:
+                                                            FontWeight.w600,
                                                         color: ManagerDesign
-                                                            .primary)),
-                                            ]))));
-                          }),
-                      const SizedBox(height: 18),
-                      Wrap(
-                          spacing: 12,
-                          runSpacing: 10,
-                          children: labels.entries
-                              .map((e) => Text.rich(
-                                  TextSpan(children: [
-                                    WidgetSpan(
-                                        child: Container(
-                                            width: 10,
-                                            height: 10,
-                                            color: colors[e.key])),
-                                    TextSpan(text: '  ${e.value}')
-                                  ]),
-                                  style: const TextStyle(fontSize: 14)))
-                              .toList()),
-                      const SizedBox(height: 20),
-                      Card(
-                          child: Padding(
-                              padding: const EdgeInsets.all(16),
-                              child: Text(
-                                  'Оплачено за месяц: ${data['paid']} сом\nПо графику за месяц: ${data['expected']} сом',
-                                  style: const TextStyle(
-                                      height: 1.8,
-                                      fontWeight: FontWeight.w600)))),
-                    ]);
-              }),
-      ]));
+                                                            .text))),
+                                            if ((day['comment'] as String?)
+                                                    ?.isNotEmpty ==
+                                                true)
+                                              const Positioned(
+                                                  right: 3,
+                                                  bottom: 3,
+                                                  child: Icon(
+                                                      Icons.chat_bubble_rounded,
+                                                      size: 9,
+                                                      color: ManagerDesign
+                                                          .primary)),
+                                          ]))));
+                        }),
+                    const SizedBox(height: 18),
+                    Wrap(
+                        spacing: 12,
+                        runSpacing: 10,
+                        children: labels.entries
+                            .map((e) => Text.rich(
+                                TextSpan(children: [
+                                  WidgetSpan(
+                                      child: Container(
+                                          width: 10,
+                                          height: 10,
+                                          color: colors[e.key])),
+                                  TextSpan(text: '  ${e.value}')
+                                ]),
+                                style: const TextStyle(fontSize: 14)))
+                            .toList()),
+                    const SizedBox(height: 20),
+                    Card(
+                        child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Text(
+                                'Оплачено за месяц: ${data['paid']} сом\nПо графику за месяц: ${data['expected']} сом',
+                                style: const TextStyle(
+                                    height: 1.8,
+                                    fontWeight: FontWeight.w600)))),
+                  ]);
+            }),
+    ];
+    if (widget.embedded)
+      return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch, children: children);
+    return Scaffold(
+        backgroundColor: ManagerDesign.background,
+        appBar: AppBar(title: const Text('Календарь платежей')),
+        body: ListView(padding: const EdgeInsets.all(16), children: children));
+  }
 }
 
 class _CalendarCommentDialog extends StatefulWidget {
@@ -624,6 +638,16 @@ class ManagerRepairCard extends StatelessWidget {
                           borderRadius: BorderRadius.circular(10)),
                       child: Text('Причина: ${details['reason']}',
                           style: const TextStyle(height: 1.5))),
+                  if (details['waitingComment'] != null)
+                    Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                            'Комментарий СТО: ${details['waitingComment']}')),
+                  if (details['plannedRepairDate'] != null)
+                    Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                            'План начала ремонта: ${details['plannedRepairDate']}')),
                   const SizedBox(height: 12),
                   for (var n = 0; n < 4; n++)
                     Padding(

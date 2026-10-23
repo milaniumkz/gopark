@@ -207,6 +207,8 @@ export interface ServiceRepairDetails {
   reason: string;
   sentAt?: string;
   arrivedAt?: string;
+  waitingComment?: string;
+  plannedRepairDate?: string;
   repairStartedAt?: string;
   completedAt?: string;
   orderNumber?: string;

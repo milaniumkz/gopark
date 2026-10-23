@@ -11,8 +11,8 @@ for (const [name, repository] of [
 ] as const) {
   test(`${name}: preserves repeated incident transitions and their dates`, async () => {
     const incident = await repository.create({
-      // This fixture exercises legacy repeated repair history, independently of ДТП photo rules.
-      title: "History test", incidentType: "repair", status: "open",
+      // History tracking is independent of the sequential STO workflow.
+      title: "History test", incidentType: "inspection", status: "open",
       priority: "high", occurredAt: "2025-01-01T00:00:00Z",
       serviceStage: "awaiting_repair",
     });
@@ -27,7 +27,7 @@ for (const [name, repository] of [
       assert.deepEqual(updated?.statusHistory?.map(({ status, serviceStage }) => [status, serviceStage]), [
         ["open", "awaiting_repair"], ["open", "in_repair"],
         ["open", "awaiting_repair"], ["open", "in_repair"],
-        ["closed", "completed"],
+        ["resolved", "completed"], ["closed", "completed"],
       ]);
       const times = updated!.statusHistory!.map(({ changedAt }) => Date.parse(changedAt));
       assert.ok(times.every(Number.isFinite));

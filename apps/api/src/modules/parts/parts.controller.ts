@@ -1,8 +1,12 @@
-import { Body, Controller, Get, Post } from "@nestjs/common";
+import { Body, Controller, Get, Post, Query } from "@nestjs/common";
 import { Roles } from "../rbac/roles.decorator.js";
 import { CurrentUser } from "../rbac/current-user.decorator.js";
 import type { RequestUser } from "../rbac/request-user.js";
-import { PartsService, type PartItem, type PartsOverview } from "./parts.service.js";
+import {
+  PartsService,
+  type PartItem,
+  type PartsOverview,
+} from "./parts.service.js";
 import type { CreatePartDto } from "./dto/create-part.dto.js";
 import type { ReceivePartDto } from "./dto/receive-part.dto.js";
 import type { WriteoffPartDto } from "./dto/writeoff-part.dto.js";
@@ -13,8 +17,16 @@ export class PartsController {
 
   @Get()
   @Roles("owner", "admin", "finance", "manager", "operator", "auditor")
-  async overview(@CurrentUser() currentUser: RequestUser | null): Promise<PartsOverview> {
-    return this.partsService.overview(currentUser?.companyName ?? null);
+  async overview(
+    @CurrentUser() currentUser: RequestUser | null,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+  ): Promise<PartsOverview> {
+    return this.partsService.overview(
+      currentUser?.companyName ?? null,
+      from,
+      to,
+    );
   }
 
   @Post()

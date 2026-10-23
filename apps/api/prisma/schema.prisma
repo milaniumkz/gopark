@@ -376,6 +376,7 @@ model Part {
 model PartMovement {
   id        String   @id @default(uuid()) @db.Uuid
   partId    String   @db.Uuid @map("part_id")
+  requesterCompany String? @map("requester_company")
   carId     String?  @db.Uuid @map("car_id")
   type      String
   quantity  Int
@@ -389,6 +390,7 @@ model PartMovement {
   @@index([partId])
   @@index([carId])
   @@index([type])
+  @@index([requesterCompany])
   @@map("part_movements")
 }
 

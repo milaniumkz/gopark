@@ -7,6 +7,7 @@ export interface ReceivePartDto {
   productionYear?: number | null;
   unit?: string | null;
   quantity: number;
+  requesterCompany?: string | null;
   minQuantity?: number | null;
   unitPrice?: number | null;
   supplier?: string | null;

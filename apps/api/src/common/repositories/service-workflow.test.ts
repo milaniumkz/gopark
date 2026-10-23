@@ -29,6 +29,8 @@ test("STO requires a reason, confirms arrival sequentially, and does not accept 
       serviceStage: "awaiting_repair",
       serviceDetails: {
         reason: "Тормоза",
+        waitingComment: "Ждём мастера",
+        plannedRepairDate: "2099-12-31",
         sentAt: "2000-01-01",
         completedAt: "2000-01-01",
       },
@@ -139,7 +141,12 @@ test("STO accident reception and completion require separate before/after photos
   const arrived = serviceWorkflow(
     {
       serviceStage: "awaiting_repair",
-      serviceDetails: { reason: "ДТП", beforePhoto: photo },
+      serviceDetails: {
+        reason: "ДТП",
+        beforePhoto: photo,
+        waitingComment: "Ждём запчасти",
+        plannedRepairDate: "2099-12-31",
+      },
     },
     accident,
   );
@@ -275,5 +282,68 @@ test("insurer identity on saved payments is immutable and mandatory for new insu
       { ...previous, serviceDetails: legacy },
     ).servicePaymentStatus,
     "partial",
+  );
+});
+
+test("waiting requires a comment and a valid immutable planned start date", () => {
+  assert.throws(
+    () => serviceWorkflow({ serviceStage: "awaiting_repair" }, previous),
+    /комментарий/,
+  );
+  assert.throws(
+    () =>
+      serviceWorkflow(
+        {
+          serviceStage: "awaiting_repair",
+          serviceDetails: { reason: "Ремонт", waitingComment: "Ждём" },
+        },
+        previous,
+      ),
+    /дат/,
+  );
+  assert.throws(
+    () =>
+      serviceWorkflow(
+        {
+          serviceStage: "awaiting_repair",
+          serviceDetails: {
+            reason: "Ремонт",
+            waitingComment: "Ждём",
+            plannedRepairDate: "2000-01-01",
+          },
+        },
+        previous,
+      ),
+    /прошлом/,
+  );
+  const saved = serviceWorkflow(
+    {
+      serviceStage: "awaiting_repair",
+      serviceDetails: {
+        reason: "Ремонт",
+        waitingComment: "Ждём запчасть",
+        plannedRepairDate: "2099-12-31",
+      },
+    },
+    previous,
+  );
+  assert.equal(saved.serviceDetails?.plannedRepairDate, "2099-12-31");
+  assert.ok(saved.serviceDetails?.arrivedAt);
+  assert.throws(
+    () =>
+      serviceWorkflow(
+        {
+          serviceDetails: {
+            ...saved.serviceDetails!,
+            plannedRepairDate: "2099-12-30",
+          },
+        },
+        {
+          ...previous,
+          serviceStage: "awaiting_repair",
+          serviceDetails: saved.serviceDetails,
+        },
+      ),
+    /нельзя менять/,
   );
 });
