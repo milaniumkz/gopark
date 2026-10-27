@@ -274,8 +274,79 @@
   width: auto;
 }
 
-.service-page .sto-card { gap: 5px; padding: 10px; }
-.service-page .sto-card .sto-reason { -webkit-line-clamp: 1; padding: 5px 7px; font-size: 12px; }
-.service-page .sto-card > p { font-size: 12px; }
-.service-page .sto-card > .button { padding: 6px 10px; min-height: 34px; font-size: 12px; }
-.sto-late { color: #b42318; background: #fff0ed; border-radius: 6px; padding: 5px 8px; font-size: 12px; }
+.service-page .sto-card {
+  gap: 5px;
+  padding: 10px;
+}
+.service-page .sto-card .sto-reason {
+  -webkit-line-clamp: 1;
+  padding: 5px 7px;
+  font-size: 12px;
+}
+.service-page .sto-card > p {
+  font-size: 12px;
+}
+.service-page .sto-card > .button {
+  padding: 6px 10px;
+  min-height: 34px;
+  font-size: 12px;
+}
+.sto-late {
+  color: #b42318;
+  background: #fff0ed;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+.service-page .sto-card .sto-reason {
+  -webkit-line-clamp: 2;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
+.sto-overview {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid #e1e8f2;
+  border-radius: 12px;
+  background: #f8faff;
+}
+.service-page .sto-overview h4 {
+  margin: 0 0 12px;
+}
+.sto-overview dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+.sto-overview dt {
+  font-size: 12px;
+  color: #65738a;
+  margin-bottom: 4px;
+}
+.sto-overview dd {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.sto-overview-wide {
+  grid-column: 1 / -1;
+}
+.sto-history {
+  margin: 12px 0;
+}
+.sto-history summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.sto-history li {
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 680px) {
+  .sto-overview dl {
+    grid-template-columns: 1fr;
+  }
+}

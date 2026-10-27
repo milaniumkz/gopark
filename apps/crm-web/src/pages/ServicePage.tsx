@@ -20,6 +20,10 @@ const labels: Record<string, string> = {
   in_repair: "В ремонте",
   completed: "Завершён",
   written_off: "Списан",
+  writeoff_requested: "Запрошено списание",
+  accident: "ДТП",
+  inspection: "Осмотр",
+  impound: "Штрафстоянка",
 };
 const insurerLabels = { nsk: "НСК", alma: "Альма", gosstrakh: "Госстрах" };
 const payerLabels = {
@@ -27,6 +31,16 @@ const payerLabels = {
   driver: "Водитель",
   insurance: "Страховая компания",
 };
+function repairReason(
+  item: ManagerIncidentItem,
+  fallback = "Причина не указана",
+) {
+  return (
+    [item.serviceDetails?.reason, item.repairNote, item.description]
+      .find((value) => value?.trim())
+      ?.trim() ?? fallback
+  );
+}
 function paid(item: ManagerIncidentItem) {
   return (item.serviceDetails?.payments ?? []).reduce(
     (sum, p) => sum + p.amount,
@@ -235,9 +249,7 @@ export function ServicePage() {
       },
     );
     setPayment({ amount: "", paidAt: today(), payer: "company" });
-    setDetails(
-      i.serviceDetails ?? { reason: i.repairNote ?? i.description ?? "" },
-    );
+    setDetails({ ...i.serviceDetails, reason: repairReason(i, "") });
     setMessage("");
   }
   async function save(stage?: string, draft = details, includeAccident = true) {
@@ -926,11 +938,9 @@ export function ServicePage() {
                     : "Без водителя"}{" "}
                   · {i.managerLabel ?? "Бригадир не указан"}
                 </p>
-                <div className="sto-reason">
-                  {i.serviceDetails?.reason ??
-                    i.repairNote ??
-                    i.description ??
-                    "Причина не указана"}
+                <div className="sto-reason" title={repairReason(i)}>
+                  <strong>Причина: </strong>
+                  {repairReason(i)}
                 </div>
                 {waitingLate(i) && (
                   <span className="sto-late">
@@ -956,6 +966,10 @@ export function ServicePage() {
                 <p>
                   {c.make} {c.model}
                 </p>
+                <div className="sto-reason">
+                  <strong>Причина: </strong>
+                  {c.incidentComment?.trim() || "Не указана в журнале"}
+                </div>
                 <p className="muted">
                   Открытый кейс не найден. Укажите причину, заказ-наряд и работы
                   перед завершением.
@@ -1049,6 +1063,151 @@ export function ServicePage() {
               Закрыть карточку
             </button>
           </div>
+          <section
+            className="sto-overview"
+            aria-label="Подробная информация о ремонте"
+          >
+            <h4>Информация о машине и ремонте</h4>
+            <dl>
+              <div>
+                <dt>Автомобиль</dt>
+                <dd>
+                  {[
+                    vehicleLabel(selected),
+                    carById.get(selected.carId ?? "")?.make,
+                    carById.get(selected.carId ?? "")?.model,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </dd>
+              </div>
+              <div>
+                <dt>Водитель</dt>
+                <dd>
+                  {driverById.get(selected.driverId ?? "")?.fullName ??
+                    selected.driverName ??
+                    "Не указан"}
+                </dd>
+              </div>
+              <div>
+                <dt>Бригадир</dt>
+                <dd>
+                  {selected.managerLabel ??
+                    carById.get(selected.carId ?? "")?.managerName ??
+                    "Не указан"}
+                </dd>
+              </div>
+              <div>
+                <dt>Тип и этап</dt>
+                <dd>
+                  {selected.incidentType === "accident"
+                    ? "После ДТП"
+                    : "Ремонт"}{" "}
+                  · {labels[selected.serviceStage ?? ""] ?? selected.status}
+                </dd>
+              </div>
+              <div className="sto-overview-wide">
+                <dt>Причина ремонта</dt>
+                <dd>{repairReason(selected)}</dd>
+              </div>
+              {selected.description?.trim() &&
+                selected.description.trim() !== repairReason(selected) && (
+                  <div className="sto-overview-wide">
+                    <dt>Описание инцидента</dt>
+                    <dd>{selected.description}</dd>
+                  </div>
+                )}
+              {selected.locationNote && (
+                <div>
+                  <dt>Место</dt>
+                  <dd>{selected.locationNote}</dd>
+                </div>
+              )}
+              {selected.occurredAt && (
+                <div>
+                  <dt>Дата инцидента</dt>
+                  <dd>{stamp(selected.occurredAt)}</dd>
+                </div>
+              )}
+              {selected.accidentDetails && (
+                <>
+                  <div>
+                    <dt>Место ДТП</dt>
+                    <dd>{selected.accidentDetails.location}</dd>
+                  </div>
+                  <div>
+                    <dt>Дата ДТП</dt>
+                    <dd>{stamp(selected.accidentDetails.occurredAt)}</dd>
+                  </div>
+                  <div>
+                    <dt>Виновность водителя</dt>
+                    <dd>
+                      {
+                        {
+                          driver: "Виновен",
+                          other: "Не виновен",
+                          both: "Обоюдная вина",
+                          unknown: "Не установлена",
+                        }[selected.accidentDetails.fault]
+                      }
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Страховая ДТП</dt>
+                    <dd>{insurerLabels[selected.accidentDetails.insurer]}</dd>
+                  </div>
+                  <div>
+                    <dt>Второй участник</dt>
+                    <dd>
+                      {[
+                        selected.accidentDetails.otherPlate,
+                        selected.accidentDetails.otherMake,
+                        selected.accidentDetails.otherModel,
+                      ].join(" · ")}
+                    </dd>
+                  </div>
+                </>
+              )}
+              {selected.referenceNumber && (
+                <div>
+                  <dt>Номер инцидента</dt>
+                  <dd>{selected.referenceNumber}</dd>
+                </div>
+              )}
+              {selected.periodLabel && (
+                <div>
+                  <dt>Период инцидента</dt>
+                  <dd>{selected.periodLabel}</dd>
+                </div>
+              )}
+              {selected.amount != null && (
+                <div>
+                  <dt>Исторический расход</dt>
+                  <dd>{formatCurrency(selected.amount)}</dd>
+                </div>
+              )}
+              {selected.insuranceCompensationAmount != null && (
+                <div>
+                  <dt>Страховое возмещение</dt>
+                  <dd>
+                    {formatCurrency(selected.insuranceCompensationAmount)}
+                  </dd>
+                </div>
+              )}
+              {selected.writeoffAmount != null && (
+                <div>
+                  <dt>Сумма списания</dt>
+                  <dd>{formatCurrency(selected.writeoffAmount)}</dd>
+                </div>
+              )}
+              {selected.insuranceNote && (
+                <div className="sto-overview-wide">
+                  <dt>Примечание по страхованию</dt>
+                  <dd>{selected.insuranceNote}</dd>
+                </div>
+              )}
+            </dl>
+          </section>
           <div className="sto-timeline">
             {stages.map((s, n) => (
               <div
@@ -1077,6 +1236,32 @@ export function ServicePage() {
               </div>
             ))}
           </div>
+          {!!selected.statusHistory?.length && (
+            <details className="sto-history">
+              <summary>
+                История всех этапов · {selected.statusHistory.length}
+              </summary>
+              <ol>
+                {selected.statusHistory.map((entry, index) => (
+                  <li key={index}>
+                    {stamp(entry.changedAt)} ·{" "}
+                    {labels[entry.serviceStage ?? ""] ??
+                      entry.serviceStage ??
+                      entry.status}{" "}
+                    ·{" "}
+                    {(
+                      {
+                        open: "Открыт",
+                        closed: "Закрыт",
+                        resolved: "Завершён",
+                        archived: "Архив",
+                      } as Record<string, string>
+                    )[entry.status] ?? entry.status}
+                  </li>
+                ))}
+              </ol>
+            </details>
+          )}
           {selected.serviceDetails?.plannedRepairDate && (
             <p className={waitingLate(selected) ? "sto-late" : "muted"}>
               План начала ремонта:{" "}
