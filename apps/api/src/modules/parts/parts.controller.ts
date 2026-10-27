@@ -21,11 +21,13 @@ export class PartsController {
     @CurrentUser() currentUser: RequestUser | null,
     @Query("from") from?: string,
     @Query("to") to?: string,
+    @Query("catalogOnly") catalogOnly?: string,
   ): Promise<PartsOverview> {
     return this.partsService.overview(
       currentUser?.companyName ?? null,
       from,
       to,
+      catalogOnly === "true",
     );
   }
 

@@ -3663,19 +3663,6 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
                                       if (item.serviceDetails == null &&
                                           !const {'repair', 'accident'}
                                               .contains(item.incidentType))
-                                        OutlinedButton(
-                                          onPressed: _pendingAction == null
-                                              ? () => _updateIncidentAction(
-                                                    item,
-                                                    'awaiting_repair',
-                                                    'Кейс переведен в ожидание ремонта',
-                                                  )
-                                              : null,
-                                          child: const Text('Ожидает ремонт'),
-                                        ),
-                                      if (item.serviceDetails == null &&
-                                          !const {'repair', 'accident'}
-                                              .contains(item.incidentType))
                                         FilledButton(
                                           onPressed: _pendingAction == null
                                               ? () => _updateIncidentAction(
@@ -5456,7 +5443,7 @@ String _managerServiceStageLabel(String stage) {
     case 'inspection':
       return 'Осмотр';
     case 'awaiting_repair':
-      return 'Ожидает ремонт';
+      return 'На СТО';
     case 'in_repair':
       return 'В ремонте';
     case 'completed':

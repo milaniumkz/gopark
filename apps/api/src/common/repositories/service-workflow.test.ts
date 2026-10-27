@@ -22,13 +22,13 @@ test("STO requires a reason, confirms arrival sequentially, and does not accept 
   );
   assert.throws(
     () => serviceWorkflow({ serviceStage: "in_repair" }, previous),
-    /по порядку/,
+    /прибытие|по порядку/,
   );
   const p = serviceWorkflow(
     {
-      serviceStage: "awaiting_repair",
       serviceDetails: {
         reason: "Тормоза",
+        arrivalConfirmed: true,
         waitingComment: "Ждём мастера",
         plannedRepairDate: "2099-12-31",
         sentAt: "2000-01-01",
@@ -135,14 +135,18 @@ test("STO accident reception and completion require separate before/after photos
   const photo = "data:image/png;base64,aGVsbG8=";
   const accident = { ...previous, incidentType: "accident" };
   assert.throws(
-    () => serviceWorkflow({ serviceStage: "awaiting_repair" }, accident),
+    () =>
+      serviceWorkflow(
+        { serviceDetails: { reason: "ДТП", arrivalConfirmed: true } },
+        accident,
+      ),
     /фото до/,
   );
   const arrived = serviceWorkflow(
     {
-      serviceStage: "awaiting_repair",
       serviceDetails: {
         reason: "ДТП",
+        arrivalConfirmed: true,
         beforePhoto: photo,
         waitingComment: "Ждём запчасти",
         plannedRepairDate: "2099-12-31",
@@ -285,17 +289,24 @@ test("insurer identity on saved payments is immutable and mandatory for new insu
   );
 });
 
-test("waiting requires a comment and a valid immutable planned start date", () => {
+test("arrival requires a comment and a valid immutable planned start date", () => {
   assert.throws(
-    () => serviceWorkflow({ serviceStage: "awaiting_repair" }, previous),
+    () =>
+      serviceWorkflow(
+        { serviceDetails: { reason: "Ремонт", arrivalConfirmed: true } },
+        previous,
+      ),
     /комментарий/,
   );
   assert.throws(
     () =>
       serviceWorkflow(
         {
-          serviceStage: "awaiting_repair",
-          serviceDetails: { reason: "Ремонт", waitingComment: "Ждём" },
+          serviceDetails: {
+            reason: "Ремонт",
+            arrivalConfirmed: true,
+            waitingComment: "Ждём",
+          },
         },
         previous,
       ),
@@ -305,9 +316,9 @@ test("waiting requires a comment and a valid immutable planned start date", () =
     () =>
       serviceWorkflow(
         {
-          serviceStage: "awaiting_repair",
           serviceDetails: {
             reason: "Ремонт",
+            arrivalConfirmed: true,
             waitingComment: "Ждём",
             plannedRepairDate: "2000-01-01",
           },
@@ -318,9 +329,9 @@ test("waiting requires a comment and a valid immutable planned start date", () =
   );
   const saved = serviceWorkflow(
     {
-      serviceStage: "awaiting_repair",
       serviceDetails: {
         reason: "Ремонт",
+        arrivalConfirmed: true,
         waitingComment: "Ждём запчасть",
         plannedRepairDate: "2099-12-31",
       },
@@ -340,10 +351,180 @@ test("waiting requires a comment and a valid immutable planned start date", () =
         },
         {
           ...previous,
-          serviceStage: "awaiting_repair",
+
           serviceDetails: saved.serviceDetails,
         },
       ),
     /нельзя менять/,
+  );
+});
+
+test("paid insurance flags become dated ledger payments once; increasing a quote does not invent another receipt", () => {
+  const confirmed = {
+    reason: "Ремонт",
+    serviceCost: 1000,
+    costDate: "2026-10-01",
+    insurance: { insurer: "nsk" as const, paid: true, paidAt: "2026-10-01" },
+    payments: [
+      {
+        id: "driver-paid",
+        payer: "driver" as const,
+        amount: 200,
+        paidAt: "2026-10-01",
+      },
+    ],
+  };
+  const first = serviceWorkflow({ serviceDetails: confirmed }, previous);
+  assert.equal(first.servicePaymentStatus, "paid");
+  assert.equal(
+    first.serviceDetails!.payments!.reduce((s, p) => s + p.amount, 0),
+    1000,
+  );
+  assert.equal(
+    first.serviceDetails!.payments!.filter((p) => p.payer === "insurance")[0]!
+      .amount,
+    800,
+  );
+  const retry = serviceWorkflow(
+    { serviceDetails: first.serviceDetails! },
+    { ...previous, serviceDetails: first.serviceDetails },
+  );
+  assert.equal(retry.serviceDetails!.payments!.length, 2);
+  const increase = serviceWorkflow(
+    { serviceDetails: { ...first.serviceDetails!, serviceCost: 1500 } },
+    { ...previous, serviceDetails: first.serviceDetails },
+  );
+  assert.equal(increase.servicePaymentStatus, "partial");
+  assert.equal(
+    increase.serviceDetails!.payments!.reduce((s, p) => s + p.amount, 0),
+    1000,
+  );
+});
+
+test("priced work rows determine the authoritative total and separate painting and repair profit bases", () => {
+  const orderItems = [
+    {
+      id: "p",
+      description: "Покраска крыла",
+      category: "painting" as const,
+      amount: 2000,
+    },
+    {
+      id: "r",
+      description: "Замена детали",
+      category: "repair" as const,
+      amount: 1000,
+    },
+  ];
+  const saved = serviceWorkflow(
+    {
+      serviceDetails: {
+        reason: "Ремонт",
+        orderItems,
+        serviceCost: 999,
+        costDate: "2026-10-01",
+      },
+    },
+    previous,
+  );
+  assert.equal(saved.serviceDetails!.serviceCost, 3000);
+  assert.equal(saved.serviceDetails!.paintingCost, 2000);
+  assert.equal(saved.serviceDetails!.repairCost, 1000);
+  assert.deepEqual(saved.serviceDetails!.works, [
+    "Покраска крыла",
+    "Замена детали",
+  ]);
+  assert.throws(
+    () =>
+      serviceWorkflow(
+        {
+          serviceDetails: {
+            reason: "Ремонт",
+            orderItems: [{ ...orderItems[0]!, amount: undefined }],
+          },
+        },
+        previous,
+      ),
+    /каждой работы/,
+  );
+  assert.throws(
+    () =>
+      serviceWorkflow(
+        {
+          serviceDetails: {
+            reason: "Ремонт",
+            orderItems: [{ ...orderItems[0]!, amount: -1 }],
+          },
+        },
+        previous,
+      ),
+    /каждой работы/,
+  );
+});
+
+test("two prices per work add up, only STO expenses enter the invoice and expenses never earn commission", async () => {
+  const { serviceProfit } = await import("@gopark/contracts");
+  const saved = serviceWorkflow(
+    {
+      serviceDetails: {
+        reason: "Work",
+        orderItems: [
+          {
+            id: "w",
+            description: "Work",
+            category: "repair",
+            serviceAmount: 100,
+            laborAmount: 50,
+            amount: 999,
+          },
+        ],
+        expenses: [
+          {
+            id: "s",
+            description: "STO materials",
+            amount: 20,
+            purchaser: "sto",
+          },
+          {
+            id: "c",
+            description: "GoPark part",
+            amount: 30,
+            purchaser: "company",
+          },
+          {
+            id: "d",
+            description: "Driver part",
+            amount: 40,
+            purchaser: "driver",
+          },
+        ],
+      },
+    },
+    previous,
+  );
+  assert.equal(saved.serviceDetails!.orderItems![0]!.amount, 150);
+  assert.equal(saved.serviceDetails!.serviceBaseCost, 150);
+  assert.equal(saved.serviceDetails!.serviceCost, 170);
+  assert.equal(saved.serviceDetails!.repairCost, 150);
+  assert.equal(serviceProfit(saved.serviceDetails), 45);
+  assert.throws(
+    () =>
+      serviceWorkflow(
+        {
+          serviceDetails: {
+            reason: "Work",
+            orderItems: [
+              {
+                id: "w",
+                description: "Work",
+                category: "repair",
+                serviceAmount: 100,
+              },
+            ],
+          },
+        },
+        previous,
+      ),
+    /стоимость/,
   );
 });

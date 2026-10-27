@@ -1,9 +1,30 @@
-import { isServiceRepair, serviceWorkflow } from "../../common/repositories/service-workflow.js";
+import { isDeepStrictEqual } from "node:util";
+import { applyServiceInventory } from "./service-inventory.js";
+import { normalizeServicePayments } from "@gopark/contracts";
+import {
+  isServiceRepair,
+  serviceWorkflow,
+} from "../../common/repositories/service-workflow.js";
 import { nextIncidentStatusHistory } from "../../common/repositories/incident-history.js";
-import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
-import type { ManagerIncidentItem, ServiceRepairDetails } from "@gopark/contracts";
-import type { CreateIncidentRecord, IncidentRepository, UpdateIncidentRecord } from "../../common/repositories/index.js";
-import { seedCars, seedDrivers, seedManagerIncidents } from "../../data/seed.js";
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from "@nestjs/common";
+import type {
+  ManagerIncidentItem,
+  ServiceRepairDetails,
+} from "@gopark/contracts";
+import type {
+  CreateIncidentRecord,
+  IncidentRepository,
+  UpdateIncidentRecord,
+} from "../../common/repositories/index.js";
+import {
+  seedCars,
+  seedDrivers,
+  seedManagerIncidents,
+} from "../../data/seed.js";
 import { PrismaService } from "../prisma/prisma.service.js";
 
 function decimalToNumber(value: unknown): number | null {
@@ -16,6 +37,13 @@ function decimalToNumber(value: unknown): number | null {
 }
 
 function mapIncidentRecord(incident: any): ManagerIncidentItem {
+  const serviceDetails = incident.serviceDetails
+    ? normalizeServicePayments(incident.serviceDetails)
+    : null;
+  const totalPaid = (serviceDetails?.payments ?? []).reduce(
+    (sum, p) => sum + p.amount,
+    0,
+  );
   return {
     id: incident.id,
     title: incident.title,
@@ -29,7 +57,9 @@ function mapIncidentRecord(incident: any): ManagerIncidentItem {
     periodLabel: incident.periodLabel ?? null,
     referenceNumber: incident.referenceNumber ?? null,
     amount: decimalToNumber(incident.amount),
-    insuranceCompensationAmount: decimalToNumber(incident.insuranceCompensationAmount),
+    insuranceCompensationAmount: decimalToNumber(
+      incident.insuranceCompensationAmount,
+    ),
     writeoffAmount: decimalToNumber(incident.writeoffAmount),
     description: incident.description ?? null,
     accidentPhotoUrl: incident.accidentPhotoUrl ?? null,
@@ -38,13 +68,43 @@ function mapIncidentRecord(incident: any): ManagerIncidentItem {
     locationNote: incident.locationNote ?? null,
     managerLabel: incident.managerLabel ?? null,
     statusHistory: incident.statusHistory ?? [],
-    serviceDetails: incident.serviceDetails ?? null,
+    serviceDetails,
     accidentDetails: incident.accidentDetails ?? null,
     serviceStage: incident.serviceStage ?? null,
     serviceCaseType: incident.serviceCaseType ?? null,
-    servicePaymentStatus: incident.servicePaymentStatus ?? null,
+    servicePaymentStatus:
+      serviceDetails?.serviceCost !== undefined
+        ? totalPaid >= serviceDetails.serviceCost && totalPaid > 0
+          ? "paid"
+          : totalPaid > 0
+            ? "partial"
+            : "unpaid"
+        : (incident.servicePaymentStatus ?? null),
     servicePayer: incident.servicePayer ?? null,
   };
+}
+
+async function assignOrderNumber(
+  tx: any,
+  details: ServiceRepairDetails,
+): Promise<ServiceRepairDetails> {
+  if (details.orderNumber?.trim()) return details;
+  const existing = await tx.incident.findMany({
+    select: { serviceDetails: true },
+  });
+  let max = 0;
+  for (const item of existing) {
+    const match = String(item.serviceDetails?.orderNumber ?? "").match(
+      /(\d+)\s*$/,
+    );
+    if (match) {
+      const n = Number(match[1]);
+      if (Number.isSafeInteger(n)) max = Math.max(max, n);
+    }
+  }
+  if (max >= Number.MAX_SAFE_INTEGER)
+    throw new BadRequestException("Достигнут предел нумерации заказ-нарядов");
+  return { ...details, orderNumber: String(max + 1) };
 }
 
 const incidentSelect = {
@@ -87,26 +147,38 @@ export class IncidentPrismaRepository implements IncidentRepository {
     return this.listInternal(companyName);
   }
 
-  private async listInternal(companyName?: string): Promise<ManagerIncidentItem[]> {
+  private async listInternal(
+    companyName?: string,
+  ): Promise<ManagerIncidentItem[]> {
     const prisma = this.prisma.client;
     if (prisma) {
       const where = companyName
         ? {
             OR: [
               {
+                serviceDetails: {
+                  path: ["manualVehicle", "companyName"],
+                  equals: companyName,
+                },
+              },
+              {
                 driverId: {
-                  in: (await prisma.driver.findMany({
-                    where: { companyName },
-                    select: { id: true },
-                  })).map((item: { id: string }) => item.id),
+                  in: (
+                    await prisma.driver.findMany({
+                      where: { companyName },
+                      select: { id: true },
+                    })
+                  ).map((item: { id: string }) => item.id),
                 },
               },
               {
                 carId: {
-                  in: (await prisma.car.findMany({
-                    where: { companyName },
-                    select: { id: true },
-                  })).map((item: { id: string }) => item.id),
+                  in: (
+                    await prisma.car.findMany({
+                      where: { companyName },
+                      select: { id: true },
+                    })
+                  ).map((item: { id: string }) => item.id),
                 },
               },
             ],
@@ -137,10 +209,12 @@ export class IncidentPrismaRepository implements IncidentRepository {
         .map((item) => item.id),
     );
 
-    return seedManagerIncidents.filter((item) => (
-      (item.driverId && driverIds.has(item.driverId))
-      || (item.carId && carIds.has(item.carId))
-    ));
+    return seedManagerIncidents.filter(
+      (item) =>
+        (item.driverId && driverIds.has(item.driverId)) ||
+        (item.carId && carIds.has(item.carId)) ||
+        item.serviceDetails?.manualVehicle?.companyName === companyName,
+    );
   }
 
   async countOpen(): Promise<number> {
@@ -166,9 +240,10 @@ export class IncidentPrismaRepository implements IncidentRepository {
     }
 
     const ids = new Set(driverIds);
-    return seedManagerIncidents
-      .filter((item) => item.status === "open" && item.driverId && ids.has(item.driverId))
-      .length;
+    return seedManagerIncidents.filter(
+      (item) =>
+        item.status === "open" && item.driverId && ids.has(item.driverId),
+    ).length;
   }
 
   async listOpenByDriver(driverId: string): Promise<ManagerIncidentItem[]> {
@@ -186,13 +261,42 @@ export class IncidentPrismaRepository implements IncidentRepository {
       return incidents.map(mapIncidentRecord);
     }
 
-    return seedManagerIncidents.filter((item) => item.driverId === driverId && item.status === "open");
+    return seedManagerIncidents.filter(
+      (item) => item.driverId === driverId && item.status === "open",
+    );
   }
 
-  async completeUntrackedRepair(carId: string, serviceDetails?: ServiceRepairDetails): Promise<ManagerIncidentItem | null> {
-    if(!serviceDetails?.reason?.trim() || !serviceDetails.orderNumber?.trim() || !serviceDetails.works?.some(w=>w.trim())) throw new BadRequestException("Укажите причину, номер заказ-наряда и список работ перед завершением ремонта");
-    const validated = serviceWorkflow({ incidentType:"repair",serviceStage:"completed",serviceDetails });
-    const data = { ...validated, serviceDetails: {...serviceDetails,completedAt:new Date().toISOString()}, title: "Завершение ремонта автомобиля без открытого кейса СТО", incidentType: "repair", status: "closed", priority: "low", serviceStage: "completed", description: "Возврат автомобиля из ремонта подтверждён в журнале СТО. Дата начала ремонта неизвестна; заказ-наряд и оплаты указаны в карточке." };
+  async completeUntrackedRepair(
+    carId: string,
+    serviceDetails?: ServiceRepairDetails,
+  ): Promise<ManagerIncidentItem | null> {
+    if (
+      !serviceDetails?.reason?.trim() ||
+      !serviceDetails.orderNumber?.trim() ||
+      !serviceDetails.works?.some((w) => w.trim())
+    )
+      throw new BadRequestException(
+        "Укажите причину, номер заказ-наряда и список работ перед завершением ремонта",
+      );
+    const validated = serviceWorkflow({
+      incidentType: "repair",
+      serviceStage: "completed",
+      serviceDetails,
+    });
+    const data = {
+      ...validated,
+      serviceDetails: {
+        ...serviceDetails,
+        completedAt: new Date().toISOString(),
+      },
+      title: "Завершение ремонта автомобиля без открытого кейса СТО",
+      incidentType: "repair",
+      status: "closed",
+      priority: "low",
+      serviceStage: "completed",
+      description:
+        "Возврат автомобиля из ремонта подтверждён в журнале СТО. Дата начала ремонта неизвестна; заказ-наряд и оплаты указаны в карточке.",
+    };
     const prisma = this.prisma.client;
     if (prisma) {
       return prisma.$transaction(async (tx: any) => {
@@ -200,11 +304,27 @@ export class IncidentPrismaRepository implements IncidentRepository {
         const car = await tx.car.findUnique({ where: { id: carId } });
         if (!car) throw new NotFoundException("Автомобиль не найден");
         if (["assigned", "free"].includes(car.status)) return null;
-        if (car.status !== "maintenance") throw new ConflictException("Автомобиль уже не находится в ремонте. Обновите журнал.");
-        const blocking = await tx.incident.count({ where: { carId, OR: [{ status: "open" }, { serviceStage: "written_off" }] } });
-        if (blocking) throw new ConflictException("У автомобиля есть открытый инцидент или списание. Сначала завершите связанный кейс.");
-        const assignment = await tx.carAssignment.findFirst({ where: { carId, endedAt: null }, orderBy: { startedAt: "desc" } });
-        const incident = await tx.incident.create({ data: { ...data, carId, driverId: assignment?.driverId ?? null } });
+        if (car.status !== "maintenance")
+          throw new ConflictException(
+            "Автомобиль уже не находится в ремонте. Обновите журнал.",
+          );
+        const blocking = await tx.incident.count({
+          where: {
+            carId,
+            OR: [{ status: "open" }, { serviceStage: "written_off" }],
+          },
+        });
+        if (blocking)
+          throw new ConflictException(
+            "У автомобиля есть открытый инцидент или списание. Сначала завершите связанный кейс.",
+          );
+        const assignment = await tx.carAssignment.findFirst({
+          where: { carId, endedAt: null },
+          orderBy: { startedAt: "desc" },
+        });
+        const incident = await tx.incident.create({
+          data: { ...data, carId, driverId: assignment?.driverId ?? null },
+        });
         await syncRepairCar(tx, incident);
         await enqueueServiceEvents(tx, incident);
         return mapIncidentRecord(incident);
@@ -213,19 +333,87 @@ export class IncidentPrismaRepository implements IncidentRepository {
     const car = seedCars.find((item) => item.id === carId);
     if (!car) throw new NotFoundException("Автомобиль не найден");
     if (["assigned", "free"].includes(car.status)) return null;
-    if (car.status !== "maintenance" || seedManagerIncidents.some((item) => item.carId === carId && (item.status === "open" || item.serviceStage === "written_off"))) throw new ConflictException("Сначала завершите связанный кейс автомобиля.");
+    if (
+      car.status !== "maintenance" ||
+      seedManagerIncidents.some(
+        (item) =>
+          item.carId === carId &&
+          (item.status === "open" || item.serviceStage === "written_off"),
+      )
+    )
+      throw new ConflictException(
+        "Сначала завершите связанный кейс автомобиля.",
+      );
     return this.create({ ...data, carId, driverId: car.assignedDriverId });
   }
 
   async create(input: CreateIncidentRecord): Promise<ManagerIncidentItem> {
-    input = { ...input, ...repairLifecycle(input), ...serviceWorkflow({ ...input, ...repairLifecycle(input) }) };
+    input = {
+      ...input,
+      ...repairLifecycle(input),
+      ...serviceWorkflow({ ...input, ...repairLifecycle(input) }),
+    };
     const prisma = this.prisma.client;
     if (prisma) {
       return prisma.$transaction(async (tx: any) => {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(2036548158)`;
-        if(input.serviceStage === "sent_to_service" && input.carId) {
-          const duplicate = await tx.incident.count({where:{carId:input.carId,status:"open",OR:[{incidentType:"repair"},{serviceStage:{in:["sent_to_service","awaiting_repair","in_repair"]}}]}});
-          if(duplicate)throw new ConflictException("У машины уже есть открытый ремонт. Откройте его карточку");
+        if (input.serviceDetails)
+          input = {
+            ...input,
+            serviceDetails: await assignOrderNumber(tx, {
+              ...input.serviceDetails,
+              orderNumber: undefined,
+            }),
+          };
+        if (input.serviceDetails?.manualVehicle && input.status === "open") {
+          const manual = input.serviceDetails.manualVehicle;
+          const duplicate = await tx.incident.count({
+            where: {
+              status: "open",
+              AND: [
+                {
+                  serviceDetails: {
+                    path: ["manualVehicle", "plateNumber"],
+                    equals: manual.plateNumber,
+                  },
+                },
+                ...(manual.companyName
+                  ? [
+                      {
+                        serviceDetails: {
+                          path: ["manualVehicle", "companyName"],
+                          equals: manual.companyName,
+                        },
+                      },
+                    ]
+                  : []),
+              ],
+            },
+          });
+          if (duplicate)
+            throw new ConflictException(
+              "У машины уже есть открытый ремонт. Откройте его карточку",
+            );
+        }
+        if (input.serviceStage === "sent_to_service" && input.carId) {
+          const duplicate = await tx.incident.count({
+            where: {
+              carId: input.carId,
+              status: "open",
+              OR: [
+                { incidentType: "repair" },
+                {
+                  serviceStage: {
+                    in: ["sent_to_service", "awaiting_repair", "in_repair"],
+                  },
+                },
+              ],
+            },
+          });
+          if (duplicate)
+            throw new ConflictException(
+              "У машины уже есть открытый ремонт. Откройте его карточку",
+            );
         }
         const incident = await tx.incident.create({
           data: {
@@ -239,7 +427,8 @@ export class IncidentPrismaRepository implements IncidentRepository {
             periodLabel: input.periodLabel ?? null,
             referenceNumber: input.referenceNumber ?? null,
             amount: input.amount ?? null,
-            insuranceCompensationAmount: input.insuranceCompensationAmount ?? null,
+            insuranceCompensationAmount:
+              input.insuranceCompensationAmount ?? null,
             writeoffAmount: input.writeoffAmount ?? null,
             description: input.description ?? null,
             accidentPhotoUrl: input.accidentPhotoUrl ?? null,
@@ -247,8 +436,12 @@ export class IncidentPrismaRepository implements IncidentRepository {
             repairNote: input.repairNote ?? null,
             locationNote: input.locationNote ?? null,
             managerLabel: input.managerLabel ?? null,
-            ...(input.serviceDetails ? { serviceDetails: input.serviceDetails } : {}),
-            ...(input.accidentDetails ? { accidentDetails: input.accidentDetails } : {}),
+            ...(input.serviceDetails
+              ? { serviceDetails: input.serviceDetails }
+              : {}),
+            ...(input.accidentDetails
+              ? { accidentDetails: input.accidentDetails }
+              : {}),
             serviceStage: input.serviceStage ?? null,
             serviceCaseType: input.serviceCaseType ?? null,
             servicePaymentStatus: input.servicePaymentStatus ?? null,
@@ -256,6 +449,12 @@ export class IncidentPrismaRepository implements IncidentRepository {
           },
         });
 
+        await applyServiceInventory(
+          tx,
+          incident,
+          undefined,
+          input.inventoryCompanyScope,
+        );
         await syncRepairCar(tx, incident);
         await enqueueServiceEvents(tx, incident);
         return mapIncidentRecord(incident);
@@ -270,7 +469,8 @@ export class IncidentPrismaRepository implements IncidentRepository {
       priority: input.priority,
       driverId: input.driverId ?? undefined,
       driverName: input.driverId
-        ? (seedDrivers.find((driver) => driver.id === input.driverId)?.fullName ?? null)
+        ? (seedDrivers.find((driver) => driver.id === input.driverId)
+            ?.fullName ?? null)
         : null,
       carId: input.carId ?? undefined,
       occurredAt: input.occurredAt ?? null,
@@ -285,7 +485,13 @@ export class IncidentPrismaRepository implements IncidentRepository {
       repairNote: input.repairNote ?? null,
       locationNote: input.locationNote ?? null,
       managerLabel: input.managerLabel ?? null,
-      statusHistory: [{ status: input.status, serviceStage: input.serviceStage ?? null, changedAt: new Date().toISOString() }],
+      statusHistory: [
+        {
+          status: input.status,
+          serviceStage: input.serviceStage ?? null,
+          changedAt: new Date().toISOString(),
+        },
+      ],
       serviceDetails: input.serviceDetails ?? null,
       accidentDetails: input.accidentDetails ?? null,
       serviceStage: input.serviceStage ?? null,
@@ -298,7 +504,10 @@ export class IncidentPrismaRepository implements IncidentRepository {
     return incident;
   }
 
-  async update(incidentId: string, input: UpdateIncidentRecord): Promise<ManagerIncidentItem | null> {
+  async update(
+    incidentId: string,
+    input: UpdateIncidentRecord,
+  ): Promise<ManagerIncidentItem | null> {
     const prisma = this.prisma.client;
     if (prisma) {
       return prisma.$transaction(async (tx: any) => {
@@ -311,46 +520,137 @@ export class IncidentPrismaRepository implements IncidentRepository {
           return null;
         }
 
+        if (existing.serviceDetails?.orderNumber && input.serviceDetails)
+          input = {
+            ...input,
+            serviceDetails: {
+              ...input.serviceDetails,
+              orderNumber: existing.serviceDetails.orderNumber,
+            },
+          };
         input = { ...input, ...repairLifecycle({ ...existing, ...input }) };
-        input = { ...input, ...serviceWorkflow(input, mapIncidentRecord(existing)) };
+        if (
+          isServiceRepair({ ...existing, ...input }) &&
+          !!(input.serviceDetails ?? existing.serviceDetails) &&
+          !(
+            input.serviceDetails?.orderNumber ??
+            existing.serviceDetails?.orderNumber
+          )?.trim()
+        )
+          input = {
+            ...input,
+            serviceDetails: await assignOrderNumber(tx, {
+              ...existing.serviceDetails,
+              ...input.serviceDetails,
+              reason:
+                input.serviceDetails?.reason ??
+                existing.serviceDetails?.reason ??
+                existing.repairNote ??
+                existing.description ??
+                "",
+            }),
+          };
+        input = {
+          ...input,
+          ...serviceWorkflow(input, mapIncidentRecord(existing)),
+        };
         const incident = await tx.incident.update({
           where: { id: incidentId },
           data: {
             ...(input.title !== undefined ? { title: input.title } : {}),
-            ...(input.incidentType !== undefined ? { incidentType: input.incidentType } : {}),
+            ...(input.incidentType !== undefined
+              ? { incidentType: input.incidentType }
+              : {}),
             ...(input.status !== undefined ? { status: input.status } : {}),
-            ...(input.priority !== undefined ? { priority: input.priority } : {}),
-            ...(input.driverId !== undefined ? { driverId: input.driverId ?? null } : {}),
-            ...(input.carId !== undefined ? { carId: input.carId ?? null } : {}),
-            ...(input.occurredAt !== undefined ? { occurredAt: input.occurredAt ? new Date(input.occurredAt) : null } : {}),
-            ...(input.periodLabel !== undefined ? { periodLabel: input.periodLabel ?? null } : {}),
-            ...(input.referenceNumber !== undefined ? { referenceNumber: input.referenceNumber ?? null } : {}),
-            ...(input.amount !== undefined ? { amount: input.amount ?? null } : {}),
-            ...(input.insuranceCompensationAmount !== undefined ? { insuranceCompensationAmount: input.insuranceCompensationAmount ?? null } : {}),
-            ...(input.writeoffAmount !== undefined ? { writeoffAmount: input.writeoffAmount ?? null } : {}),
-            ...(input.description !== undefined ? { description: input.description ?? null } : {}),
-            ...(input.accidentPhotoUrl !== undefined ? { accidentPhotoUrl: input.accidentPhotoUrl ?? null } : {}),
-            ...(input.insuranceNote !== undefined ? { insuranceNote: input.insuranceNote ?? null } : {}),
-            ...(input.repairNote !== undefined ? { repairNote: input.repairNote ?? null } : {}),
-            ...(input.locationNote !== undefined ? { locationNote: input.locationNote ?? null } : {}),
-            ...(input.managerLabel !== undefined ? { managerLabel: input.managerLabel ?? null } : {}),
-            ...(input.serviceDetails ? { serviceDetails: input.serviceDetails } : {}),
-            ...(input.accidentDetails ? { accidentDetails: input.accidentDetails } : {}),
-            ...(input.serviceStage !== undefined ? { serviceStage: input.serviceStage ?? null } : {}),
-            ...(input.serviceCaseType !== undefined ? { serviceCaseType: input.serviceCaseType ?? null } : {}),
-            ...(input.servicePaymentStatus !== undefined ? { servicePaymentStatus: input.servicePaymentStatus ?? null } : {}),
-            ...(input.servicePayer !== undefined ? { servicePayer: input.servicePayer ?? null } : {}),
+            ...(input.priority !== undefined
+              ? { priority: input.priority }
+              : {}),
+            ...(input.driverId !== undefined
+              ? { driverId: input.driverId ?? null }
+              : {}),
+            ...(input.carId !== undefined
+              ? { carId: input.carId ?? null }
+              : {}),
+            ...(input.occurredAt !== undefined
+              ? {
+                  occurredAt: input.occurredAt
+                    ? new Date(input.occurredAt)
+                    : null,
+                }
+              : {}),
+            ...(input.periodLabel !== undefined
+              ? { periodLabel: input.periodLabel ?? null }
+              : {}),
+            ...(input.referenceNumber !== undefined
+              ? { referenceNumber: input.referenceNumber ?? null }
+              : {}),
+            ...(input.amount !== undefined
+              ? { amount: input.amount ?? null }
+              : {}),
+            ...(input.insuranceCompensationAmount !== undefined
+              ? {
+                  insuranceCompensationAmount:
+                    input.insuranceCompensationAmount ?? null,
+                }
+              : {}),
+            ...(input.writeoffAmount !== undefined
+              ? { writeoffAmount: input.writeoffAmount ?? null }
+              : {}),
+            ...(input.description !== undefined
+              ? { description: input.description ?? null }
+              : {}),
+            ...(input.accidentPhotoUrl !== undefined
+              ? { accidentPhotoUrl: input.accidentPhotoUrl ?? null }
+              : {}),
+            ...(input.insuranceNote !== undefined
+              ? { insuranceNote: input.insuranceNote ?? null }
+              : {}),
+            ...(input.repairNote !== undefined
+              ? { repairNote: input.repairNote ?? null }
+              : {}),
+            ...(input.locationNote !== undefined
+              ? { locationNote: input.locationNote ?? null }
+              : {}),
+            ...(input.managerLabel !== undefined
+              ? { managerLabel: input.managerLabel ?? null }
+              : {}),
+            ...(input.serviceDetails
+              ? { serviceDetails: input.serviceDetails }
+              : {}),
+            ...(input.accidentDetails
+              ? { accidentDetails: input.accidentDetails }
+              : {}),
+            ...(input.serviceStage !== undefined
+              ? { serviceStage: input.serviceStage ?? null }
+              : {}),
+            ...(input.serviceCaseType !== undefined
+              ? { serviceCaseType: input.serviceCaseType ?? null }
+              : {}),
+            ...(input.servicePaymentStatus !== undefined
+              ? { servicePaymentStatus: input.servicePaymentStatus ?? null }
+              : {}),
+            ...(input.servicePayer !== undefined
+              ? { servicePayer: input.servicePayer ?? null }
+              : {}),
           },
           select: incidentSelect,
         });
 
+        await applyServiceInventory(
+          tx,
+          incident,
+          existing,
+          input.inventoryCompanyScope,
+        );
         await syncRepairCar(tx, incident);
         await enqueueServiceEvents(tx, incident, existing);
         return mapIncidentRecord(incident);
       });
     }
 
-    const incident = seedManagerIncidents.find((item) => item.id === incidentId);
+    const incident = seedManagerIncidents.find(
+      (item) => item.id === incidentId,
+    );
     if (!incident) {
       return null;
     }
@@ -360,29 +660,68 @@ export class IncidentPrismaRepository implements IncidentRepository {
     Object.assign(incident, {
       statusHistory: nextIncidentStatusHistory(incident, input),
       ...(input.title !== undefined ? { title: input.title } : {}),
-      ...(input.incidentType !== undefined ? { incidentType: input.incidentType } : {}),
+      ...(input.incidentType !== undefined
+        ? { incidentType: input.incidentType }
+        : {}),
       ...(input.status !== undefined ? { status: input.status } : {}),
       ...(input.priority !== undefined ? { priority: input.priority } : {}),
-      ...(input.driverId !== undefined ? { driverId: input.driverId ?? undefined } : {}),
+      ...(input.driverId !== undefined
+        ? { driverId: input.driverId ?? undefined }
+        : {}),
       ...(input.carId !== undefined ? { carId: input.carId ?? undefined } : {}),
-      ...(input.occurredAt !== undefined ? { occurredAt: input.occurredAt ?? null } : {}),
-      ...(input.periodLabel !== undefined ? { periodLabel: input.periodLabel ?? null } : {}),
-      ...(input.referenceNumber !== undefined ? { referenceNumber: input.referenceNumber ?? null } : {}),
+      ...(input.occurredAt !== undefined
+        ? { occurredAt: input.occurredAt ?? null }
+        : {}),
+      ...(input.periodLabel !== undefined
+        ? { periodLabel: input.periodLabel ?? null }
+        : {}),
+      ...(input.referenceNumber !== undefined
+        ? { referenceNumber: input.referenceNumber ?? null }
+        : {}),
       ...(input.amount !== undefined ? { amount: input.amount ?? null } : {}),
-      ...(input.insuranceCompensationAmount !== undefined ? { insuranceCompensationAmount: input.insuranceCompensationAmount ?? null } : {}),
-      ...(input.writeoffAmount !== undefined ? { writeoffAmount: input.writeoffAmount ?? null } : {}),
-      ...(input.description !== undefined ? { description: input.description ?? null } : {}),
-      ...(input.accidentPhotoUrl !== undefined ? { accidentPhotoUrl: input.accidentPhotoUrl ?? null } : {}),
-      ...(input.insuranceNote !== undefined ? { insuranceNote: input.insuranceNote ?? null } : {}),
-      ...(input.repairNote !== undefined ? { repairNote: input.repairNote ?? null } : {}),
-      ...(input.locationNote !== undefined ? { locationNote: input.locationNote ?? null } : {}),
-      ...(input.managerLabel !== undefined ? { managerLabel: input.managerLabel ?? null } : {}),
+      ...(input.insuranceCompensationAmount !== undefined
+        ? {
+            insuranceCompensationAmount:
+              input.insuranceCompensationAmount ?? null,
+          }
+        : {}),
+      ...(input.writeoffAmount !== undefined
+        ? { writeoffAmount: input.writeoffAmount ?? null }
+        : {}),
+      ...(input.description !== undefined
+        ? { description: input.description ?? null }
+        : {}),
+      ...(input.accidentPhotoUrl !== undefined
+        ? { accidentPhotoUrl: input.accidentPhotoUrl ?? null }
+        : {}),
+      ...(input.insuranceNote !== undefined
+        ? { insuranceNote: input.insuranceNote ?? null }
+        : {}),
+      ...(input.repairNote !== undefined
+        ? { repairNote: input.repairNote ?? null }
+        : {}),
+      ...(input.locationNote !== undefined
+        ? { locationNote: input.locationNote ?? null }
+        : {}),
+      ...(input.managerLabel !== undefined
+        ? { managerLabel: input.managerLabel ?? null }
+        : {}),
       ...(input.serviceDetails ? { serviceDetails: input.serviceDetails } : {}),
-            ...(input.accidentDetails ? { accidentDetails: input.accidentDetails } : {}),
-            ...(input.serviceStage !== undefined ? { serviceStage: input.serviceStage ?? null } : {}),
-      ...(input.serviceCaseType !== undefined ? { serviceCaseType: input.serviceCaseType ?? null } : {}),
-      ...(input.servicePaymentStatus !== undefined ? { servicePaymentStatus: input.servicePaymentStatus ?? null } : {}),
-      ...(input.servicePayer !== undefined ? { servicePayer: input.servicePayer ?? null } : {}),
+      ...(input.accidentDetails
+        ? { accidentDetails: input.accidentDetails }
+        : {}),
+      ...(input.serviceStage !== undefined
+        ? { serviceStage: input.serviceStage ?? null }
+        : {}),
+      ...(input.serviceCaseType !== undefined
+        ? { serviceCaseType: input.serviceCaseType ?? null }
+        : {}),
+      ...(input.servicePaymentStatus !== undefined
+        ? { servicePaymentStatus: input.servicePaymentStatus ?? null }
+        : {}),
+      ...(input.servicePayer !== undefined
+        ? { servicePayer: input.servicePayer ?? null }
+        : {}),
     });
 
     syncSeedRepairCar(incident);
@@ -390,18 +729,29 @@ export class IncidentPrismaRepository implements IncidentRepository {
   }
 }
 
-
 async function syncRepairCar(tx: any, incident: any): Promise<void> {
   // Legacy cases may lack carId. Link only an unambiguous assignment at the
   // incident's recorded time; never substitute the driver's current vehicle.
-  if (!incident.carId && incident.driverId && incident.occurredAt && incident.incidentType === "repair") {
-    const matches = await tx.carAssignment.findMany({ where: {
-      driverId: incident.driverId, startedAt: { lte: incident.occurredAt },
-      OR: [{ endedAt: null }, { endedAt: { gt: incident.occurredAt } }],
-    }, take: 2 });
+  if (
+    !incident.carId &&
+    incident.driverId &&
+    incident.occurredAt &&
+    incident.incidentType === "repair"
+  ) {
+    const matches = await tx.carAssignment.findMany({
+      where: {
+        driverId: incident.driverId,
+        startedAt: { lte: incident.occurredAt },
+        OR: [{ endedAt: null }, { endedAt: { gt: incident.occurredAt } }],
+      },
+      take: 2,
+    });
     if (matches.length === 1) {
       incident.carId = matches[0].carId;
-      await tx.incident.update({ where: { id: incident.id }, data: { carId: incident.carId } });
+      await tx.incident.update({
+        where: { id: incident.id },
+        data: { carId: incident.carId },
+      });
     }
   }
   if (!incident.carId || !isServiceRepair(incident)) return;
@@ -409,63 +759,185 @@ async function syncRepairCar(tx: any, incident: any): Promise<void> {
   if (!car || ["sold", "written_off"].includes(car.status)) return;
   const stage = incident.serviceStage;
   if (stage === "written_off") {
-    await tx.car.update({ where: { id: car.id }, data: { status: "written_off" } });
+    await tx.car.update({
+      where: { id: car.id },
+      data: { status: "written_off" },
+    });
     return;
   }
-  if (["sent_to_service", "awaiting_repair", "in_repair"].includes(stage) && incident.status === "open") {
+  if (
+    ["sent_to_service", "awaiting_repair", "in_repair"].includes(stage) &&
+    incident.status === "open"
+  ) {
     if (["assigned", "free", "maintenance", "accident"].includes(car.status)) {
-      await tx.car.update({ where: { id: car.id }, data: { status: "maintenance" } });
+      await tx.car.update({
+        where: { id: car.id },
+        data: { status: "maintenance" },
+      });
     }
     return;
   }
-  if (stage !== "completed" || !["resolved", "closed", "archived"].includes(incident.status) || !["maintenance", "accident"].includes(car.status)) return;
-  const blocking = await tx.incident.count({ where: {
-    id: { not: incident.id }, carId: car.id,
-    OR: [{ status: "open" }, { serviceStage: "written_off" }],
-  } });
+  if (
+    stage !== "completed" ||
+    !["resolved", "closed", "archived"].includes(incident.status) ||
+    !["maintenance", "accident"].includes(car.status)
+  )
+    return;
+  const blocking = await tx.incident.count({
+    where: {
+      id: { not: incident.id },
+      carId: car.id,
+      OR: [{ status: "open" }, { serviceStage: "written_off" }],
+    },
+  });
   if (blocking) return;
   const assignment = await tx.carAssignment.findFirst({
-    where: { carId: car.id, endedAt: null }, include: { driver: true }, orderBy: { startedAt: "desc" },
+    where: { carId: car.id, endedAt: null },
+    include: { driver: true },
+    orderBy: { startedAt: "desc" },
   });
   const driver = assignment?.driver;
-  await tx.car.update({ where: { id: car.id }, data: { status: driver && driver.status !== "terminated" ? "assigned" : "free" } });
+  await tx.car.update({
+    where: { id: car.id },
+    data: {
+      status: driver && driver.status !== "terminated" ? "assigned" : "free",
+    },
+  });
   // Only clear the incident-related status for the same, still assigned driver.
-  if (driver && driver.id === incident.driverId && driver.status === "accident") {
-    const otherDriverIncident = await tx.incident.count({ where: { id: { not: incident.id }, driverId: driver.id, status: "open" } });
-    if (!otherDriverIncident) await tx.driver.update({ where: { id: driver.id }, data: { status: "active" } });
+  if (
+    driver &&
+    driver.id === incident.driverId &&
+    driver.status === "accident"
+  ) {
+    const otherDriverIncident = await tx.incident.count({
+      where: { id: { not: incident.id }, driverId: driver.id, status: "open" },
+    });
+    if (!otherDriverIncident)
+      await tx.driver.update({
+        where: { id: driver.id },
+        data: { status: "active" },
+      });
   }
 }
 
-
-function repairLifecycle(incident: { incidentType?: string; serviceStage?: string | null; status?: string;serviceDetails?:ServiceRepairDetails|null }): UpdateIncidentRecord {
+function repairLifecycle(incident: {
+  incidentType?: string;
+  serviceStage?: string | null;
+  status?: string;
+  serviceDetails?: ServiceRepairDetails | null;
+}): UpdateIncidentRecord {
   if (!isServiceRepair(incident)) return {};
-  if (incident.serviceStage === "written_off") return { status: "closed", serviceStage: "written_off" };
-  if (incident.serviceStage === "completed" || ["resolved", "closed", "archived"].includes(incident.status ?? "")) {
-    return { serviceStage: "completed", status: incident.status === "archived" ? "archived" : "closed" };
+  if (incident.serviceStage === "written_off")
+    return { status: "closed", serviceStage: "written_off" };
+  if (
+    incident.serviceStage === "completed" ||
+    ["resolved", "closed", "archived"].includes(incident.status ?? "")
+  ) {
+    return {
+      serviceStage: "completed",
+      status: incident.status === "archived" ? "archived" : "closed",
+    };
   }
-  return { status: "open", serviceStage: incident.serviceStage || "awaiting_repair" };
+  return {
+    status: "open",
+    serviceStage: incident.serviceStage || "awaiting_repair",
+  };
 }
 
 function syncSeedRepairCar(incident: ManagerIncidentItem): void {
   if (!incident.carId || !isServiceRepair(incident)) return;
   const car = seedCars.find((item) => item.id === incident.carId);
   if (!car || ["sold", "written_off"].includes(car.status)) return;
-  if (incident.serviceStage === "written_off") { car.status = "written_off"; return; }
-  if (["sent_to_service", "awaiting_repair", "in_repair"].includes(incident.serviceStage ?? "") && incident.status === "open") {
-    if (["assigned", "free", "maintenance", "accident"].includes(car.status)) car.status = "maintenance";
+  if (incident.serviceStage === "written_off") {
+    car.status = "written_off";
     return;
   }
-  if (incident.serviceStage !== "completed" || !["maintenance", "accident"].includes(car.status)) return;
-  if (seedManagerIncidents.some((item) => item.id !== incident.id && item.carId === car.id && (item.status === "open" || item.serviceStage === "written_off"))) return;
+  if (
+    ["sent_to_service", "awaiting_repair", "in_repair"].includes(
+      incident.serviceStage ?? "",
+    ) &&
+    incident.status === "open"
+  ) {
+    if (["assigned", "free", "maintenance", "accident"].includes(car.status))
+      car.status = "maintenance";
+    return;
+  }
+  if (
+    incident.serviceStage !== "completed" ||
+    !["maintenance", "accident"].includes(car.status)
+  )
+    return;
+  if (
+    seedManagerIncidents.some(
+      (item) =>
+        item.id !== incident.id &&
+        item.carId === car.id &&
+        (item.status === "open" || item.serviceStage === "written_off"),
+    )
+  )
+    return;
   const driver = seedDrivers.find((item) => item.id === car.assignedDriverId);
   car.status = driver && driver.status !== "terminated" ? "assigned" : "free";
-  if (driver && driver.id === incident.driverId && driver.status === "accident" && !seedManagerIncidents.some((item) => item.id !== incident.id && item.driverId === driver.id && item.status === "open")) driver.status = "active";
+  if (
+    driver &&
+    driver.id === incident.driverId &&
+    driver.status === "accident" &&
+    !seedManagerIncidents.some(
+      (item) =>
+        item.id !== incident.id &&
+        item.driverId === driver.id &&
+        item.status === "open",
+    )
+  )
+    driver.status = "active";
 }
 
-async function enqueueServiceEvents(tx: any, incident: any, previous?: any): Promise<void> {
-  if (!incident.serviceDetails || (previous && JSON.stringify(previous.serviceDetails) === JSON.stringify(incident.serviceDetails) && previous.serviceStage === incident.serviceStage)) return;
-  await tx.outboxEvent.create({ data: { topic: "service.changed", aggregateType: "incident", aggregateId: incident.id, payload: { incidentId: incident.id, stage: incident.serviceStage, kind: previous?.serviceStage === incident.serviceStage ? "updated" : "stage", details: incident.repairNote ?? incident.serviceDetails.reason } } });
-  if (incident.serviceStage === "sent_to_service" && previous?.serviceStage !== "sent_to_service") {
-    await tx.outboxEvent.create({ data: { topic: "service.arrival_overdue", aggregateType: "incident", aggregateId: incident.id, payload: { incidentId: incident.id }, createdAt: new Date(Date.parse(incident.serviceDetails.sentAt) + 24 * 60 * 60 * 1000) } });
+async function enqueueServiceEvents(
+  tx: any,
+  incident: any,
+  previous?: any,
+): Promise<void> {
+  if (
+    !incident.serviceDetails ||
+    (previous &&
+      isDeepStrictEqual(previous.serviceDetails, incident.serviceDetails) &&
+      previous.serviceStage === incident.serviceStage)
+  )
+    return;
+  await tx.outboxEvent.create({
+    data: {
+      topic: "service.changed",
+      aggregateType: "incident",
+      aggregateId: incident.id,
+      payload: {
+        incidentId: incident.id,
+        stage: incident.serviceStage,
+        kind:
+          !previous?.serviceDetails?.arrivedAt &&
+          incident.serviceDetails?.arrivedAt
+            ? "arrival"
+            : previous?.serviceStage === incident.serviceStage
+              ? "updated"
+              : "stage",
+        details: incident.repairNote ?? incident.serviceDetails.reason,
+        workshop: incident.serviceDetails.workshop ?? null,
+      },
+    },
+  });
+  if (
+    incident.serviceStage === "sent_to_service" &&
+    previous?.serviceStage !== "sent_to_service"
+  ) {
+    await tx.outboxEvent.create({
+      data: {
+        topic: "service.arrival_overdue",
+        aggregateType: "incident",
+        aggregateId: incident.id,
+        payload: { incidentId: incident.id },
+        createdAt: new Date(
+          Date.parse(incident.serviceDetails.sentAt) + 24 * 60 * 60 * 1000,
+        ),
+      },
+    });
   }
 }

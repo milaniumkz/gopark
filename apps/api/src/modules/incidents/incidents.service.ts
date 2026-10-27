@@ -1,5 +1,8 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
-import type { ManagerIncidentItem, ServiceRepairDetails } from "@gopark/contracts";
+import type {
+  ManagerIncidentItem,
+  ServiceRepairDetails,
+} from "@gopark/contracts";
 import { makeIncidentRepository } from "../../common/application/repository.factory.js";
 import type { IncidentRepository } from "../../common/repositories/index.js";
 import type { CreateIncidentDto } from "./dto/create-incident.dto.js";
@@ -17,7 +20,9 @@ function normalizeOccurredAt(value: string | null | undefined): string | null {
     return null;
   }
 
-  const eventDate = new Date(normalized.length === 10 ? `${normalized}T00:00:00.000Z` : normalized);
+  const eventDate = new Date(
+    normalized.length === 10 ? `${normalized}T00:00:00.000Z` : normalized,
+  );
   if (Number.isNaN(eventDate.getTime())) {
     throw new BadRequestException("Дата инцидента указана неверно.");
   }
@@ -33,31 +38,48 @@ function normalizeOccurredAt(value: string | null | undefined): string | null {
 
 @Injectable()
 export class IncidentsService {
-  private readonly incidentRepository: IncidentRepository = makeIncidentRepository();
+  private readonly incidentRepository: IncidentRepository =
+    makeIncidentRepository();
 
-  constructor(private readonly notificationsCreateService: NotificationsCreateService) {}
+  constructor(
+    private readonly notificationsCreateService: NotificationsCreateService,
+  ) {}
 
   list(): Promise<ManagerIncidentItem[]> {
     return this.incidentRepository.list();
   }
 
-  completeUntrackedRepair(carId: string, serviceDetails?: ServiceRepairDetails): Promise<ManagerIncidentItem | null> {
-    return this.incidentRepository.completeUntrackedRepair(carId, serviceDetails);
+  completeUntrackedRepair(
+    carId: string,
+    serviceDetails?: ServiceRepairDetails,
+  ): Promise<ManagerIncidentItem | null> {
+    return this.incidentRepository.completeUntrackedRepair(
+      carId,
+      serviceDetails,
+    );
   }
 
   listByCompany(companyName: string): Promise<ManagerIncidentItem[]> {
     return this.incidentRepository.listByCompany(companyName);
   }
 
-  async create(input: CreateIncidentDto): Promise<ManagerIncidentItem> {
+  async create(
+    input: CreateIncidentDto,
+    inventoryCompanyScope?: string | null,
+  ): Promise<ManagerIncidentItem> {
     const notifyText = trimOrNull(input.notifyDriverText);
     const notifyDate = trimOrNull(input.notifyDriverDate);
     const description = [
       trimOrNull(input.description),
-      notifyText && notifyDate ? `Уведомить водителя ${notifyDate}: ${notifyText}` : null,
-    ].filter(Boolean).join("\n");
+      notifyText && notifyDate
+        ? `Уведомить водителя ${notifyDate}: ${notifyText}`
+        : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
 
     const incident = await this.incidentRepository.create({
+      inventoryCompanyScope,
       title: input.title.trim(),
       incidentType: trimOrNull(input.incidentType) || "general",
       status: input.status.trim(),
@@ -84,7 +106,12 @@ export class IncidentsService {
       servicePayer: trimOrNull(input.servicePayer),
     });
 
-    if (incident.incidentType === "inspection" && incident.driverId && notifyText && notifyDate) {
+    if (
+      incident.incidentType === "inspection" &&
+      incident.driverId &&
+      notifyText &&
+      notifyDate
+    ) {
       await this.notificationsCreateService.scheduleDriverInspectionReminder(
         incident.driverId,
         notifyText,
@@ -95,8 +122,15 @@ export class IncidentsService {
     return incident;
   }
 
-  update(incidentId: string, input: UpdateIncidentDto): Promise<ManagerIncidentItem | null> {
-    const patch: UpdateIncidentDto = { serviceDetails: input.serviceDetails, accidentDetails: input.accidentDetails };
+  update(
+    incidentId: string,
+    input: UpdateIncidentDto,
+    inventoryCompanyScope?: string | null,
+  ): Promise<ManagerIncidentItem | null> {
+    const patch: UpdateIncidentDto = {
+      serviceDetails: input.serviceDetails,
+      accidentDetails: input.accidentDetails,
+    };
 
     if (input.title !== undefined) {
       patch.title = input.title.trim();
@@ -129,7 +163,8 @@ export class IncidentsService {
       patch.amount = input.amount ?? null;
     }
     if (input.insuranceCompensationAmount !== undefined) {
-      patch.insuranceCompensationAmount = input.insuranceCompensationAmount ?? null;
+      patch.insuranceCompensationAmount =
+        input.insuranceCompensationAmount ?? null;
     }
     if (input.writeoffAmount !== undefined) {
       patch.writeoffAmount = input.writeoffAmount ?? null;
@@ -165,7 +200,10 @@ export class IncidentsService {
       patch.servicePayer = trimOrNull(input.servicePayer);
     }
 
-    return this.incidentRepository.update(incidentId, patch);
+    return this.incidentRepository.update(incidentId, {
+      ...patch,
+      inventoryCompanyScope,
+    });
   }
 
   private toScheduledInspectionReminderDate(date: string): string {

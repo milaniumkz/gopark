@@ -2,6 +2,7 @@ import type { ServiceRepairDetails, AccidentDetails } from "@gopark/contracts";
 import type { ManagerIncidentItem } from "@gopark/contracts";
 
 export interface CreateIncidentRecord {
+  inventoryCompanyScope?: string|null;
   title: string;
   incidentType: string;
   status: string;
@@ -29,6 +30,7 @@ export interface CreateIncidentRecord {
 }
 
 export interface UpdateIncidentRecord {
+  inventoryCompanyScope?: string|null;
   title?: string;
   incidentType?: string;
   status?: string;

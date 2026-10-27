@@ -70,7 +70,7 @@ test(
         carId: car.id,
         driverId: driver.id,
         serviceStage: "sent_to_service",
-        serviceDetails: { reason: "Диагностика" },
+        serviceDetails: { reason: "Диагностика", workshop: "body" },
       });
       ids.push(sent.id);
       assert.equal(
@@ -115,15 +115,43 @@ test(
         1,
         "replayed event doesn't duplicate inbox notification",
       );
-      await repo.update(sent.id, { serviceStage: "awaiting_repair", serviceDetails: { reason: sent.serviceDetails!.reason, waitingComment: "Ожидает мастера", plannedRepairDate: "2099-12-31" } });
+      const notice = await db.managerAlert.findFirst({
+        where: { managerId: manager.id },
+      });
+      assert.ok(notice!.details.includes(car.plateNumber));
+      assert.ok(notice!.details.includes("Кузовной цех"));
+      await repo.update(sent.id, {
+        serviceDetails: {
+          arrivalConfirmed: true,
+          reason: sent.serviceDetails!.reason,
+          waitingComment: "Ожидает мастера",
+          plannedRepairDate: "2099-12-31",
+        },
+      });
+      const arrivalEvent = await db.outboxEvent.findFirst({
+        where: {
+          aggregateId: sent.id,
+          topic: "service.changed",
+          payload: { path: ["kind"], equals: "arrival" },
+        },
+      });
+      assert.ok(arrivalEvent, "arrival has its own durable notification");
+      await integration.handle(arrivalEvent.topic, {
+        ...arrivalEvent.payload,
+        eventId: arrivalEvent.id,
+      });
+      await integration.handle(arrivalEvent.topic, {
+        ...arrivalEvent.payload,
+        eventId: arrivalEvent.id,
+      });
       await integration.handle(reminder.topic, {
         ...reminder.payload,
         eventId: reminder.id,
       });
       assert.equal(
         await db.managerAlert.count({ where: { managerId: manager.id } }),
-        1,
-        "confirmed arrival cancels overdue alert",
+        2,
+        "confirmed arrival notifies once and cancels overdue alert",
       );
       await repo.update(sent.id, { serviceStage: "in_repair" });
       await assert.rejects(
@@ -195,11 +223,11 @@ test(
       });
       assert.equal(
         await db.managerAlert.count({ where: { managerId: manager.id } }),
-        2,
+        3,
       );
       assert.equal(
         push.length,
-        4,
+        6,
         "push attempted for changes and overdue; inbox remains idempotent",
       );
     } finally {

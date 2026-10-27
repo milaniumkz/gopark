@@ -205,20 +205,52 @@ export interface ServicePaymentEntry {
 }
 export interface ServiceRepairDetails {
   reason: string;
+  repairCategory?: "repair" | "accident" | "accident_repair";
+  workshop?: "body" | "main" | "both";
+  accidentFault?: "driver" | "other" | "both" | "unknown";
+  expectedPayer?: "company" | "driver" | "insurance";
+  manualVehicle?: {
+    plateNumber: string;
+    make: string;
+    model: string;
+    companyName?: string | null;
+  };
   sentAt?: string;
   arrivedAt?: string;
+  arrivalConfirmed?: boolean;
   waitingComment?: string;
   plannedRepairDate?: string;
   repairStartedAt?: string;
   completedAt?: string;
   orderNumber?: string;
   works?: string[];
+  orderItems?: {
+    id: string;
+    description: string;
+    category: "painting" | "repair";
+    amount?: number;
+    serviceAmount?: number;
+    laborAmount?: number;
+  }[];
+  expenses?: {
+    id: string;
+    description: string;
+    amount?: number;
+    purchaser: "sto" | "company" | "driver";
+    inventoryMode?: "purchase" | "stock";
+    partId?: string;
+    inventoryApplied?: boolean;
+  }[];
+  serviceBaseCost?: number;
   serviceCost?: number;
+  paintingCost?: number;
+  repairCost?: number;
   costDate?: string;
   payments?: ServicePaymentEntry[];
   insurance?: {
     insurer: "gosstrakh" | "nsk" | "alma";
     paid: boolean;
+    confirmedAmount?: number;
     paidAt?: string;
   };
   beforePhoto?: string;

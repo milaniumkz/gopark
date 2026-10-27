@@ -582,20 +582,11 @@ class ManagerRepairCard extends StatelessWidget {
   final String? note;
   @override
   Widget build(BuildContext context) {
-    const stages = [
-      'sent_to_service',
-      'awaiting_repair',
-      'in_repair',
-      'completed'
-    ];
-    const titles = [
-      'Отправлен на СТО',
-      'Прибыл · в ожидании',
-      'В ремонте',
-      'Машина готова'
-    ];
-    const keys = ['sentAt', 'arrivedAt', 'repairStartedAt', 'completedAt'];
-    final current = stages.indexOf(stage ?? '');
+    const stages = ['sent_to_service', 'in_repair', 'completed'];
+    const titles = ['Отправлен на СТО', 'В ремонте', 'Машина готова'];
+    const keys = ['sentAt', 'repairStartedAt', 'completedAt'];
+    final current = stages
+        .indexOf(stage == 'awaiting_repair' ? 'sent_to_service' : stage ?? '');
     String date(dynamic raw) {
       final d = DateTime.tryParse('$raw')?.toLocal();
       return d == null
@@ -648,8 +639,21 @@ class ManagerRepairCard extends StatelessWidget {
                         padding: const EdgeInsets.only(top: 8),
                         child: Text(
                             'План начала ремонта: ${details['plannedRepairDate']}')),
+                  if (details['arrivedAt'] != null)
+                    Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                            'Прибыл на СТО: ${date(details['arrivedAt'])}')),
+                  if (details['workshop'] != null)
+                    Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text('Цех: ${{
+                              'body': 'Кузовной',
+                              'main': 'Основной',
+                              'both': 'Кузовной и основной'
+                            }[details['workshop']] ?? details['workshop']}')),
                   const SizedBox(height: 12),
-                  for (var n = 0; n < 4; n++)
+                  for (var n = 0; n < stages.length; n++)
                     Padding(
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         child: Row(
@@ -691,7 +695,7 @@ class ManagerRepairCard extends StatelessWidget {
                         child: Text(
                             '${const {
                                   "sent_to_service": "Отправлен на СТО",
-                                  "awaiting_repair": "В ожидании",
+                                  "awaiting_repair": "На СТО",
                                   "in_repair": "В ремонте",
                                   "completed": "Завершён",
                                   "written_off": "Списан",
@@ -713,9 +717,24 @@ class ManagerRepairCard extends StatelessWidget {
                     Text('Заказ-наряд № ${details['orderNumber']}',
                         style: const TextStyle(fontWeight: FontWeight.bold)),
                     const SizedBox(height: 8),
-                    ...(details['works'] as List? ?? []).map((w) => Padding(
-                        padding: const EdgeInsets.only(bottom: 6),
-                        child: Text('• $w')))
+                    if (details['orderItems'] is List)
+                      ...(details['orderItems'] as List).map((w) => Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Text(
+                              '${w['description']}\nУслуга: ${w['serviceAmount'] ?? 'не указана'} сом · работа: ${w['laborAmount'] ?? 'не указана'} сом · итого: ${w['amount'] ?? '—'} сом')))
+                    else
+                      ...(details['works'] as List? ?? []).map((w) => Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Text('• $w'))),
+                    if (details['expenses'] is List)
+                      ...(details['expenses'] as List).map((e) => Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(
+                              'Расход: ${e['description']} · ${e['amount']} сом · ${{
+                                    'sto': 'СТО',
+                                    'company': 'GoPark',
+                                    'driver': 'Водитель'
+                                  }[e['purchaser']] ?? e['purchaser']}'))),
                   ],
                   if (cost != null) ...[
                     const Divider(),

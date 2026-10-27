@@ -377,6 +377,8 @@ model PartMovement {
   id        String   @id @default(uuid()) @db.Uuid
   partId    String   @db.Uuid @map("part_id")
   requesterCompany String? @map("requester_company")
+  incidentId String? @db.Uuid @map("incident_id")
+  expenseId String? @map("expense_id")
   carId     String?  @db.Uuid @map("car_id")
   type      String
   quantity  Int
@@ -387,10 +389,14 @@ model PartMovement {
   part      Part     @relation(fields: [partId], references: [id])
   car       Car?     @relation(fields: [carId], references: [id])
 
+  incident Incident? @relation(fields:[incidentId],references:[id],onDelete:SetNull)
+
   @@index([partId])
   @@index([carId])
   @@index([type])
   @@index([requesterCompany])
+  @@unique([incidentId,expenseId,type])
+  @@index([incidentId])
   @@map("part_movements")
 }
 
@@ -653,6 +659,8 @@ model Incident {
   servicePaymentStatus String? @map("service_payment_status")
   servicePayer String? @map("service_payer")
   createdAt    DateTime @default(now()) @map("created_at")
+
+  partMovements PartMovement[]
 
   @@map("incidents")
   serviceDetails Json?

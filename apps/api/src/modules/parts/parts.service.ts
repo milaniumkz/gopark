@@ -148,6 +148,7 @@ export class PartsService {
     companyName?: string | null,
     from?: string,
     to?: string,
+    catalogOnly = false,
   ): Promise<PartsOverview> {
     const client = this.prisma.client;
     if (!client) {
@@ -171,6 +172,16 @@ export class PartsService {
       ...(to ? { lt: new Date(Date.parse(`${to}T00:00:00Z`) + 86400000) } : {}),
     };
     const partWhere = companyName ? { companyName } : {};
+    if (catalogOnly)
+      return {
+        parts: (
+          await client.part.findMany({
+            where: partWhere,
+            orderBy: { name: "asc" },
+          })
+        ).map(mapPart),
+        movements: [],
+      };
     const [parts, movements] = await Promise.all([
       client.part.findMany({
         where: partWhere,

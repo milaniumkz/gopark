@@ -135,4 +135,4 @@ jobs:
       - name: Create isolated test schema
         run: pnpm --filter @gopark/api exec prisma db push --skip-generate
       - name: Verify numbering and atomic repair lifecycle on real PostgreSQL
-        run: pnpm --filter @gopark/api exec node --loader ts-node/esm --test src/infrastructure/repositories/contract-number.integration.test.ts src/infrastructure/repositories/repair-lifecycle.integration.test.ts src/infrastructure/repositories/calendar-comments.integration.test.ts src/infrastructure/repositories/service-workflow.integration.test.ts src/modules/parts/parts.integration.test.ts
+        run: pnpm --filter @gopark/api exec node --loader ts-node/esm --test src/infrastructure/repositories/contract-number.integration.test.ts src/infrastructure/repositories/repair-lifecycle.integration.test.ts src/infrastructure/repositories/calendar-comments.integration.test.ts src/infrastructure/repositories/service-workflow.integration.test.ts src/infrastructure/repositories/service-order.integration.test.ts src/modules/parts/parts.integration.test.ts
