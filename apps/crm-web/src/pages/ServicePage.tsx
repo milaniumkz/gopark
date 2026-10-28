@@ -13,12 +13,12 @@ import {
   recalculateServiceCosts,
   billableServiceExpenses,
   serviceFeeBase,
-  serviceProfit,
 } from "@gopark/contracts";
 import { patchJson, postJson } from "../lib/api";
 import { useApiQuery } from "../hooks/useApiQuery";
 import { useAuth } from "../ui/AuthContext";
 import { downloadCsvTable, formatCurrency, formatDateOnly } from "../lib/utils";
+import { workshopFinance, workshopPayment } from "./service-workshop";
 import "./service-workflow.css";
 const stages = ["sent_to_service", "in_repair", "completed"];
 const labels: Record<string, string> = {
@@ -34,9 +34,9 @@ const labels: Record<string, string> = {
 };
 const insurerLabels = { nsk: "НСК", alma: "Альма", gosstrakh: "Госстрах" };
 const workshopLabels = {
-  body: "Кузовной цех",
+  body: "Малярный цех",
   main: "Основной цех",
-  both: "Кузовной и основной цеха",
+  both: "Основной и малярный цеха",
 };
 const categoryLabels = {
   repair: "Ремонт",
@@ -112,6 +112,29 @@ const stamp = (date?: string) =>
     ? new Date(date).toLocaleString("ru-RU", { timeZone: "Asia/Almaty" })
     : "Дата не указана";
 export function ServicePage() {
+  const [revision, setRevision] = useState(0);
+  return (
+    <div className="sto-departments" aria-label="Цеха СТО">
+      {(["main", "body"] as const).map((shop) => (
+        <ServiceWorkshopPage
+          key={shop}
+          shop={shop}
+          revision={revision}
+          onChanged={() => setRevision((v) => v + 1)}
+        />
+      ))}
+    </div>
+  );
+}
+function ServiceWorkshopPage({
+  shop,
+  revision,
+  onChanged,
+}: {
+  shop: "main" | "body";
+  revision: number;
+  onChanged: () => void;
+}) {
   const { session } = useAuth();
   const incidents = useApiQuery<ManagerIncidentItem[]>("incidents");
   const cars = useApiQuery<VehicleListItem[]>("cars");
@@ -194,7 +217,7 @@ export function ServicePage() {
   const [dispatchInsurer, setDispatchInsurer] = useState<
     "" | "nsk" | "alma" | "gosstrakh"
   >("");
-  const [workshop, setWorkshop] = useState<"" | "body" | "main" | "both">("");
+  const [workshop, setWorkshop] = useState<"" | "body" | "main" | "both">(shop);
   const [manualEntry, setManualEntry] = useState(false);
   const [manualPlate, setManualPlate] = useState("");
   const [manualMake, setManualMake] = useState("");
@@ -212,7 +235,7 @@ export function ServicePage() {
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
   }, [showDispatch, busy]);
-  const records = (incidents.data ?? [])
+  const allRecords = (incidents.data ?? [])
     .map((i) => ({
       ...i,
       serviceDetails: i.serviceDetails
@@ -225,6 +248,31 @@ export function ServicePage() {
         i.serviceStage === "awaiting_repair" ||
         stages.includes(i.serviceStage ?? ""),
     );
+  const records = allRecords.filter(
+    (i) =>
+      i.serviceDetails?.workshop === shop ||
+      i.serviceDetails?.workshop === "both",
+  );
+  const lane = (i: ManagerIncidentItem) =>
+    workshopFinance(i.serviceDetails, shop);
+  const laneCost = (i: ManagerIncidentItem) => lane(i).cost;
+  const lanePaid = (i: ManagerIncidentItem) => lane(i).paid;
+  const laneProfit = (i: ManagerIncidentItem) => lane(i).profit;
+  useEffect(() => {
+    if (!revision) return;
+    void Promise.allSettled([
+      incidents.refetch({ silent: true }),
+      cars.refetch({ silent: true }),
+      drivers.refetch({ silent: true }),
+      parts.refetch({ silent: true }),
+    ]);
+  }, [
+    revision,
+    incidents.refetch,
+    cars.refetch,
+    drivers.refetch,
+    parts.refetch,
+  ]);
   const carById = new Map((cars.data ?? []).map((c) => [c.id, c]));
   const driverById = new Map((drivers.data ?? []).map((d) => [d.id, d]));
   const vehicleLabel = (i: ManagerIncidentItem) =>
@@ -276,16 +324,16 @@ export function ServicePage() {
   });
   const matchesPayment = (i: ManagerIncidentItem) =>
     paymentFilter === "all" ||
-    (paymentFilter === "with_payments" && paid(i) > 0) ||
-    (paymentFilter === "unpaid" && cost(i) > paid(i)) ||
-    (paymentFilter === "paid" &&
-      i.serviceDetails?.serviceCost !== undefined &&
-      paid(i) >= cost(i)) ||
-    (paymentFilter === "partial" && paid(i) > 0 && paid(i) < cost(i));
+    (paymentFilter === "with_payments" && lanePaid(i) > 0) ||
+    (paymentFilter === "unpaid" && laneCost(i) > lanePaid(i)) ||
+    (paymentFilter === "paid" && lane(i).known && lanePaid(i) >= laneCost(i)) ||
+    (paymentFilter === "partial" &&
+      lanePaid(i) > 0 &&
+      lanePaid(i) < laneCost(i));
   const matchesMetric = (i: ManagerIncidentItem) =>
     (metricScope === "all" ||
-      (metricScope === "cost" && i.serviceDetails?.serviceCost !== undefined) ||
-      (metricScope === "profit" && serviceFeeBase(i.serviceDetails) > 0) ||
+      (metricScope === "cost" && lane(i).known) ||
+      (metricScope === "profit" && lane(i).base > 0) ||
       (metricScope === "painting" &&
         (i.serviceDetails?.paintingCost ?? 0) > 0) ||
       (metricScope === "repair" && (i.serviceDetails?.repairCost ?? 0) > 0) ||
@@ -320,7 +368,7 @@ export function ServicePage() {
         .toLowerCase()
         .includes(search.toLowerCase()),
   );
-  const untracked = (cars.data ?? []).filter(
+  const untracked = (shop === "main" ? (cars.data ?? []) : []).filter(
     (c) =>
       paymentFilter === "all" &&
       (company === "all" || c.companyName === company) &&
@@ -332,7 +380,7 @@ export function ServicePage() {
       payer === "all" &&
       (!managerFilter || c.managerName === managerFilter) &&
       c.status === "maintenance" &&
-      !records.some((i) => i.carId === c.id && !closed(i)) &&
+      !allRecords.some((i) => i.carId === c.id && !closed(i)) &&
       ["active", "all", "in_repair"].includes(filter) &&
       [c.plateNumber, c.make, c.model]
         .join(" ")
@@ -343,16 +391,11 @@ export function ServicePage() {
     () =>
       periodRecords.reduce(
         (s, i) => ({
-          cost: s.cost + cost(i),
-          paid: s.paid + paid(i),
-          painting: s.painting + (i.serviceDetails?.paintingCost ?? 0),
-          repair: s.repair + (i.serviceDetails?.repairCost ?? 0),
-          unallocated:
-            s.unallocated +
-            (i.serviceDetails?.paintingCost === undefined &&
-            i.serviceDetails?.repairCost === undefined
-              ? serviceFeeBase(i.serviceDetails)
-              : 0),
+          cost: s.cost + laneCost(i),
+          paid: s.paid + lanePaid(i),
+          painting: s.painting + (shop === "body" ? lane(i).base : 0),
+          repair: s.repair + (shop === "main" ? lane(i).base : 0),
+          unallocated: s.unallocated,
         }),
         { cost: 0, paid: 0, painting: 0, repair: 0, unallocated: 0 },
       ),
@@ -374,7 +417,12 @@ export function ServicePage() {
             managerFilter)
       );
     })
-    .flatMap((i) => i.serviceDetails?.payments ?? [])
+    .flatMap((i) =>
+      (i.serviceDetails?.payments ?? []).map((p) => ({
+        ...p,
+        amount: workshopPayment(i.serviceDetails, shop, p.amount),
+      })),
+    )
     .filter(
       (p) =>
         (payer === "all" || p.payer === payer) &&
@@ -384,6 +432,7 @@ export function ServicePage() {
     .reduce((sum, p) => sum + p.amount, 0);
   async function refresh() {
     await Promise.all([incidents.refetch(), cars.refetch(), drivers.refetch()]);
+    onChanged();
   }
   function open(i: ManagerIncidentItem) {
     setSelected(i);
@@ -453,6 +502,7 @@ export function ServicePage() {
           repairNote: draft.reason,
         },
       );
+      onChanged();
       setSelected(next);
       setDetails(next.serviceDetails ?? draft);
       await Promise.allSettled([
@@ -547,7 +597,7 @@ export function ServicePage() {
         }
       }
       if (!car) throw new Error("Выберите автомобиль");
-      const existing = records.find((i) => i.carId === car.id && !closed(i));
+      const existing = allRecords.find((i) => i.carId === car.id && !closed(i));
       if (existing)
         throw new Error(
           "У машины уже есть открытый ремонт. Откройте его карточку.",
@@ -842,7 +892,7 @@ export function ServicePage() {
           "Этап",
           "Причина",
           "Стоимость услуг",
-          "Оплачено всего",
+          "Оплачено по цеху",
           "К оплате",
           "Оплата",
           "Плательщики",
@@ -865,14 +915,14 @@ export function ServicePage() {
           categoryLabel(i),
           labels[i.serviceStage ?? ""] ?? i.status,
           i.serviceDetails?.reason ?? "",
-          i.serviceDetails?.serviceCost ?? "",
-          paid(i),
-          i.serviceDetails?.serviceCost == null
-            ? "Стоимость не указана"
-            : Math.max(0, cost(i) - paid(i)),
-          !paid(i)
+          lane(i).known ? laneCost(i) : "",
+          lanePaid(i),
+          !lane(i).known
+            ? "Сумма по цеху не распределена"
+            : Math.max(0, laneCost(i) - lanePaid(i)),
+          !lanePaid(i)
             ? "Не оплачено"
-            : paid(i) >= cost(i)
+            : lanePaid(i) >= laneCost(i)
               ? "Оплачено"
               : "Частично",
           (i.serviceDetails?.payments ?? [])
@@ -886,18 +936,11 @@ export function ServicePage() {
           i.serviceDetails?.plannedRepairDate ?? "",
           i.serviceDetails?.repairStartedAt ?? "",
           waitingLate(i) ? "Да" : "Нет",
-          i.serviceDetails?.paintingCost ?? "",
-          i.serviceDetails?.paintingCost == null
-            ? ""
-            : i.serviceDetails.paintingCost * 0.3,
-          i.serviceDetails?.repairCost ?? "",
-          i.serviceDetails?.repairCost == null
-            ? ""
-            : i.serviceDetails.repairCost * 0.3,
-          i.serviceDetails?.paintingCost === undefined &&
-          i.serviceDetails?.repairCost === undefined
-            ? cost(i)
-            : 0,
+          shop === "body" ? lane(i).base : 0,
+          shop === "body" ? laneProfit(i) : 0,
+          shop === "main" ? lane(i).base : 0,
+          shop === "main" ? laneProfit(i) : 0,
+          lane(i).known ? 0 : "Не распределена",
           i.serviceDetails?.workshop
             ? workshopLabels[i.serviceDetails.workshop]
             : "Не указан",
@@ -944,7 +987,7 @@ export function ServicePage() {
               payerLabels[p.payer],
               p.insurer ? insurerLabels[p.insurer] : "",
               p.paidAt,
-              p.amount,
+              workshopPayment(i.serviceDetails, shop, p.amount),
               p.id,
             ]);
       }
@@ -961,19 +1004,24 @@ export function ServicePage() {
       x.utils.book_append_sheet(
         book,
         x.utils.aoa_to_sheet([
+          ["Цех", workshopLabels[shop]],
+          [
+            "Распределение",
+            "Общие оплаты и расходы двух цехов распределены пропорционально стоимости услуг и работ. Без разбивки суммы не распределяются.",
+          ],
           ["Период с", from || "Все даты"],
           ["Период по", to || "Все даты"],
           [
             "Прибыль малярных работ 30%",
             rows.reduce(
-              (sum, i) => sum + (i.serviceDetails?.paintingCost ?? 0) * 0.3,
+              (sum, i) => sum + (shop === "body" ? laneProfit(i) : 0),
               0,
             ),
           ],
           [
             "Прибыль ремонта 30%",
             rows.reduce(
-              (sum, i) => sum + (i.serviceDetails?.repairCost ?? 0) * 0.3,
+              (sum, i) => sum + (shop === "main" ? laneProfit(i) : 0),
               0,
             ),
           ],
@@ -984,21 +1032,24 @@ export function ServicePage() {
                 sum +
                 (i.serviceDetails?.paintingCost === undefined &&
                 i.serviceDetails?.repairCost === undefined
-                  ? serviceProfit(i.serviceDetails)
+                  ? laneProfit(i)
                   : 0),
               0,
             ),
           ],
-          ["Стоимость услуг", rows.reduce((sum, i) => sum + cost(i), 0)],
-          ["Оплачено по ремонтам", rows.reduce((sum, i) => sum + paid(i), 0)],
+          ["Стоимость услуг", rows.reduce((sum, i) => sum + laneCost(i), 0)],
+          [
+            "Оплачено по ремонтам",
+            rows.reduce((sum, i) => sum + lanePaid(i), 0),
+          ],
           [
             "К оплате",
-            rows.reduce((sum, i) => sum + Math.max(0, cost(i) - paid(i)), 0),
+            rows.reduce(
+              (sum, i) => sum + Math.max(0, laneCost(i) - lanePaid(i)),
+              0,
+            ),
           ],
-          [
-            "Прибыль СТО 30%",
-            rows.reduce((sum, i) => sum + serviceProfit(i.serviceDetails), 0),
-          ],
+          ["Прибыль СТО 30%", rows.reduce((sum, i) => sum + laneProfit(i), 0)],
           [
             "Пояснение",
             "Ремонты отобраны по дате стоимости; поступления — по дате оплаты. Пустая стоимость не равна нулевому обязательству.",
@@ -1024,7 +1075,11 @@ export function ServicePage() {
           ? workshopLabels[i.serviceDetails.workshop]
           : "Не указан";
         if (i.serviceDetails?.orderItems)
-          for (const w of i.serviceDetails.orderItems)
+          for (const w of i.serviceDetails.orderItems.filter(
+            (w) =>
+              i.serviceDetails?.workshop !== "both" ||
+              w.category === (shop === "body" ? "painting" : "repair"),
+          ))
             workRows.push([
               i.serviceDetails.orderNumber ?? "",
               vehicleLabel(i),
@@ -1090,7 +1145,10 @@ export function ServicePage() {
         x.utils.aoa_to_sheet(expenseRows),
         "Расходы",
       );
-      x.writeFile(book, `gopark-sto-${from || "all"}-${to || "all"}.xlsx`);
+      x.writeFile(
+        book,
+        `gopark-sto-${shop}-${from || "all"}-${to || "all"}.xlsx`,
+      );
     } catch {
       setMessage("Не удалось подготовить Excel. Повторите выгрузку.");
     }
@@ -1208,7 +1266,10 @@ export function ServicePage() {
   );
   const error = incidents.error || cars.error || drivers.error;
   return (
-    <section className="page-stack service-page">
+    <section
+      className={`page-stack service-page sto-department sto-department--${shop}`}
+      aria-label={workshopLabels[shop]}
+    >
       {photoPreview && (
         <button
           type="button"
@@ -1224,9 +1285,9 @@ export function ServicePage() {
           <div className="hero-card hero-card--dashboard">
             <div className="hero-card__main">
               <p className="eyebrow">Ремонт и услуги</p>
-              <h2>СТО</h2>
+              <h2>{workshopLabels[shop]}</h2>
               <p>
-                Причина, этапы ремонта, заказ-наряд и оплата в одной карточке.
+                Показатели, автомобили и заказ-наряды цеха.
               </p>
             </div>
             <div className="hero-card__actions">
@@ -1242,7 +1303,7 @@ export function ServicePage() {
                     setDispatchFault("");
                     setDispatchPayer("");
                     setDispatchInsurer("");
-                    setWorkshop("");
+                    setWorkshop(shop);
                     setManualPlate("");
                     setManualMake("");
                     setManualModel("");
@@ -1265,7 +1326,7 @@ export function ServicePage() {
                 className="button button--secondary"
                 onClick={() =>
                   downloadCsvTable(
-                    "gopark-service.csv",
+                    `gopark-service-${shop}.csv`,
                     [
                       "Автомобиль",
                       "Статус",
@@ -1293,11 +1354,11 @@ export function ServicePage() {
                       i.serviceDetails?.completedAt ?? "",
                       i.serviceDetails?.orderNumber ?? "",
                       i.serviceDetails?.works?.join("; ") ?? "",
-                      i.serviceDetails?.serviceCost ?? "",
+                      lane(i).known ? laneCost(i) : "Не распределена",
                       i.serviceDetails?.costDate ?? "",
-                      paid(i),
-                      Math.max(0, cost(i) - paid(i)),
-                      serviceProfit(i.serviceDetails),
+                      lanePaid(i),
+                      Math.max(0, laneCost(i) - lanePaid(i)),
+                      laneProfit(i),
                       JSON.stringify(i.serviceDetails?.payments ?? []),
                     ]),
                   )
@@ -1307,57 +1368,50 @@ export function ServicePage() {
               </button>
             </div>
           </div>
-          <div className="sto-stats">
+          <div
+            className="sto-stats"
+            aria-label={`Дашборд: ${workshopLabels[shop]}`}
+          >
             {[
               [
                 "Автомобили в ремонте",
                 String(
-                  (cars.data ?? []).filter(
-                    (c) =>
-                      c.status === "maintenance" &&
-                      (company === "all" || c.companyName === company),
-                  ).length +
-                    new Set(
-                      records
-                        .filter(
-                          (i) =>
-                            !i.carId &&
-                            i.serviceDetails?.manualVehicle &&
-                            !closed(i) &&
-                            (company === "all" || recordCompany(i) === company),
-                        )
-                        .map(
-                          (i) => i.serviceDetails!.manualVehicle!.plateNumber,
-                        ),
-                    ).size,
+                  new Set(
+                    periodRecords.filter((i) => !closed(i)).map(vehicleKey),
+                  ).size,
                 ),
               ],
               ["Стоимость услуг", formatCurrency(sums.cost)],
               ["Оплачено", formatCurrency(sums.paid)],
               [
                 "Не оплачено",
-                formatCurrency(Math.max(0, sums.cost - sums.paid)),
+                formatCurrency(
+                  periodRecords.reduce(
+                    (total, i) =>
+                      total + Math.max(0, laneCost(i) - lanePaid(i)),
+                    0,
+                  ),
+                ),
               ],
               [
                 "Прибыль СТО · 30%",
-                formatCurrency(
-                  (sums.painting + sums.repair + sums.unallocated) * 0.3,
-                ),
+                formatCurrency(sums.painting * 0.3 + sums.repair * 0.3),
               ],
             ].map(([label, value]) => renderMetric(label, value, "finance"))}
           </div>
-          <div
-            className="sto-stats sto-profit"
-            aria-label="Прибыль по направлениям"
-          >
-            {[
-              ["Малярные работы · прибыль 30%", sums.painting * 0.3],
-              ["Ремонт · прибыль 30%", sums.repair * 0.3],
-              ["Прибыль без разбивки", sums.unallocated * 0.3],
-            ].map(([label, value]) =>
-              renderMetric(String(label), value, "profit"),
-            )}
-          </div>
+          <p className="muted sto-allocation-note">
+            Для машины в двух цехах услуги и работы учитываются по направлениям.
+            Общие оплаты и расходы распределяются пропорционально их стоимости.
+            Прибыль — 30% услуг и работ, без расходов.
+          </p>
+          {periodRecords.some((i) => !lane(i).known) && (
+            <p className="sto-late">
+              Без разбивки суммы:{" "}
+              {periodRecords.filter((i) => !lane(i).known).length}. Укажите
+              стоимости работ по направлениям в карточке; неизвестные суммы не
+              включены в показатели.
+            </p>
+          )}
           <div className="sto-stats" aria-label="Статистика ДТП">
             {[
               ["Всего ДТП", String(accidents.length)],
@@ -1373,11 +1427,7 @@ export function ServicePage() {
               [
                 "Стоимость ДТП",
                 formatCurrency(
-                  accidents.reduce(
-                    (sum, i) =>
-                      sum + (i.serviceDetails?.serviceCost ?? i.amount ?? 0),
-                    0,
-                  ),
+                  accidents.reduce((sum, i) => sum + laneCost(i), 0),
                 ),
               ],
             ].map(([label, value]) => renderMetric(label, value, "accident"))}
@@ -1638,37 +1688,29 @@ export function ServicePage() {
                 </button>
               </div>
             )}
-            <div className="sto-workshops">
-              {(["body", "main"] as const).map((shop) => {
-                const items = rows.filter(
-                  (i) =>
-                    i.serviceDetails?.workshop === shop ||
-                    i.serviceDetails?.workshop === "both",
-                );
-                return (
-                  <section
-                    className={`sto-workshop sto-workshop--${shop}`}
-                    key={shop}
-                    aria-label={workshopLabels[shop]}
-                  >
-                    <h3>
-                      {workshopLabels[shop]} · {items.length}
-                    </h3>
-                    <div className="sto-cards">
-                      {items.map(renderRepairCard)}
-                    </div>
-                    {!items.length && (
-                      <p className="muted">Машин по фильтрам нет</p>
-                    )}
-                  </section>
-                );
-              })}
-            </div>
-            {(rows.some((i) => !i.serviceDetails?.workshop) ||
+            <div className="sto-cards">{rows.map(renderRepairCard)}</div>
+            {!rows.length && <p className="muted">Машин по фильтрам нет</p>}
+            {((shop === "main" &&
+              allRecords.some((i) => !i.serviceDetails?.workshop)) ||
               !!untracked.length) && <h3>Цех пока не указан</h3>}
             <div className="sto-cards">
-              {rows
-                .filter((i) => !i.serviceDetails?.workshop)
+              {(shop === "main" && !activeMetric ? allRecords : [])
+                .filter(
+                  (i) =>
+                    !i.serviceDetails?.workshop &&
+                    (company === "all" || recordCompany(i) === company) &&
+                    (filter === "all" ||
+                      (filter === "active"
+                        ? !closed(i)
+                        : filter === "archived"
+                          ? closed(i)
+                          : i.serviceStage === filter)) &&
+                    (!search ||
+                      [vehicleLabel(i), repairReason(i)]
+                        .join(" ")
+                        .toLowerCase()
+                        .includes(search.toLowerCase())),
+                )
                 .map(renderRepairCard)}
               {untracked.map((c) => (
                 <article className="sto-card" key={c.id}>
@@ -1694,7 +1736,7 @@ export function ServicePage() {
                         setSendCar(c.id);
                         setReason(c.incidentComment ?? "");
                         setManualEntry(false);
-                        setWorkshop("");
+                        setWorkshop(shop);
                         setShowDispatch(true);
                       }}
                     >
