@@ -18,7 +18,7 @@ import { patchJson, postJson } from "../lib/api";
 import { useApiQuery } from "../hooks/useApiQuery";
 import { useAuth } from "../ui/AuthContext";
 import { downloadCsvTable, formatCurrency, formatDateOnly } from "../lib/utils";
-import { workshopFinance, workshopPayment } from "./service-workshop";
+import { workshopFinance, workshopPayments } from "./service-workshop";
 import "./service-workflow.css";
 const stages = ["sent_to_service", "in_repair", "completed"];
 const labels: Record<string, string> = {
@@ -417,12 +417,7 @@ function ServiceWorkshopPage({
             managerFilter)
       );
     })
-    .flatMap((i) =>
-      (i.serviceDetails?.payments ?? []).map((p) => ({
-        ...p,
-        amount: workshopPayment(i.serviceDetails, shop, p.amount),
-      })),
-    )
+    .flatMap((i) => workshopPayments(i.serviceDetails, shop))
     .filter(
       (p) =>
         (payer === "all" || p.payer === payer) &&
@@ -974,7 +969,7 @@ function ServiceWorkshopPage({
           (caseType !== "all" && i.serviceCaseType !== caseType)
         )
           continue;
-        for (const p of i.serviceDetails?.payments ?? [])
+        for (const p of workshopPayments(i.serviceDetails, shop))
           if (
             (!from || p.paidAt.slice(0, 10) >= from) &&
             (!to || p.paidAt.slice(0, 10) <= to) &&
@@ -987,7 +982,7 @@ function ServiceWorkshopPage({
               payerLabels[p.payer],
               p.insurer ? insurerLabels[p.insurer] : "",
               p.paidAt,
-              workshopPayment(i.serviceDetails, shop, p.amount),
+              p.amount,
               p.id,
             ]);
       }
@@ -1286,9 +1281,7 @@ function ServiceWorkshopPage({
             <div className="hero-card__main">
               <p className="eyebrow">Ремонт и услуги</p>
               <h2>{workshopLabels[shop]}</h2>
-              <p>
-                Показатели, автомобили и заказ-наряды цеха.
-              </p>
+              <p>Показатели, автомобили и заказ-наряды цеха.</p>
             </div>
             <div className="hero-card__actions">
               {canSend && (

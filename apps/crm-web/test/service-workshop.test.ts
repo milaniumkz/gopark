@@ -4,6 +4,7 @@ import type { ServiceRepairDetails } from "@gopark/contracts";
 import {
   workshopFinance,
   workshopPayment,
+  workshopPayments,
 } from "../src/pages/service-workshop.js";
 test("a workshop receives only its own cases, including full legacy single-workshop quotes", () => {
   const d: ServiceRepairDetails = {
@@ -102,4 +103,26 @@ test("a shared case with work only in one workshop allocates nothing to the othe
   };
   assert.equal(workshopFinance(d, "body").cost, 100);
   assert.equal(workshopFinance(d, "main").cost, 0);
+});
+
+test("small partial receipts settle both workshop balances exactly after rounding", () => {
+  const d: ServiceRepairDetails = {
+    reason: "Test",
+    workshop: "both",
+    serviceCost: 0.02,
+    paintingCost: 0.01,
+    repairCost: 0.01,
+    payments: [
+      { id: "1", payer: "driver", amount: 0.01, paidAt: "2026-10-01" },
+      { id: "2", payer: "driver", amount: 0.01, paidAt: "2026-10-01" },
+    ],
+  };
+  for (const shop of ["main", "body"] as const) {
+    const totals = workshopFinance(d, shop);
+    assert.equal(totals.paid, totals.cost);
+    assert.equal(
+      workshopPayments(d, shop).reduce((s, p) => s + p.amount, 0),
+      totals.paid,
+    );
+  }
 });

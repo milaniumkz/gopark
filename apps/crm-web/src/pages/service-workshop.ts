@@ -45,9 +45,10 @@ export function workshopFinance(
 ) {
   if (!d || (d.workshop !== shop && d.workshop !== "both"))
     return { base: 0, cost: 0, paid: 0, profit: 0, known: false };
-  const payments = (d.payments ?? []).reduce(
-    (s, p) => s + workshopPayment(d, shop, p.amount),
-    0,
+  const payments = workshopPayment(
+    d,
+    shop,
+    (d.payments ?? []).reduce((sum, p) => sum + p.amount, 0),
   );
   if (d.workshop === shop) {
     const base = serviceFeeBase(d);
@@ -72,4 +73,20 @@ export function workshopFinance(
     profit: money(base * 0.3),
     known,
   };
+}
+
+/** Allocate cumulative receipts so rounding cannot leave a fully paid invoice partly unpaid. */
+export function workshopPayments(
+  d: ServiceRepairDetails | null | undefined,
+  shop: Shop,
+) {
+  let received = 0,
+    allocated = 0;
+  return (d?.payments ?? []).map((payment) => {
+    received = money(received + payment.amount);
+    const total = workshopPayment(d, shop, received);
+    const amount = money(total - allocated);
+    allocated = total;
+    return { ...payment, amount };
+  });
 }
