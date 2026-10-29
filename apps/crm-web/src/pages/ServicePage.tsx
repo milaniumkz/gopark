@@ -111,8 +111,20 @@ const stamp = (date?: string) =>
   date
     ? new Date(date).toLocaleString("ru-RU", { timeZone: "Asia/Almaty" })
     : "Дата не указана";
+type WorkshopSide = "main" | "body";
+type RepairOpenRequest = { item: ManagerIncidentItem; shop: WorkshopSide };
 export function ServicePage() {
   const [revision, setRevision] = useState(0);
+  const [openRequest, setOpenRequest] = useState<RepairOpenRequest | null>(
+    null,
+  );
+  function requestOpen(item: ManagerIncidentItem, origin: WorkshopSide) {
+    const assigned = item.serviceDetails?.workshop;
+    setOpenRequest({
+      item,
+      shop: assigned === "main" || assigned === "body" ? assigned : origin,
+    });
+  }
   return (
     <div className="sto-departments" aria-label="Цеха СТО">
       {(["main", "body"] as const).map((shop) => (
@@ -120,6 +132,8 @@ export function ServicePage() {
           key={shop}
           shop={shop}
           revision={revision}
+          openRequest={openRequest}
+          onOpen={requestOpen}
           onChanged={() => setRevision((v) => v + 1)}
         />
       ))}
@@ -130,10 +144,14 @@ function ServiceWorkshopPage({
   shop,
   revision,
   onChanged,
+  openRequest,
+  onOpen,
 }: {
   shop: "main" | "body";
   revision: number;
   onChanged: () => void;
+  openRequest: RepairOpenRequest | null;
+  onOpen: (item: ManagerIncidentItem, origin: WorkshopSide) => void;
 }) {
   const { session } = useAuth();
   const incidents = useApiQuery<ManagerIncidentItem[]>("incidents");
@@ -430,6 +448,17 @@ function ServiceWorkshopPage({
     onChanged();
   }
   function open(i: ManagerIncidentItem) {
+    onOpen(i, shop);
+  }
+  useEffect(() => {
+    if (!openRequest) return;
+    if (openRequest.shop === shop) openHere(openRequest.item);
+    else if (openRequest.item.serviceDetails?.workshop !== "both")
+      setSelected((current) =>
+        current?.id === openRequest.item.id ? null : current,
+      );
+  }, [openRequest]);
+  function openHere(i: ManagerIncidentItem) {
     setSelected(i);
     paymentAttemptRef.current = null;
     setOpenVersion((v) => v + 1);
@@ -498,7 +527,10 @@ function ServiceWorkshopPage({
         },
       );
       onChanged();
-      setSelected(next);
+      const nextShop = next.serviceDetails?.workshop;
+      if ((nextShop === "main" || nextShop === "body") && nextShop !== shop)
+        onOpen(next, shop);
+      else setSelected(next);
       setDetails(next.serviceDetails ?? draft);
       await Promise.allSettled([
         incidents.refetch({ silent: true }),
@@ -1959,6 +1991,12 @@ function ServiceWorkshopPage({
             </section>
           )}
         </>
+      )}
+      {selected && (
+        <header className="sto-department-heading">
+          <p className="eyebrow">СТО</p>
+          <h2>{workshopLabels[shop]}</h2>
+        </header>
       )}
       {selected && message && (
         <div role="status" className="panel">
