@@ -528,3 +528,49 @@ test("two prices per work add up, only STO expenses enter the invoice and expens
     /стоимость/,
   );
 });
+
+test("manual painting profit is persisted and validated without changing quote or main-shop commission", async () => {
+  const { serviceProfit } = await import("@gopark/contracts");
+  const work = {
+    id: "profit",
+    description: "Paint",
+    category: "painting" as const,
+    serviceAmount: 1000,
+    laborAmount: 0,
+    profitAmount: 170,
+  };
+  const result = serviceWorkflow(
+    {
+      serviceDetails: { reason: "Test", workshop: "body", orderItems: [work] },
+    },
+    previous,
+  );
+  assert.equal(result.serviceDetails!.orderItems![0]!.profitAmount, 170);
+  assert.equal(result.serviceDetails!.serviceCost, 1000);
+  assert.equal(serviceProfit(result.serviceDetails), 170);
+  assert.throws(
+    () =>
+      serviceWorkflow(
+        {
+          serviceDetails: {
+            reason: "Test",
+            workshop: "body",
+            orderItems: [{ ...work, profitAmount: -1 }],
+          },
+        },
+        previous,
+      ),
+    /прибыль/,
+  );
+  const main = serviceWorkflow(
+    {
+      serviceDetails: {
+        reason: "Test",
+        workshop: "main",
+        orderItems: [{ ...work, category: "repair" }],
+      },
+    },
+    previous,
+  );
+  assert.equal(serviceProfit(main.serviceDetails), 300);
+});

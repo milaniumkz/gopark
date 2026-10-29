@@ -13,12 +13,25 @@ import {
   recalculateServiceCosts,
   billableServiceExpenses,
   serviceFeeBase,
+  usesManualServiceProfit,
 } from "@gopark/contracts";
 import { patchJson, postJson } from "../lib/api";
 import { useApiQuery } from "../hooks/useApiQuery";
 import { useAuth } from "../ui/AuthContext";
 import { downloadCsvTable, formatCurrency, formatDateOnly } from "../lib/utils";
-import { workshopFinance, workshopPayments } from "./service-workshop";
+import {
+  workshopFinance,
+  workshopPayments,
+  workOrderAmount,
+  workOrderProfit,
+  serviceCardDates,
+} from "./service-workshop";
+import {
+  clearServiceValidation,
+  updateServiceValidation,
+  validateServiceFields,
+  type ServiceValidationMode,
+} from "./service-validation";
 import "./service-workflow.css";
 const stages = ["sent_to_service", "in_repair", "completed"];
 const labels: Record<string, string> = {
@@ -112,7 +125,11 @@ const stamp = (date?: string) =>
     ? new Date(date).toLocaleString("ru-RU", { timeZone: "Asia/Almaty" })
     : "Дата не указана";
 type WorkshopSide = "main" | "body";
-type RepairOpenRequest = { item: ManagerIncidentItem; shop: WorkshopSide };
+type RepairOpenRequest = {
+  item: ManagerIncidentItem;
+  shop: WorkshopSide;
+  close?: boolean;
+};
 export function ServicePage() {
   const [revision, setRevision] = useState(0);
   const [openRequest, setOpenRequest] = useState<RepairOpenRequest | null>(
@@ -134,6 +151,7 @@ export function ServicePage() {
           revision={revision}
           openRequest={openRequest}
           onOpen={requestOpen}
+          onClose={(item) => setOpenRequest({ item, shop, close: true })}
           onChanged={() => setRevision((v) => v + 1)}
         />
       ))}
@@ -146,12 +164,14 @@ function ServiceWorkshopPage({
   onChanged,
   openRequest,
   onOpen,
+  onClose,
 }: {
   shop: "main" | "body";
   revision: number;
   onChanged: () => void;
   openRequest: RepairOpenRequest | null;
   onOpen: (item: ManagerIncidentItem, origin: WorkshopSide) => void;
+  onClose: (item: ManagerIncidentItem) => void;
 }) {
   const { session } = useAuth();
   const incidents = useApiQuery<ManagerIncidentItem[]>("incidents");
@@ -197,6 +217,24 @@ function ServiceWorkshopPage({
   const [to, setTo] = useState("");
   const [payer, setPayer] = useState("all");
   const detailRef = useRef<HTMLElement>(null);
+  const dispatchRef = useRef<HTMLElement>(null);
+  const [validationMode, setValidationMode] =
+    useState<ServiceValidationMode | null>(null);
+  async function validateScope(mode: ServiceValidationMode) {
+    setValidationMode(mode);
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => resolve()),
+    );
+    const valid = validateServiceFields(
+      mode === "dispatch" ? dispatchRef.current : detailRef.current,
+      mode,
+    );
+    if (!valid)
+      setMessage(
+        "Заполните выделенные поля. Проверьте наименование, стоимость и дату.",
+      );
+    return valid;
+  }
   const [accidentDraft, setAccidentDraft] = useState<AccidentDetails>({
     location: "",
     occurredAt: "",
@@ -210,6 +248,7 @@ function ServiceWorkshopPage({
   const [selected, setSelected] = useState<ManagerIncidentItem | null>(null);
   useEffect(() => {
     if (selected) {
+      clearServiceValidation(detailRef.current);
       detailRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
       detailRef.current?.focus({ preventScroll: true });
     }
@@ -224,6 +263,10 @@ function ServiceWorkshopPage({
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const savingRef = useRef(false);
+  const paymentSubmitRef = useRef(false);
+  const [paymentAction, setPaymentAction] = useState<"partial" | "full" | null>(
+    null,
+  );
   const paymentAttemptRef = useRef<{ key: string; id: string } | null>(null);
   const [showDispatch, setShowDispatch] = useState(false);
   const [dispatchFault, setDispatchFault] = useState<
@@ -411,11 +454,12 @@ function ServiceWorkshopPage({
         (s, i) => ({
           cost: s.cost + laneCost(i),
           paid: s.paid + lanePaid(i),
+          profit: s.profit + laneProfit(i),
           painting: s.painting + (shop === "body" ? lane(i).base : 0),
           repair: s.repair + (shop === "main" ? lane(i).base : 0),
           unallocated: s.unallocated,
         }),
-        { cost: 0, paid: 0, painting: 0, repair: 0, unallocated: 0 },
+        { cost: 0, paid: 0, profit: 0, painting: 0, repair: 0, unallocated: 0 },
       ),
     [periodRecords],
   );
@@ -452,13 +496,18 @@ function ServiceWorkshopPage({
   }
   useEffect(() => {
     if (!openRequest) return;
-    if (openRequest.shop === shop) openHere(openRequest.item);
+    if (openRequest.close)
+      setSelected((current) =>
+        current?.id === openRequest.item.id ? null : current,
+      );
+    else if (openRequest.shop === shop) openHere(openRequest.item);
     else if (openRequest.item.serviceDetails?.workshop !== "both")
       setSelected((current) =>
         current?.id === openRequest.item.id ? null : current,
       );
   }, [openRequest]);
   function openHere(i: ManagerIncidentItem) {
+    setValidationMode(null);
     setSelected(i);
     paymentAttemptRef.current = null;
     setOpenVersion((v) => v + 1);
@@ -480,11 +529,42 @@ function ServiceWorkshopPage({
         i.serviceDetails?.expectedPayer ??
         (i.serviceDetails?.insurance?.paid ? "insurance" : "company"),
     });
-    setDetails({ ...i.serviceDetails, reason: repairReason(i, "") });
+    const restored = { ...i.serviceDetails, reason: repairReason(i, "") };
+    if (restored.orderItems)
+      restored.orderItems = restored.orderItems.map((work) =>
+        usesManualServiceProfit(restored, work)
+          ? {
+              ...work,
+              profitAmount:
+                work.profitAmount ?? workOrderProfit(work, restored.workshop),
+            }
+          : work,
+      );
+    setDetails(restored);
     setMessage("");
   }
   async function save(stage?: string, draft = details, includeAccident = true) {
     if (!selected || busy || savingRef.current) return false;
+    const workflowChanged =
+      !!stage ||
+      (draft.arrivalConfirmed === true && !selected.serviceDetails?.arrivedAt);
+    if (
+      stage === "completed" &&
+      !details.orderItems?.length &&
+      !details.works?.some((w) => w.trim())
+    )
+      addOrderItem();
+    if (
+      !(await validateScope(
+        stage === "completed"
+          ? "complete"
+          : draft.arrivalConfirmed && !selected.serviceDetails?.arrivedAt
+            ? "arrival"
+            : "save",
+      ))
+    )
+      return false;
+    if (savingRef.current) return false;
     if (
       draft.orderItems?.some(incompletePrice) ||
       draft.expenses?.some(
@@ -528,7 +608,11 @@ function ServiceWorkshopPage({
       );
       onChanged();
       const nextShop = next.serviceDetails?.workshop;
-      if ((nextShop === "main" || nextShop === "body") && nextShop !== shop)
+      if (workflowChanged) onClose(next);
+      else if (
+        (nextShop === "main" || nextShop === "body") &&
+        nextShop !== shop
+      )
         onOpen(next, shop);
       else setSelected(next);
       setDetails(next.serviceDetails ?? draft);
@@ -541,7 +625,9 @@ function ServiceWorkshopPage({
       setMessage(
         stage === "completed"
           ? "Ремонт завершён. Бригадир получит уведомление."
-          : "Данные сохранены. Бригадир получит уведомление.",
+          : workflowChanged
+            ? "Статус обновлён. Бригадир получит уведомление."
+            : "Данные сохранены. Бригадир получит уведомление.",
       );
       return true;
     } catch (e) {
@@ -555,7 +641,9 @@ function ServiceWorkshopPage({
     }
   }
   async function send() {
-    if ((!sendCar && !manualEntry) || !reason.trim() || busy) return;
+    if (busy || savingRef.current) return;
+    if (!(await validateScope("dispatch"))) return;
+    if (savingRef.current) return;
     if (!workshop) {
       setMessage("Выберите цех");
       return;
@@ -581,6 +669,7 @@ function ServiceWorkshopPage({
               ? { insurance: { insurer: dispatchInsurer, paid: false } }
               : {}),
           };
+    savingRef.current = true;
     setBusy(true);
     setMessage("");
     try {
@@ -681,6 +770,7 @@ function ServiceWorkshopPage({
         e instanceof Error ? e.message : "Не удалось отправить машину",
       );
     } finally {
+      savingRef.current = false;
       setBusy(false);
     }
   }
@@ -792,9 +882,23 @@ function ServiceWorkshopPage({
     w: NonNullable<ServiceRepairDetails["orderItems"]>[number],
   ) =>
     !w.description.trim() ||
+    (usesManualServiceProfit(details, w) && w.profitAmount === undefined) ||
     (w.serviceAmount !== undefined || w.laborAmount !== undefined
       ? w.serviceAmount === undefined || w.laborAmount === undefined
       : w.amount === undefined);
+  async function submitPayment(action: "partial" | "full") {
+    if (busy || savingRef.current || paymentSubmitRef.current) return;
+    paymentSubmitRef.current = true;
+    setPaymentAction(action);
+    try {
+      if (!(await validateScope(action))) return;
+      if (action === "full") await confirmFullPayment();
+      else await addPayment();
+    } finally {
+      paymentSubmitRef.current = false;
+      setPaymentAction(null);
+    }
+  }
   async function confirmFullPayment() {
     if (!selected || busy || savingRef.current) return;
     const remaining =
@@ -1039,7 +1143,7 @@ function ServiceWorkshopPage({
           ["Период с", from || "Все даты"],
           ["Период по", to || "Все даты"],
           [
-            "Прибыль малярных работ 30%",
+            "Прибыль малярных работ",
             rows.reduce(
               (sum, i) => sum + (shop === "body" ? laneProfit(i) : 0),
               0,
@@ -1076,7 +1180,7 @@ function ServiceWorkshopPage({
               0,
             ),
           ],
-          ["Прибыль СТО 30%", rows.reduce((sum, i) => sum + laneProfit(i), 0)],
+          ["Прибыль СТО", rows.reduce((sum, i) => sum + laneProfit(i), 0)],
           [
             "Пояснение",
             "Ремонты отобраны по дате стоимости; поступления — по дате оплаты. Пустая стоимость не равна нулевому обязательству.",
@@ -1092,13 +1196,11 @@ function ServiceWorkshopPage({
           "Работа",
           "Направление",
           "Стоимость услуги",
-          "Стоимость работы",
-          "Итого",
-          "Прибыль 30%",
+          "Прибыль СТО",
         ],
       ];
       for (const i of rows) {
-        const shop = i.serviceDetails?.workshop
+        const shopLabel = i.serviceDetails?.workshop
           ? workshopLabels[i.serviceDetails.workshop]
           : "Не указан";
         if (i.serviceDetails?.orderItems)
@@ -1110,24 +1212,20 @@ function ServiceWorkshopPage({
             workRows.push([
               i.serviceDetails.orderNumber ?? "",
               vehicleLabel(i),
-              shop,
+              shopLabel,
               w.description,
               w.category === "painting" ? "Малярные работы" : "Ремонт",
-              w.serviceAmount ?? "",
-              w.laborAmount ?? "",
-              w.amount ?? "",
-              w.amount == null ? "" : w.amount * 0.3,
+              workOrderAmount(w) ?? "",
+              workOrderProfit(w, i.serviceDetails?.workshop) ?? "",
             ]);
         else
           for (const w of i.serviceDetails?.works ?? [])
             workRows.push([
               i.serviceDetails?.orderNumber ?? "",
               vehicleLabel(i),
-              shop,
+              shopLabel,
               w,
               "Направление не указано",
-              "",
-              "",
               "",
               "",
             ]);
@@ -1279,6 +1377,48 @@ function ServiceWorkshopPage({
         <strong>Причина: </strong>
         {repairReason(i)}
       </div>
+      {!!serviceCardDates(i).length && (
+        <dl className="sto-card-dates" aria-label="Даты статусов">
+          {serviceCardDates(i).map((entry, index) => (
+            <div key={`${entry.label}-${entry.at}-${index}`}>
+              <dt>{entry.label}</dt>
+              <dd>
+                <time dateTime={entry.at}>
+                  {entry.dateOnly ? formatDateOnly(entry.at) : stamp(entry.at)}
+                </time>
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {(closed(i) || i.serviceStage === "completed") && (
+        <dl className="sto-card-finance" aria-label="Итоги ремонта">
+          <div>
+            <dt>Общая стоимость ремонта</dt>
+            <dd>
+              {i.serviceDetails?.serviceCost === undefined
+                ? "Не указана"
+                : formatCurrency(i.serviceDetails.serviceCost)}
+            </dd>
+          </div>
+          <div>
+            <dt>Прибыль СТО · {workshopLabels[shop]}</dt>
+            <dd>
+              {lane(i).known ? formatCurrency(laneProfit(i)) : "Не указана"}
+            </dd>
+          </div>
+          {i.serviceDetails?.workshop === "both" && (
+            <div>
+              <dt>Стоимость по цеху</dt>
+              <dd>
+                {lane(i).known
+                  ? formatCurrency(laneCost(i))
+                  : "Не распределена"}
+              </dd>
+            </div>
+          )}
+        </dl>
+      )}
       {waitingLate(i) && (
         <span className="sto-late">
           {i.serviceDetails?.repairStartedAt
@@ -1296,6 +1436,7 @@ function ServiceWorkshopPage({
     <section
       className={`page-stack service-page sto-department sto-department--${shop}`}
       aria-label={workshopLabels[shop]}
+      onInputCapture={(e) => updateServiceValidation(e.target)}
     >
       {photoPreview && (
         <button
@@ -1418,16 +1559,14 @@ function ServiceWorkshopPage({
                   ),
                 ),
               ],
-              [
-                "Прибыль СТО · 30%",
-                formatCurrency(sums.painting * 0.3 + sums.repair * 0.3),
-              ],
+              ["Прибыль СТО", formatCurrency(sums.profit)],
             ].map(([label, value]) => renderMetric(label, value, "finance"))}
           </div>
           <p className="muted sto-allocation-note">
             Для машины в двух цехах услуги и работы учитываются по направлениям.
             Общие оплаты и расходы распределяются пропорционально их стоимости.
-            Прибыль — 30% услуг и работ, без расходов.
+            Прибыль основного цеха — 30%, малярного — по заказ-наряду. Расходы в
+            прибыль не входят.
           </p>
           {periodRecords.some((i) => !lane(i).known) && (
             <p className="sto-late">
@@ -1663,10 +1802,7 @@ function ServiceWorkshopPage({
               . Исторические расходы не включаются в прибыль без стоимости
               услуг.
               <br />
-              Прибыль начисленная (30% от услуг и работ):{" "}
-              {formatCurrency(
-                (sums.painting + sums.repair + sums.unallocated) * 0.3,
-              )}
+              Прибыль цеха: {formatCurrency(sums.profit)}
               . Расходы в прибыль не включаются.
               <br />
               Период:{" "}
@@ -1787,6 +1923,7 @@ function ServiceWorkshopPage({
           )}
           {canSend && showDispatch && (
             <section
+              ref={dispatchRef}
               className="entity-modal sto-dispatch"
               role="dialog"
               aria-modal="true"
@@ -1806,6 +1943,7 @@ function ServiceWorkshopPage({
                 <label>
                   Куда направить *
                   <select
+                    required
                     aria-label="Куда направить"
                     value={workshop}
                     onChange={(e) =>
@@ -1854,6 +1992,7 @@ function ServiceWorkshopPage({
                     <label>
                       Виновность при ДТП *
                       <select
+                        required
                         aria-label="Виновность при ДТП"
                         value={dispatchFault}
                         onChange={(e) =>
@@ -1873,6 +2012,7 @@ function ServiceWorkshopPage({
                     <label>
                       Кто оплачивает ДТП *
                       <select
+                        required
                         aria-label="Кто оплачивает ДТП"
                         value={dispatchPayer}
                         onChange={(e) =>
@@ -1893,6 +2033,7 @@ function ServiceWorkshopPage({
                       <label>
                         Страховая компания *
                         <select
+                          required
                           aria-label="Страховая ДТП"
                           value={dispatchInsurer}
                           onChange={(e) =>
@@ -1922,6 +2063,7 @@ function ServiceWorkshopPage({
                     <label>
                       Автомобиль
                       <select
+                        required
                         value={sendCar}
                         onChange={(e) => setSendCar(e.target.value)}
                       >
@@ -1950,6 +2092,7 @@ function ServiceWorkshopPage({
                         <label key={label}>
                           {label} *
                           <input
+                            required
                             value={value}
                             onChange={(e) => setValue(e.target.value)}
                           />
@@ -1960,6 +2103,7 @@ function ServiceWorkshopPage({
                   <label className="sto-wide">
                     Причина *
                     <textarea
+                      required
                       value={reason}
                       onChange={(e) => setReason(e.target.value)}
                       placeholder="Что произошло и что требуется проверить"
@@ -1972,16 +2116,7 @@ function ServiceWorkshopPage({
                 </p>
                 <button
                   className="button"
-                  disabled={
-                    busy ||
-                    !workshop ||
-                    (!manualEntry && !sendCar) ||
-                    !reason.trim() ||
-                    (manualEntry &&
-                      ![manualPlate, manualMake, manualModel].every((v) =>
-                        v.trim(),
-                      ))
-                  }
+                  disabled={busy}
                   onClick={() => void send()}
                 >
                   {busy ? "Сохранение…" : "Сохранить и уведомить"}
@@ -2280,6 +2415,7 @@ function ServiceWorkshopPage({
                 <label>
                   Комментарий приёмки *
                   <textarea
+                    required={validationMode === "arrival"}
                     value={details.waitingComment ?? ""}
                     onChange={(e) =>
                       setDetails({ ...details, waitingComment: e.target.value })
@@ -2296,6 +2432,7 @@ function ServiceWorkshopPage({
                       (selected.serviceStage !== "sent_to_service" ||
                         !!selected.serviceDetails?.arrivedAt)
                     }
+                    required={validationMode === "arrival"}
                     value={details.plannedRepairDate ?? ""}
                     onChange={(e) =>
                       setDetails({
@@ -2394,6 +2531,12 @@ function ServiceWorkshopPage({
                       : "Фото после ремонта · при завершении *"}
                     <input
                       type="file"
+                      required={
+                        !details[key] &&
+                        (validationMode === "complete" ||
+                          (validationMode === "arrival" &&
+                            key === "beforePhoto"))
+                      }
                       accept="image/jpeg,image/png,image/webp"
                       onChange={(e) => void loadPhoto(e.target.files?.[0], key)}
                     />
@@ -2424,6 +2567,7 @@ function ServiceWorkshopPage({
               <label className="sto-wide">
                 Причина *
                 <textarea
+                  required
                   value={details.reason}
                   onChange={(e) =>
                     setDetails({ ...details, reason: e.target.value })
@@ -2449,6 +2593,7 @@ function ServiceWorkshopPage({
                     <label>
                       Наименование {index + 1} *
                       <input
+                        required
                         value={work.description}
                         onChange={(e) =>
                           setOrderItems(
@@ -2490,7 +2635,8 @@ function ServiceWorkshopPage({
                         type="number"
                         min="0"
                         step="0.01"
-                        value={work.serviceAmount ?? ""}
+                        required
+                        value={workOrderAmount(work) ?? ""}
                         onChange={(e) =>
                           setOrderItems(
                             details.orderItems!.map((w) =>
@@ -2501,6 +2647,9 @@ function ServiceWorkshopPage({
                                       e.target.value === ""
                                         ? undefined
                                         : Number(e.target.value),
+                                    laborAmount:
+                                      e.target.value === "" ? undefined : 0,
+                                    amount: undefined,
                                   }
                                 : w,
                             ),
@@ -2509,19 +2658,27 @@ function ServiceWorkshopPage({
                       />
                     </label>
                     <label>
-                      Стоимость работы, сом *
+                      {usesManualServiceProfit(details, work)
+                        ? "Прибыль СТО, сом *"
+                        : "Прибыль СТО — 30%, сом"}
                       <input
                         type="number"
                         min="0"
                         step="0.01"
-                        value={work.laborAmount ?? ""}
+                        required={usesManualServiceProfit(details, work)}
+                        readOnly={!usesManualServiceProfit(details, work)}
+                        value={
+                          usesManualServiceProfit(details, work)
+                            ? (work.profitAmount ?? "")
+                            : (workOrderProfit(work, details.workshop) ?? "")
+                        }
                         onChange={(e) =>
                           setOrderItems(
                             details.orderItems!.map((w) =>
                               w.id === work.id
                                 ? {
                                     ...w,
-                                    laborAmount:
+                                    profitAmount:
                                       e.target.value === ""
                                         ? undefined
                                         : Number(e.target.value),
@@ -2532,14 +2689,6 @@ function ServiceWorkshopPage({
                         }
                       />
                     </label>
-                    {work.serviceAmount === undefined &&
-                      work.laborAmount === undefined &&
-                      work.amount !== undefined && (
-                        <small>
-                          Ранее сохранённая сумма: {formatCurrency(work.amount)}
-                          . Разбивка не указана.
-                        </small>
-                      )}
                     <button
                       type="button"
                       className="button button--secondary"
@@ -2567,6 +2716,11 @@ function ServiceWorkshopPage({
                     и оплатой.
                   </p>
                 )}
+                <p className="muted">
+                  В основном цехе прибыль рассчитывается автоматически (30%). В
+                  малярном цехе прибыль вводится вручную. Прибыль не
+                  прибавляется к стоимости услуги.
+                </p>
                 <p>
                   <strong>
                     Общая сумма заказ-наряда:{" "}
@@ -2585,6 +2739,7 @@ function ServiceWorkshopPage({
                       Наименование расхода {index + 1} *
                       <input
                         disabled={expense.inventoryApplied}
+                        required
                         value={expense.description}
                         onChange={(e) =>
                           setExpenses(
@@ -2604,6 +2759,7 @@ function ServiceWorkshopPage({
                         type="number"
                         min="0"
                         step="0.01"
+                        required
                         value={expense.amount ?? ""}
                         onChange={(e) =>
                           setExpenses(
@@ -2690,6 +2846,7 @@ function ServiceWorkshopPage({
                             Запчасть со склада
                             <select
                               disabled={expense.inventoryApplied}
+                              required
                               value={expense.partId ?? ""}
                               onChange={(e) => {
                                 const part = parts.data?.parts.find(
@@ -2856,6 +3013,9 @@ function ServiceWorkshopPage({
                   type="number"
                   min="0"
                   step="0.01"
+                  required={
+                    validationMode === "full" || validationMode === "partial"
+                  }
                   value={details.serviceCost ?? ""}
                   readOnly={
                     details.paintingCost !== undefined ||
@@ -2878,6 +3038,7 @@ function ServiceWorkshopPage({
                 Дата стоимости услуг
                 <input
                   type="date"
+                  required={details.serviceCost !== undefined}
                   value={details.costDate ?? ""}
                   onChange={(e) =>
                     setDetails({ ...details, costDate: e.target.value })
@@ -2927,6 +3088,11 @@ function ServiceWorkshopPage({
                 <label>
                   Страховая компания
                   <select
+                    required={
+                      payment.payer === "insurance" &&
+                      (validationMode === "full" ||
+                        validationMode === "partial")
+                    }
                     value={details.insurance?.insurer ?? ""}
                     onChange={(e) =>
                       setDetails({
@@ -2992,6 +3158,8 @@ function ServiceWorkshopPage({
                   type="number"
                   min="0.01"
                   step="0.01"
+                  data-validation-for="partial"
+                  required={validationMode === "partial"}
                   value={payment.amount}
                   onChange={(e) =>
                     setPayment({ ...payment, amount: e.target.value })
@@ -3002,6 +3170,11 @@ function ServiceWorkshopPage({
                 Дата оплаты
                 <input
                   type="date"
+                  data-validation-for="partial full"
+                  max={today()}
+                  required={
+                    validationMode === "partial" || validationMode === "full"
+                  }
                   value={payment.paidAt}
                   onChange={(e) =>
                     setPayment({ ...payment, paidAt: e.target.value })
@@ -3011,34 +3184,46 @@ function ServiceWorkshopPage({
               <button
                 type="button"
                 className="button button--secondary"
-                disabled={busy || incompleteOrder}
-                onClick={() => void addPayment()}
+                disabled={busy || paymentAction !== null}
+                onClick={() => void submitPayment("partial")}
               >
-                Добавить оплату
+                {paymentAction === "partial"
+                  ? "Сохранение оплаты…"
+                  : "Добавить оплату"}
               </button>
             </div>
             <label className="sto-checkbox">
               <input
                 type="checkbox"
                 checked={
-                  !incompleteOrder &&
-                  details.serviceCost !== undefined &&
-                  paid({ ...selected, serviceDetails: details }) >=
-                    details.serviceCost
+                  paymentAction === "full" ||
+                  (!incompleteOrder &&
+                    details.serviceCost !== undefined &&
+                    paid({ ...selected, serviceDetails: details }) >=
+                      details.serviceCost)
                 }
                 disabled={
                   busy ||
-                  incompleteOrder ||
-                  details.serviceCost === undefined ||
-                  paid({ ...selected, serviceDetails: details }) >=
-                    (details.serviceCost ?? Infinity)
+                  paymentAction !== null ||
+                  (!incompleteOrder &&
+                    paid({ ...selected, serviceDetails: details }) >=
+                      (details.serviceCost ?? Infinity))
                 }
                 onChange={(e) => {
-                  if (e.target.checked) void confirmFullPayment();
+                  if (e.target.checked) void submitPayment("full");
                 }}
               />
               Оплата произведена полностью
             </label>
+            {(paymentAction || message) && (
+              <p
+                className="sto-payment-feedback"
+                role="status"
+                aria-live="polite"
+              >
+                {paymentAction ? "Сохраняем оплату…" : message}
+              </p>
+            )}
             <p className="muted">
               Галочка сохраняет платёж на весь остаток стоимости с выбранным
               плательщиком и датой. Частичную сумму укажите в поле «Сумма» и
@@ -3061,20 +3246,7 @@ function ServiceWorkshopPage({
               {!closed(selected) && (
                 <button
                   className="button"
-                  disabled={
-                    busy ||
-                    (selected.serviceStage === "sent_to_service" &&
-                      (!details.waitingComment?.trim() ||
-                        !details.plannedRepairDate)) ||
-                    (selected.incidentType === "accident" &&
-                      ((selected.serviceStage === "sent_to_service" &&
-                        !details.beforePhoto) ||
-                        (selected.serviceStage === "in_repair" &&
-                          (!details.beforePhoto || !details.afterPhoto)))) ||
-                    (selected.serviceStage === "in_repair" &&
-                      (!details.orderNumber?.trim() ||
-                        !details.works?.some((w) => w.trim())))
-                  }
+                  disabled={busy}
                   onClick={() =>
                     selected.serviceStage === "sent_to_service" &&
                     !selected.serviceDetails?.arrivedAt

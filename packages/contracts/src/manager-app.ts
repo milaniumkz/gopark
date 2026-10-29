@@ -231,6 +231,7 @@ export interface ServiceRepairDetails {
     amount?: number;
     serviceAmount?: number;
     laborAmount?: number;
+    profitAmount?: number;
   }[];
   expenses?: {
     id: string;

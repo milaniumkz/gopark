@@ -2,6 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { ServiceRepairDetails } from "@gopark/contracts";
 import {
+  serviceCardDates,
+  workOrderAmount,
+  workOrderProfit,
   workshopFinance,
   workshopPayment,
   workshopPayments,
@@ -125,4 +128,126 @@ test("small partial receipts settle both workshop balances exactly after roundin
       totals.paid,
     );
   }
+});
+
+test("service price produces 30% profit without adding that profit to the invoice", () => {
+  const row = {
+    id: "r",
+    description: "Service",
+    category: "repair" as const,
+    serviceAmount: 1000,
+    laborAmount: 0,
+  };
+  assert.equal(workOrderAmount(row), 1000);
+  assert.equal(workOrderProfit(row), 300);
+  assert.equal(workOrderAmount({ ...row, serviceAmount: 0 }), 0);
+  assert.equal(workOrderProfit({ ...row, serviceAmount: 0 }), 0);
+  assert.equal(
+    workOrderProfit({
+      ...row,
+      serviceAmount: undefined,
+      laborAmount: undefined,
+    }),
+    undefined,
+  );
+  assert.equal(workOrderProfit({ ...row, serviceAmount: 100.01 }), 30);
+});
+test("historic work components retain their combined price and profit", () => {
+  const row = {
+    id: "r",
+    description: "Historic",
+    category: "painting" as const,
+    serviceAmount: 700,
+    laborAmount: 300,
+  };
+  assert.equal(workOrderAmount(row), 1000);
+  assert.equal(workOrderProfit(row), 300);
+  assert.equal(
+    workOrderAmount({
+      ...row,
+      serviceAmount: undefined,
+      laborAmount: undefined,
+      amount: 1250,
+    }),
+    1250,
+  );
+});
+
+test("collapsed cards show known stage dates and history without inventing missing dates", () => {
+  const item = {
+    id: "i",
+    title: "Test",
+    incidentType: "repair",
+    status: "archived",
+    priority: "high",
+    serviceDetails: {
+      reason: "Test",
+      sentAt: "2026-10-01T08:00:00Z",
+      repairStartedAt: "2026-10-02T08:00:00Z",
+      plannedRepairDate: "2026-10-02",
+    },
+    statusHistory: [
+      {
+        serviceStage: "in_repair",
+        status: "open",
+        changedAt: "2026-10-02T08:00:01Z",
+      },
+      {
+        serviceStage: "completed",
+        status: "archived",
+        changedAt: "2026-10-03T08:00:00Z",
+      },
+    ],
+  };
+  const dates = serviceCardDates(item);
+  assert.deepEqual(
+    dates.map((x) => x.label),
+    ["Отправлен на СТО", "Начало ремонта", "Архив", "План начала"],
+  );
+  assert.ok(dates.every((x) => x.at));
+  assert.equal(
+    serviceCardDates({ ...item, serviceDetails: undefined, statusHistory: [] })
+      .length,
+    0,
+  );
+});
+
+test("painting profit is entered manually, main profit remains automatic and neither changes the bill", () => {
+  const work = {
+    id: "p",
+    description: "Paint",
+    category: "painting" as const,
+    serviceAmount: 1000,
+    laborAmount: 0,
+    profitAmount: 170,
+  };
+  assert.equal(workOrderProfit(work, "body"), 170);
+  assert.equal(workOrderProfit(work, "main"), 300);
+  assert.equal(
+    workshopFinance(
+      {
+        reason: "Test",
+        workshop: "body",
+        serviceCost: 1000,
+        orderItems: [work],
+      },
+      "body",
+    ).profit,
+    170,
+  );
+  const shared = {
+    reason: "Test",
+    workshop: "both" as const,
+    serviceCost: 2000,
+    orderItems: [
+      work,
+      { ...work, id: "r", category: "repair" as const, profitAmount: 900 },
+    ],
+  };
+  assert.equal(workshopFinance(shared, "body").profit, 170);
+  assert.equal(workshopFinance(shared, "main").profit, 300);
+  assert.equal(
+    workshopFinance(shared, "body").cost + workshopFinance(shared, "main").cost,
+    2000,
+  );
 });

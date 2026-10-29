@@ -98,6 +98,16 @@ export function serviceWorkflow(
       )
         fail("Для каждой работы укажите название и направление");
       ids.add(work.id);
+      if (
+        work.profitAmount !== undefined &&
+        (typeof work.profitAmount !== "number" ||
+          !Number.isFinite(work.profitAmount) ||
+          work.profitAmount < 0 ||
+          Math.abs(
+            work.profitAmount * 100 - Math.round(work.profitAmount * 100),
+          ) > 1e-6)
+      )
+        fail("Укажите корректную прибыль СТО");
       const prices =
         work.serviceAmount !== undefined || work.laborAmount !== undefined
           ? [work.serviceAmount, work.laborAmount]

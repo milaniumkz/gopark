@@ -1,7 +1,30 @@
-import type { ServiceRepairDetails } from "@gopark/contracts";
-import { billableServiceExpenses, serviceFeeBase } from "@gopark/contracts";
+import type {
+  ManagerIncidentItem,
+  ServiceRepairDetails,
+} from "@gopark/contracts";
+import {
+  billableServiceExpenses,
+  serviceFeeBase,
+  serviceProfit,
+  serviceWorkProfit,
+} from "@gopark/contracts";
 type Shop = "main" | "body";
 const money = (amount: number) => Math.round(amount * 100) / 100;
+type WorkRow = NonNullable<ServiceRepairDetails["orderItems"]>[number];
+export function workOrderAmount(work: WorkRow): number | undefined {
+  return work.serviceAmount !== undefined || work.laborAmount !== undefined
+    ? money((work.serviceAmount ?? 0) + (work.laborAmount ?? 0))
+    : work.amount;
+}
+export function workOrderProfit(
+  work: WorkRow,
+  workshop?: ServiceRepairDetails["workshop"],
+): number | undefined {
+  const amount = workOrderAmount(work);
+  return amount === undefined
+    ? undefined
+    : serviceWorkProfit({ reason: "", workshop }, work);
+}
 function baseSplit(d: ServiceRepairDetails) {
   if (d.orderItems !== undefined) {
     const base = (category: "painting" | "repair") =>
@@ -56,7 +79,7 @@ export function workshopFinance(
       base,
       cost: d.serviceCost ?? 0,
       paid: money(payments),
-      profit: money(base * 0.3),
+      profit: serviceProfit(d),
       known: d.serviceCost !== undefined,
     };
   }
@@ -70,7 +93,16 @@ export function workshopFinance(
       ? money(base + workshopPayment(d, shop, billableServiceExpenses(d)))
       : 0,
     paid: money(payments),
-    profit: money(base * 0.3),
+    profit: d.orderItems?.length
+      ? money(
+          d.orderItems
+            .filter(
+              (work) =>
+                work.category === (shop === "body" ? "painting" : "repair"),
+            )
+            .reduce((sum, work) => sum + serviceWorkProfit(d, work), 0),
+        )
+      : money(base * 0.3),
     known,
   };
 }
@@ -89,4 +121,64 @@ export function workshopPayments(
     allocated = total;
     return { ...payment, amount };
   });
+}
+
+export function serviceCardDates(item: ManagerIncidentItem) {
+  const result: Array<{ label: string; at: string; dateOnly?: boolean }> = [];
+  const d = item.serviceDetails;
+  const phases = [
+    ["sent_to_service", "Отправлен на СТО", d?.sentAt],
+    ["awaiting_repair", "Прибыл на СТО", d?.arrivedAt],
+    ["in_repair", "Начало ремонта", d?.repairStartedAt],
+    ["completed", "Завершён", d?.completedAt],
+  ] as const;
+  const known = new Set<string>();
+  const add = (label: string, at: string | undefined, dateOnly = false) => {
+    if (at && Number.isFinite(Date.parse(at)))
+      result.push({ label, at, dateOnly });
+  };
+  for (const [phase, label, at] of phases)
+    if (at && Number.isFinite(Date.parse(at))) {
+      add(label, at);
+      known.add(phase);
+    }
+  const names: Record<string, string> = {
+    sent_to_service: "Отправлен на СТО",
+    awaiting_repair: "Прибыл на СТО",
+    in_repair: "Начало ремонта",
+    completed: "Завершён",
+    written_off: "Списан",
+    writeoff_requested: "Запрошено списание",
+    open: "Открыт",
+    closed: "Закрыт",
+    resolved: "Завершён",
+    archived: "Архив",
+  };
+  for (const entry of item.statusHistory ?? []) {
+    if (
+      !["archived", "closed", "resolved"].includes(entry.status) &&
+      entry.serviceStage &&
+      known.has(entry.serviceStage)
+    )
+      continue;
+    const key = ["archived", "closed", "resolved"].includes(entry.status)
+      ? entry.status
+      : (entry.serviceStage ?? entry.status);
+    const label = names[key] ?? key;
+    if (
+      !result.some(
+        (r) =>
+          r.label === label && Date.parse(r.at) === Date.parse(entry.changedAt),
+      )
+    )
+      add(label, entry.changedAt);
+  }
+  result.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  if (item.incidentType === "accident")
+    add(
+      "ДТП",
+      item.accidentDetails?.occurredAt ?? item.occurredAt ?? undefined,
+    );
+  add("План начала", d?.plannedRepairDate, true);
+  return result;
 }

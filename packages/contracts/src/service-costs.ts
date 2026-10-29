@@ -68,8 +68,34 @@ export function serviceFeeBase(
         : Math.max(0, (d.serviceCost ?? 0) - billableServiceExpenses(d))),
   );
 }
+type WorkRow = NonNullable<ServiceRepairDetails["orderItems"]>[number];
+export function usesManualServiceProfit(
+  d: ServiceRepairDetails | null | undefined,
+  work: WorkRow,
+): boolean {
+  return (
+    d?.workshop === "body" ||
+    (d?.workshop === "both" && work.category === "painting")
+  );
+}
+export function serviceWorkProfit(
+  d: ServiceRepairDetails | null | undefined,
+  work: WorkRow,
+): number {
+  if (usesManualServiceProfit(d, work) && work.profitAmount !== undefined)
+    return money(work.profitAmount);
+  const amount =
+    work.serviceAmount !== undefined || work.laborAmount !== undefined
+      ? (work.serviceAmount ?? 0) + (work.laborAmount ?? 0)
+      : (work.amount ?? 0);
+  return money(amount * 0.3);
+}
 export function serviceProfit(
   d: ServiceRepairDetails | undefined | null,
 ): number {
-  return money(serviceFeeBase(d) * 0.3);
+  return d?.orderItems?.length
+    ? money(
+        d.orderItems.reduce((sum, work) => sum + serviceWorkProfit(d, work), 0),
+      )
+    : money(serviceFeeBase(d) * 0.3);
 }
