@@ -63,6 +63,11 @@ export function validateServiceFields(
     if (!valid) first ??= field;
   }
   if (first) {
+    let parent = first.parentElement;
+    while (parent) {
+      if (parent instanceof HTMLDetailsElement) parent.open = true;
+      parent = parent.parentElement;
+    }
     first.scrollIntoView({ block: "center", behavior: "smooth" });
     first.focus({ preventScroll: true });
     first.reportValidity();

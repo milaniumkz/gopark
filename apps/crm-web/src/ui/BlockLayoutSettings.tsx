@@ -294,6 +294,7 @@ export function BlockLayoutSettings({ contentRef, routeKey, routeLabel }: BlockL
       <button
         className={`topbar__button topbar__button--ghost${isOpen ? " topbar__button--active" : ""}`}
         type="button"
+        aria-label="Настроить блоки" title="Настроить блоки"
         onClick={() => setIsOpen((current) => !current)}
       >
         <span>Настроить блоки</span>
