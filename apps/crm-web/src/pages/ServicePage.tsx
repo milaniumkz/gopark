@@ -1,3 +1,4 @@
+import { DateRangePicker } from "../ui/DateRangePicker";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type {
@@ -1382,6 +1383,16 @@ function ServiceWorkshopPage({
         className={`sto-card sto-record${closed(i) ? " sto-record--closed" : ""}`}
         key={i.id}
         role="rowgroup"
+        onClick={(event) => {
+          if (
+            (event.target as Element).closest(
+              "button, a, input, select, textarea, summary",
+            )
+          )
+            return;
+          if (window.getSelection()?.toString()) return;
+          open(i);
+        }}
       >
         <div className="sto-record-summary" role="row">
           <div className="sto-record-vehicle" role="cell">
@@ -1638,24 +1649,14 @@ function ServiceWorkshopPage({
             </p>
           )}
           <div className="sto-period">
-            <div className="sto-period-dates">
-              <label>
-                С
-                <input
-                  type="date"
-                  value={from}
-                  onChange={(e) => setFrom(e.target.value)}
-                />
-              </label>
-              <label>
-                По
-                <input
-                  type="date"
-                  value={to}
-                  onChange={(e) => setTo(e.target.value)}
-                />
-              </label>
-            </div>
+            <DateRangePicker
+              from={from}
+              to={to}
+              onChange={(from, to) => {
+                setFrom(from);
+                setTo(to);
+              }}
+            />
             <span className={`sto-profit-mode sto-profit-mode--${shop}`}>
               {shop === "main" ? "30% · автоматически" : "Прибыль · вручную"}
             </span>

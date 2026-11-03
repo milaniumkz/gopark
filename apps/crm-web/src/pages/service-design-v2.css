@@ -1188,3 +1188,14 @@
   margin: 8px 0;
   overflow-wrap: anywhere;
 }
+
+.sto-theme-v2 .sto-card.sto-record {
+  cursor: pointer;
+}
+.sto-theme-v2 .sto-card.sto-record:hover {
+  background: #f0f5fd;
+}
+.sto-theme-v2 .sto-card.sto-record:focus-within {
+  outline: 2px solid #2869e7;
+  outline-offset: -2px;
+}

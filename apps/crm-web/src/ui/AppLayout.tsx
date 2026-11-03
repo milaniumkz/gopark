@@ -66,7 +66,7 @@ const roleLabels: Record<string, string> = {
 
 export function AppLayout() {
   const location = useLocation();
-  const isStoPage = location.pathname.replace(/\/+$/, "") === "/service";
+  const isCompactWorkspace = ["/service", "/parts"].includes(location.pathname.replace(/\/+$/, ""));
   const [stoMobileMenuOpen, setStoMobileMenuOpen] = useState(false);
   useEffect(() => setStoMobileMenuOpen(false), [location.pathname]);
   useEffect(() => {
@@ -104,7 +104,7 @@ export function AppLayout() {
 
   return (
     <div
-      className={`shell shell--immersive${isStoPage ? ` shell--sto${stoMobileMenuOpen ? " shell--sto-menu-open" : ""}` : ""}${isSidebarOpen ? "" : " shell--sidebar-collapsed"}`}
+      className={`shell shell--immersive${isCompactWorkspace ? ` shell--sto${stoMobileMenuOpen ? " shell--sto-menu-open" : ""}` : ""}${isSidebarOpen ? "" : " shell--sidebar-collapsed"}`}
     >
       <aside className="sidebar" id="crm-navigation-sidebar">
         <div className="sidebar__body">
@@ -226,7 +226,7 @@ export function AppLayout() {
           </button>
         </div>
       </aside>
-      {isStoPage && stoMobileMenuOpen && (
+      {isCompactWorkspace && stoMobileMenuOpen && (
         <button
           className="sto-menu-backdrop"
           aria-label="Закрыть меню"
@@ -234,7 +234,7 @@ export function AppLayout() {
         />
       )}
       <div className="content">
-        {isStoPage && (
+        {isCompactWorkspace && (
           <button
             className="sto-mobile-menu-button"
             type="button"

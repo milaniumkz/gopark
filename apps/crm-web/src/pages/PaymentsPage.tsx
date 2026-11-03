@@ -1,3 +1,4 @@
+import { DateRangePicker } from "../ui/DateRangePicker";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { hasCrmAccess, hasCrmCapability } from "../lib/crm-access";
@@ -331,8 +332,7 @@ export function PaymentsPage() {
               <option value="succeeded">Проведён</option>
               <option value="failed">Ошибка</option>
             </select>
-            <input type="date" value={paymentDateFrom} onChange={(event) => setPaymentDateFrom(event.target.value)} />
-            <input type="date" value={paymentDateTo} onChange={(event) => setPaymentDateTo(event.target.value)} />
+            <DateRangePicker from={paymentDateFrom} to={paymentDateTo} onChange={(from, to) => { setPaymentDateFrom(from); setPaymentDateTo(to); }} />
             {creditOnly ? (
               <button type="button" className="button-secondary" onClick={() => setCreditOnly(false)}>
                 Снять фильтр остатка

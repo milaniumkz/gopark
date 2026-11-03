@@ -1,3 +1,5 @@
+import { DateRangePicker } from "../ui/DateRangePicker";
+import "./parts-design-v2.css";
 import { useEffect, useMemo, useState } from "react";
 import type { VehicleListItem } from "@gopark/contracts";
 import { hasCrmCapability } from "../lib/crm-access";
@@ -400,7 +402,7 @@ export function PartsPage() {
   }
 
   return (
-    <section className="page-stack parts-page">
+    <section className="page-stack parts-page parts-design-v2">
       <div className="hero-card">
         <p className="eyebrow">Запчасти</p>
         <h2>Склад запчастей</h2>
@@ -501,26 +503,14 @@ export function PartsPage() {
       <article className="panel">
         <h3>Статистика движений запчастей</h3>
         <div className="toolbar">
-          <label>
-            С
-            <input
-              aria-label="Запчасти с"
-              type="date"
-              value={dateFrom}
-              max={dateTo || undefined}
-              onChange={(e) => setDateFrom(e.target.value)}
-            />
-          </label>
-          <label>
-            По
-            <input
-              aria-label="Запчасти по"
-              type="date"
-              value={dateTo}
-              min={dateFrom || undefined}
-              onChange={(e) => setDateTo(e.target.value)}
-            />
-          </label>
+          <DateRangePicker
+            from={dateFrom}
+            to={dateTo}
+            onChange={(from, to) => {
+              setDateFrom(from);
+              setDateTo(to);
+            }}
+          />
           <select
             aria-label="Фильтр заказчика"
             value={companyFilter}
@@ -849,10 +839,7 @@ export function PartsPage() {
             <thead>
               <tr>
                 <th>Запчасть</th>
-                <th>Артикул</th>
-                <th>Марка</th>
-                <th>Модель</th>
-                <th>Год</th>
+                <th>Автомобиль</th>
                 <th>Остаток</th>
                 <th>Мин.</th>
                 <th>Цена</th>
@@ -865,13 +852,16 @@ export function PartsPage() {
                   <td>
                     <div className="identity-cell">
                       <strong title={item.name}>{item.name}</strong>
-                      <span>{formatShortId(item.id)}</span>
+                      <span>
+                        Артикул: {item.sku ?? "—"} · {formatShortId(item.id)}
+                      </span>
                     </div>
                   </td>
-                  <td>{item.sku ?? "—"}</td>
-                  <td>{item.make ?? "—"}</td>
-                  <td>{item.model ?? "—"}</td>
-                  <td>{item.productionYear ?? "—"}</td>
+                  <td>
+                    {[item.make, item.model, item.productionYear]
+                      .filter(Boolean)
+                      .join(" ") || "—"}
+                  </td>
                   <td>
                     <span
                       className={
@@ -903,36 +893,57 @@ export function PartsPage() {
           <h3>Журнал движений</h3>
         </div>
         {movements.length ? (
-          <table className="data-table parts-movements-table">
+          <table
+            className="data-table parts-movements-table"
+            aria-label="Журнал движений запчастей"
+          >
             <thead>
               <tr>
-                <th>Дата</th>
-                <th>Тип</th>
+                <th>Дата / тип</th>
                 <th>Запчасть</th>
-                <th>Количество</th>
-                <th>Авто</th>
+                <th>Кол-во</th>
+                <th>Куда списано / получатель</th>
+                <th>Сумма</th>
                 <th>Причина</th>
               </tr>
             </thead>
             <tbody>
               {movements.map((item) => (
                 <tr key={item.id}>
-                  <td>{formatDateTime(item.createdAt)}</td>
-                  <td>
+                  <td data-label="Дата / тип">
+                    <time dateTime={item.createdAt}>
+                      {formatDateTime(item.createdAt)}
+                    </time>
                     <span className={movementTone(item.type)}>
                       {movementLabel(item.type)}
                     </span>
                   </td>
-                  <td>{item.partName}</td>
-                  <td>{item.quantity}</td>
-                  <td>{item.carLabel ?? "—"}</td>
-                  <td>{item.requesterCompany ?? "Не указан"}</td>
-                  <td>
+                  <td data-label="Запчасть">
+                    <strong>{item.partName}</strong>
+                  </td>
+                  <td data-label="Количество">{item.quantity}</td>
+                  <td data-label="Куда списано / получатель">
+                    <strong>
+                      {item.carLabel ??
+                        (item.type === "receive"
+                          ? "Приход на склад"
+                          : "Авто не указано")}
+                    </strong>
+                    <span>
+                      {item.requesterCompany ?? "Компания не указана"}
+                    </span>
+                  </td>
+                  <td data-label="Сумма">
                     {item.unitPrice == null
                       ? "Цена не указана"
                       : formatCurrency(item.quantity * item.unitPrice)}
                   </td>
-                  <td>{item.reason ?? item.note ?? "—"}</td>
+                  <td data-label="Причина">
+                    {item.reason ?? item.note ?? "—"}
+                    {item.reason && item.note && item.reason !== item.note && (
+                      <span>{item.note}</span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

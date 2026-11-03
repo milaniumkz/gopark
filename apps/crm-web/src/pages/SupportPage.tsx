@@ -1,3 +1,4 @@
+import { DateRangePicker } from "../ui/DateRangePicker";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type {
@@ -403,8 +404,7 @@ export function SupportPage() {
               </option>
             ))}
           </select>
-          <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
-          <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
+          <DateRangePicker from={dateFrom} to={dateTo} onChange={(from, to) => { setDateFrom(from); setDateTo(to); }} />
         </div>
       </article>
 

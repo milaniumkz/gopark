@@ -8007,15 +8007,6 @@ a {
   }
 }
 
-.date-range-picker { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.date-range-popup { position: absolute; top: calc(100% + 8px); left: 0; z-index: 20; width: min(350px, calc(100vw - 40px)); padding: 12px; background: white; border: 1px solid #dce4ef; border-radius: 12px; box-shadow: 0 8px 30px #142a4420; }
-.date-range-popup p { margin: 8px 0; font-size: 12px; }
-.date-range-popup .toolbar { justify-content: space-between; }
-.date-range-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; margin-bottom: 10px; touch-action: none; user-select: none; }
-.date-range-grid > span { text-align: center; font-size: 12px; padding: 5px; }
-.date-range-grid > button { padding: 8px 3px; background: #f2f5fa; color: #20334d; border: 1px solid transparent; }
-.date-range-grid > button[aria-pressed="true"] { background: #dbeafe; border-color: #3b82f6; }
-
 /* Parts dialogs stay centered and compact; only their contents scroll. */
 .parts-page .entity-modal { inset: auto; top: 50%; left: 50%; transform: translate(-50%, -50%); margin: 0; width: min(680px, calc(100vw - 32px)); max-height: min(760px, calc(100dvh - 48px)); padding: 20px; border-radius: 18px; grid-template-rows: auto minmax(0,1fr); }
 .parts-page .entity-modal__header { margin-bottom: 12px; }
