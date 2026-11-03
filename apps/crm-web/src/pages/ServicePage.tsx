@@ -2951,8 +2951,6 @@ function ServiceWorkshopPage({
                                         | "sto"
                                         | "company"
                                         | "driver",
-                                      inventoryMode: undefined,
-                                      partId: undefined,
                                     }
                                   : x,
                               ),
@@ -2964,91 +2962,87 @@ function ServiceWorkshopPage({
                           <option value="driver">Водитель — не включать</option>
                         </select>
                       </label>
-                      {expense.purchaser === "company" && (
-                        <>
+                      <>
+                        <label>
+                          Источник расхода
+                          <select
+                            disabled={expense.inventoryApplied}
+                            value={
+                              expense.inventoryMode ??
+                              (expense.partId ? "stock" : "purchase")
+                            }
+                            onChange={(e) =>
+                              setExpenses(
+                                details.expenses!.map((x) =>
+                                  x.id === expense.id
+                                    ? {
+                                        ...x,
+                                        inventoryMode: e.target.value as
+                                          | "purchase"
+                                          | "stock",
+                                        partId: undefined,
+                                      }
+                                    : x,
+                                ),
+                              )
+                            }
+                          >
+                            <option value="purchase">
+                              Купили новую запчасть — приход и расход
+                            </option>
+                            <option value="stock">
+                              Запчасть со склада — только расход
+                            </option>
+                          </select>
+                        </label>
+                        {expense.inventoryMode === "stock" && (
                           <label>
-                            Источник расхода
+                            Запчасть со склада
                             <select
                               disabled={expense.inventoryApplied}
-                              value={expense.inventoryMode ?? "other"}
-                              onChange={(e) =>
-                                setExpenses(
-                                  details.expenses!.map((x) =>
-                                    x.id === expense.id
-                                      ? {
-                                          ...x,
-                                          inventoryMode:
-                                            e.target.value === "other"
-                                              ? undefined
-                                              : (e.target.value as
-                                                  | "purchase"
-                                                  | "stock"),
-                                          partId: undefined,
-                                        }
-                                      : x,
-                                  ),
-                                )
-                              }
-                            >
-                              <option value="other">Прочий расход</option>
-                              <option value="purchase">
-                                Купили новую запчасть — приход и расход
-                              </option>
-                              <option value="stock">
-                                Запчасть со склада — только расход
-                              </option>
-                            </select>
-                          </label>
-                          {expense.inventoryMode === "stock" && (
-                            <label>
-                              Запчасть со склада
-                              <select
-                                disabled={expense.inventoryApplied}
-                                required
-                                value={expense.partId ?? ""}
-                                onChange={(e) => {
-                                  const part = parts.data?.parts.find(
-                                    (p) => p.id === e.target.value,
+                              required
+                              value={expense.partId ?? ""}
+                              onChange={(e) => {
+                                const part = parts.data?.parts.find(
+                                  (p) => p.id === e.target.value,
+                                );
+                                if (part)
+                                  setExpenses(
+                                    details.expenses!.map((x) =>
+                                      x.id === expense.id
+                                        ? {
+                                            ...x,
+                                            partId: part.id,
+                                            description: part.name,
+                                            amount: part.unitPrice ?? undefined,
+                                          }
+                                        : x,
+                                    ),
                                   );
-                                  if (part)
-                                    setExpenses(
-                                      details.expenses!.map((x) =>
-                                        x.id === expense.id
-                                          ? {
-                                              ...x,
-                                              partId: part.id,
-                                              description: part.name,
-                                              amount:
-                                                part.unitPrice ?? undefined,
-                                            }
-                                          : x,
-                                      ),
-                                    );
-                                }}
-                              >
-                                <option value="">Выберите запчасть</option>
-                                {(parts.data?.parts ?? [])
-                                  .filter(
-                                    (p) =>
-                                      p.quantity > 0 || p.id === expense.partId,
-                                  )
-                                  .map((p) => (
-                                    <option key={p.id} value={p.id}>
-                                      {p.name} · {p.quantity} {p.unit}
-                                    </option>
-                                  ))}
-                              </select>
-                              <small>
-                                {parts.error
-                                  ? "Не удалось загрузить склад. Обновите страницу. "
-                                  : ""}
-                                Будет списана 1 единица. Для нескольких
-                                запчастей добавьте строки.
-                              </small>
-                            </label>
-                          )}
-                        </>
-                      )}
+                              }}
+                            >
+                              <option value="">Выберите запчасть</option>
+                              {(parts.data?.parts ?? [])
+                                .filter(
+                                  (p) =>
+                                    p.quantity > 0 || p.id === expense.partId,
+                                )
+                                .map((p) => (
+                                  <option key={p.id} value={p.id}>
+                                    {p.name} · {p.quantity} {p.unit}
+                                  </option>
+                                ))}
+                            </select>
+                            <small>
+                              {parts.error
+                                ? "Не удалось загрузить склад. Обновите страницу. "
+                                : ""}
+                              Будет списана 1 единица. Для нескольких запчастей
+                              добавьте строки.
+                            </small>
+                          </label>
+                        )}
+                      </>
                       {expense.inventoryApplied && (
                         <small>Складские движения сохранены</small>
                       )}
@@ -3079,6 +3073,7 @@ function ServiceWorkshopPage({
                           id: paymentId(),
                           description: "",
                           purchaser: "sto",
+                          inventoryMode: "purchase",
                           amount: undefined,
                         },
                       ])

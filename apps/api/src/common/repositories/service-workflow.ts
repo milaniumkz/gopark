@@ -148,10 +148,9 @@ export function serviceWorkflow(
       if (
         e.inventoryMode !== undefined &&
         (!["purchase", "stock"].includes(e.inventoryMode) ||
-          e.purchaser !== "company" ||
           (e.inventoryMode === "stock" && !e.partId))
       )
-        fail("Для складского расхода GoPark выберите источник и запчасть");
+        fail("Для складского расхода выберите источник и запчасть");
     }
   }
   Object.assign(

@@ -27,8 +27,21 @@ export async function applyServiceInventory(
     : null;
   const requesterCompany =
     scope ?? car?.companyName ?? details.manualVehicle?.companyName ?? "GoPark";
-  for (const expense of details.expenses) {
-    const prev = old.find((e) => e.id === expense.id);
+  for (const input of details.expenses) {
+    const prev = old.find((e) => e.id === input.id);
+    // Old clients and existing expenses may omit the source. Only an authorised
+    // STO save posts them; ordinary manager updates must not create stock moves.
+    const expense = {
+      ...input,
+      inventoryMode:
+        input.inventoryMode ??
+        prev?.inventoryMode ??
+        (scope !== undefined
+          ? input.partId
+            ? ("stock" as const)
+            : ("purchase" as const)
+          : undefined),
+    };
     if (prev?.inventoryApplied) {
       if (
         expense.inventoryMode !== prev.inventoryMode ||
@@ -53,10 +66,6 @@ export async function applyServiceInventory(
     }
     if (scope === undefined)
       throw new ForbiddenException("Складские расходы оформляет сотрудник СТО");
-    if (expense.purchaser !== "company")
-      throw new BadRequestException(
-        "Автоматические складские движения доступны для расходов GoPark",
-      );
     let part: any;
     if (expense.inventoryMode === "purchase") {
       part = await tx.part.create({

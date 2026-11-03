@@ -231,7 +231,10 @@ test(
       )!;
       assert.ok(purchased.inventoryApplied);
       assert.ok(purchased.partId);
-      partIds.push(purchased.partId!);
+      for (const expense of first.serviceDetails!.expenses!) {
+        assert.equal(expense.inventoryApplied, true);
+        if (expense.partId !== stock.id) partIds.push(expense.partId!);
+      }
       assert.equal(
         (await db.part.findUniqueOrThrow({ where: { id: stock.id } })).quantity,
         1,
@@ -243,7 +246,7 @@ test(
       );
       assert.equal(
         await db.partMovement.count({ where: { incidentId: first.id } }),
-        3,
+        7,
       );
       assert.equal(first.serviceDetails!.serviceCost, 170);
       assert.equal(first.serviceDetails!.serviceBaseCost, 150);
@@ -253,7 +256,7 @@ test(
       });
       assert.equal(
         await db.partMovement.count({ where: { incidentId: first.id } }),
-        3,
+        7,
       );
       assert.equal(
         (await db.part.findUniqueOrThrow({ where: { id: stock.id } })).quantity,
@@ -323,7 +326,7 @@ test(
       );
       assert.equal(
         await db.partMovement.count({ where: { incidentId: first.id } }),
-        3,
+        7,
       );
       await assert.rejects(
         () =>
