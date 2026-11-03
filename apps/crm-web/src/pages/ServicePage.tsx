@@ -98,6 +98,16 @@ function closed(item: ManagerIncidentItem) {
   return ["resolved", "closed", "archived"].includes(item.status);
 }
 // getRandomValues is available on HTTP as well; randomUUID requires HTTPS.
+function paymentCaption(cost: number | undefined, paidAmount: number) {
+  if (cost === undefined)
+    return paidAmount > 0
+      ? `Оплачено ${formatCurrency(paidAmount)} · стоимость не указана`
+      : "Не оплачено · стоимость не указана";
+  if (cost === 0) return "Оплата не требуется";
+  if (paidAmount <= 0) return "Не оплачено";
+  if (paidAmount >= cost) return "Оплачено полностью";
+  return `Оплачено частично — ${formatCurrency(paidAmount)} из ${formatCurrency(cost)}`;
+}
 function paymentId() {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   bytes[6] = (bytes[6]! & 0x0f) | 0x40;
@@ -1405,6 +1415,12 @@ function ServiceWorkshopPage({
             <p className="sto-record-reason" title={repairReason(i)}>
               <span>Причина: </span>
               {repairReason(i)}
+            </p>
+            <p className="sto-record-payment" aria-label="Статус оплаты">
+              {paymentCaption(
+                lane(i).known ? laneCost(i) : undefined,
+                lanePaid(i),
+              )}
             </p>
             {!!dates.length && (
               <dl className="sto-card-dates" aria-label="Даты статусов">
@@ -3228,6 +3244,12 @@ function ServiceWorkshopPage({
                 </p>
               )}
             <h4>Оплаты</h4>
+            <p className="sto-record-payment" aria-label="Статус оплаты">
+              {paymentCaption(
+                details.serviceCost,
+                paid({ ...selected, serviceDetails: details }),
+              )}
+            </p>
             <p role="status">
               Оплачено:{" "}
               {formatCurrency(paid({ ...selected, serviceDetails: details }))} ·

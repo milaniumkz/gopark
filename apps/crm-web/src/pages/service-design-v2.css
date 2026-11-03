@@ -1181,3 +1181,10 @@
   color: #258161 !important;
   -webkit-text-fill-color: #258161;
 }
+
+.sto-theme-v2 .sto-record-payment {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
