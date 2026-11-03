@@ -1,7 +1,7 @@
 /* Approved variant 2: compact working journal. All styling is scoped to STO. */
 .sto-theme-v2 {
   color: #23334b;
-  font-size: 14px;
+  font-size: 19px;
   line-height: 1.45;
   --sto-line: #e7ecf3;
   --sto-muted: #8290a5;
@@ -15,18 +15,18 @@
   padding: 4px 0 22px;
 }
 .sto-page-header .sto-breadcrumb {
-  font-size: 12px;
+  font-size: 16px;
   color: #8b97a8;
   margin: 0 0 18px;
 }
 .sto-page-header h1 {
-  font-size: 28px;
+  font-size: 38px;
   line-height: 1.2;
   letter-spacing: -0.6px;
   margin: 0 0 8px;
 }
 .sto-page-header p {
-  font-size: 13px;
+  font-size: 18px;
   color: var(--sto-muted);
   margin: 0;
 }
@@ -48,7 +48,7 @@
   --sto-accent: #dc983e;
 }
 .sto-theme-v2 .button {
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 600;
   line-height: 1.3;
   border-radius: 8px;
@@ -93,7 +93,7 @@
   flex: 1;
 }
 .sto-theme-v2 .sto-department .hero-card__main h2 {
-  font-size: 18px;
+  font-size: 24px;
   line-height: 1.3;
   letter-spacing: -0.2px;
   margin: 0 0 5px;
@@ -102,7 +102,7 @@
   display: none;
 }
 .sto-theme-v2 .hero-card__main > p {
-  font-size: 11px;
+  font-size: 16px;
   line-height: 1.3;
   color: #8e9bad;
 }
@@ -165,14 +165,14 @@
 }
 .sto-theme-v2 .sto-stat > span {
   display: block;
-  font-size: 11px;
+  font-size: 16px;
   font-weight: 400;
   line-height: 1.4;
   color: #7f8da2;
   min-height: 29px;
 }
 .sto-theme-v2 .sto-stat > strong {
-  font-size: 20px;
+  font-size: 27px;
   line-height: 1.25;
   letter-spacing: -0.4px;
   margin: 0;
@@ -210,7 +210,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: 16px;
   color: #8a97a9;
 }
 .sto-period-dates input {
@@ -224,7 +224,7 @@
   font: inherit;
 }
 .sto-profit-mode {
-  font-size: 10px;
+  font-size: 16px;
   padding: 5px 8px;
   border-radius: 15px;
   background: #eff5ff;
@@ -243,7 +243,7 @@
   padding: 0 20px 12px;
 }
 .sto-theme-v2 .sto-filters label {
-  font-size: 11px;
+  font-size: 16px;
   font-weight: 400;
   min-width: 0;
   gap: 5px;
@@ -252,7 +252,7 @@
 .sto-theme-v2 .sto-filters input,
 .sto-theme-v2 .sto-filters select,
 .sto-theme-v2 .sto-filters textarea {
-  font-size: 12px;
+  font-size: 16px;
   min-width: 0;
   max-width: 100%;
   padding: 9px 10px;
@@ -268,7 +268,7 @@
 .sto-theme-v2 .sto-extra-filters {
   margin: 0 20px 10px;
   color: #7c8da5;
-  font-size: 11px;
+  font-size: 16px;
 }
 .sto-theme-v2 .sto-extra-filters > .sto-filters {
   display: grid;
@@ -278,7 +278,7 @@
 }
 .sto-theme-v2 .sto-extra-filters .sto-wide {
   grid-column: 1/-1;
-  font-size: 11px;
+  font-size: 16px;
   line-height: 1.7;
   margin: 0;
 }
@@ -294,7 +294,7 @@
   background: none;
   color: #8b9bb0;
   font: inherit;
-  font-size: 12px;
+  font-size: 16px;
   padding: 7px 10px;
   cursor: pointer;
   border-radius: 7px;
@@ -302,7 +302,7 @@
 .sto-status-tabs button > span {
   margin-left: 7px;
   color: #9eacc0;
-  font-size: 10px;
+  font-size: 16px;
 }
 .sto-status-tabs button.sto-status-tab--active {
   background: #edf4ff;
@@ -325,7 +325,7 @@
   padding: 13px 20px;
   color: #93a0b2;
   background: #fbfcfe;
-  font-size: 10px;
+  font-size: 16px;
   text-transform: uppercase;
   letter-spacing: 0.3px;
   border-bottom: 1px solid #edf1f7;
@@ -348,19 +348,19 @@
 }
 .sto-theme-v2 .sto-record-vehicle h3 {
   margin: 0 0 5px;
-  font-size: 14px;
+  font-size: 19px;
   line-height: 1.4;
   font-weight: 700;
   color: #2d405b;
 }
 .sto-record-plate {
-  font-size: 11px;
+  font-size: 16px;
   line-height: 1.4;
   color: #8191a9;
   overflow-wrap: anywhere;
 }
 .sto-theme-v2 .sto-record-vehicle .sto-kind {
-  font-size: 9px;
+  font-size: 16px;
   margin-left: 6px;
   padding: 2px 4px;
   border: 1px solid #e4eaf3;
@@ -371,7 +371,7 @@
 }
 .sto-record-price,
 .sto-record-profit {
-  font-size: 13px;
+  font-size: 18px;
   font-weight: 600;
   overflow-wrap: anywhere;
   line-height: 1.5;
@@ -383,7 +383,7 @@
   color: #268060;
 }
 .sto-theme-v2 .sto-record .sto-badge {
-  font-size: 10px;
+  font-size: 16px;
   padding: 4px 7px;
   border-radius: 5px;
   display: inline-block;
@@ -399,7 +399,7 @@
   padding: 0 20px 12px;
 }
 .sto-record-reason {
-  font-size: 11px !important;
+  font-size: 16px !important;
   color: #7d8ea5;
   margin: 9px 0 0 !important;
   line-height: 1.5;
@@ -417,12 +417,12 @@
   margin: 0;
 }
 .sto-theme-v2 .sto-card-dates dt {
-  font-size: 10px;
+  font-size: 16px;
   line-height: 1.4;
   color: #98a7bc;
 }
 .sto-theme-v2 .sto-card-dates dd {
-  font-size: 11px;
+  font-size: 16px;
   line-height: 1.45;
   color: #7488a5;
   margin: 4px 0 0;
@@ -434,7 +434,7 @@
   align-items: center;
   margin-top: 10px;
   color: #9aa8bb;
-  font-size: 10px;
+  font-size: 16px;
 }
 .sto-record-footer > span {
   min-width: 0;
@@ -448,7 +448,7 @@
   border: 0;
   background: transparent;
   color: #3774d9;
-  font-size: 11px;
+  font-size: 16px;
   font-weight: 600;
 }
 .sto-record-open span {
@@ -465,16 +465,16 @@
   margin: 10px 0 0;
 }
 .sto-theme-v2 .sto-card-finance dt {
-  font-size: 10px;
+  font-size: 16px;
   color: #8ca197;
 }
 .sto-theme-v2 .sto-card-finance dd {
-  font-size: 13px;
+  font-size: 18px;
   color: #398565;
   font-weight: 600;
 }
 .sto-theme-v2 .sto-table-count {
-  font-size: 11px;
+  font-size: 16px;
   color: #91a1b8;
   padding: 13px 20px;
   background: #fbfcfe;
@@ -485,7 +485,7 @@
 }
 .sto-theme-v2 .sto-calculation-note,
 .sto-theme-v2 .sto-accident-stats {
-  font-size: 11px;
+  font-size: 16px;
   color: #8698b1;
   padding: 12px 20px;
   border-top: 1px solid var(--sto-line);
@@ -516,10 +516,10 @@
   min-height: 65px;
 }
 .sto-theme-v2 .sto-accident-stats .sto-stat > strong {
-  font-size: 17px;
+  font-size: 23px;
 }
 .sto-theme-v2 .sto-allocation-note {
-  font-size: 11px;
+  font-size: 16px;
   line-height: 1.7;
 }
 .sto-theme-v2 .sto-department > .sto-late,
@@ -527,7 +527,7 @@
 .sto-theme-v2 .sto-department > [role="status"],
 .sto-theme-v2 .sto-filter-summary {
   margin: 10px 20px;
-  font-size: 12px;
+  font-size: 16px;
 }
 .sto-theme-v2 .sto-department-heading {
   padding: 18px 20px;
@@ -540,11 +540,11 @@
   gap: 5px;
 }
 .sto-theme-v2 .sto-department-heading h2 {
-  font-size: 18px;
+  font-size: 24px;
   margin: 0;
 }
 .sto-theme-v2 .sto-department-heading .eyebrow {
-  font-size: 11px;
+  font-size: 16px;
   color: #96a4b7;
   letter-spacing: 0;
   text-transform: none;
@@ -562,7 +562,7 @@
   align-items: center;
 }
 .sto-theme-v2 .sto-detail > .sto-card-heading h3 {
-  font-size: 17px;
+  font-size: 23px;
 }
 .sto-theme-v2 .sto-department .sto-overview {
   border: 1px solid #eaf0f7;
@@ -576,18 +576,18 @@
   gap: 12px;
 }
 .sto-theme-v2 .sto-overview h4 {
-  font-size: 13px;
+  font-size: 18px;
 }
 .sto-theme-v2 .sto-overview dt {
-  font-size: 10px;
+  font-size: 16px;
   color: #8f9eb3;
 }
 .sto-theme-v2 .sto-overview dd {
-  font-size: 12px;
+  font-size: 16px;
   color: #62758f;
 }
 .sto-theme-v2 .sto-detail h4 {
-  font-size: 14px;
+  font-size: 19px;
   margin: 16px 0 10px;
 }
 .sto-theme-v2 .sto-detail fieldset {
@@ -630,16 +630,16 @@
 }
 .sto-theme-v2 .sto-order-row > .button:after {
   content: "×";
-  font-size: 18px;
+  font-size: 24px;
   color: #a1afc3;
 }
 .sto-theme-v2 .sto-order-row label {
-  font-size: 10px;
+  font-size: 16px;
 }
 .sto-theme-v2 .sto-detail .sto-order-row input,
 .sto-theme-v2 .sto-detail .sto-order-row select {
   width: 100%;
-  font-size: 12px;
+  font-size: 16px;
   min-width: 0;
   padding: 8px 6px;
 }
@@ -664,12 +664,12 @@
   border-top: 1px solid var(--sto-line);
 }
 .sto-theme-v2 .sto-payment-feedback {
-  font-size: 12px;
+  font-size: 16px;
   padding: 10px;
   border-radius: 7px;
 }
 .sto-theme-v2 .sto-detail .muted {
-  font-size: 11px;
+  font-size: 16px;
   line-height: 1.65;
 }
 .sto-theme-v2 .sto-department .sto-cards {
@@ -683,7 +683,7 @@
 .sto-theme-v2 .sto-department > h3,
 .sto-theme-v2 .sto-results > h3 {
   margin: 14px 20px;
-  font-size: 13px;
+  font-size: 18px;
 }
 /* The compact icon rail applies only to this route and keeps accessible labels/tooltips. */
 .shell.shell--sto {
@@ -758,7 +758,7 @@
   gap: 6px;
 }
 .shell--sto .sidebar-footer__button {
-  font-size: 10px;
+  font-size: 16px;
   min-height: 32px;
   padding: 6px 3px;
 }
@@ -786,7 +786,7 @@
     padding: 0 6px;
   }
   .sto-theme-v2 .sto-stat > strong {
-    font-size: 17px;
+    font-size: 23px;
   }
   .sto-theme-v2 .sto-primary-filters {
     grid-template-columns: 1fr 1fr;
@@ -828,11 +828,11 @@
     padding-bottom: 18px;
   }
   .sto-page-header h1 {
-    font-size: 23px;
+    font-size: 31px;
   }
   .sto-page-header > .button {
     padding: 8px;
-    font-size: 11px;
+    font-size: 16px;
   }
   .sto-theme-v2 .sto-department .hero-card {
     padding: 16px;
@@ -875,7 +875,7 @@
   }
   .sto-mobile-label {
     display: block;
-    font-size: 10px;
+    font-size: 16px;
     font-weight: 400;
     color: #92a1b6;
     margin-bottom: 4px;
@@ -941,12 +941,12 @@
     .sidebar-footer__button--primary
   ):before {
   content: "‹";
-  font-size: 24px;
+  font-size: 32px;
   line-height: 1;
 }
 .shell--sto .sidebar-footer > .sidebar-footer__button--primary:before {
   content: "↪";
-  font-size: 19px;
+  font-size: 26px;
   line-height: 1;
 }
 .shell--sto .sidebar-footer > .topbar__button > span {
@@ -958,7 +958,7 @@
 }
 .shell--sto .sidebar-footer > .topbar__button:before {
   content: "⚙";
-  font-size: 20px;
+  font-size: 27px;
   line-height: 1;
 }
 .sto-mobile-menu-button,
@@ -975,7 +975,7 @@
     color: #456486;
     border-radius: 7px;
     font: inherit;
-    font-size: 13px;
+    font-size: 18px;
     margin-bottom: 12px;
     cursor: pointer;
   }
@@ -995,7 +995,7 @@
     width: auto;
     height: auto;
     clip-path: none;
-    font-size: 14px;
+    font-size: 19px;
   }
   .shell--sto-menu-open .nav__link {
     justify-content: flex-start;
@@ -1018,7 +1018,7 @@
   border-radius: 8px;
   padding: 10px 12px;
   margin: 12px 0 16px;
-  font-size: 12px;
+  font-size: 16px;
   color: #7185a0;
 }
 .sto-theme-v2 .sto-detail-context > summary {
@@ -1037,7 +1037,7 @@
   border-radius: 8px;
   padding: 10px 12px;
   margin: 10px 0;
-  font-size: 12px;
+  font-size: 16px;
   color: #7185a0;
 }
 .sto-theme-v2 .sto-expense-details > summary,
@@ -1056,4 +1056,106 @@
 }
 .sto-theme-v2 .sto-dtp-details > .sto-filters {
   margin-top: 12px;
+}
+
+/* Larger, high-contrast typography requested for the entire STO workspace. */
+.shell--sto .content,
+.shell--sto .content *,
+.shell--sto .content *::before,
+.shell--sto .content *::after {
+  color: #000 !important;
+  -webkit-text-fill-color: #000;
+}
+.sto-theme-v2 input::placeholder,
+.sto-theme-v2 textarea::placeholder {
+  color: #000;
+  opacity: 1;
+}
+.sto-theme-v2 :is(input, select, textarea, button, small, label) {
+  font-size: max(1em, 16px);
+}
+.sto-theme-v2 .button:not(.button--secondary) {
+  background: #dbe9ff;
+  border-color: #91b7ef;
+}
+.sto-theme-v2 .sto-department--body .button:not(.button--secondary) {
+  background: #ffe3bb;
+  border-color: #e3a14a;
+}
+.sto-theme-v2 .sto-period-dates {
+  flex-wrap: wrap;
+}
+.sto-theme-v2 .sto-period-dates input {
+  width: 158px;
+}
+.sto-theme-v2 .sto-status-tabs {
+  flex-wrap: wrap;
+}
+.sto-theme-v2 .sto-record-summary > *,
+.sto-theme-v2 .sto-detail > *,
+.sto-theme-v2 .sto-order-row > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.sto-theme-v2 .sto-detail .sto-order-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) 32px;
+}
+.sto-theme-v2 .sto-detail .sto-order-row > label:first-child,
+.sto-theme-v2 .sto-detail .sto-order-row > label:nth-child(2) {
+  grid-column: 1/3;
+}
+.sto-theme-v2 .sto-detail .sto-order-row > label:nth-child(3) {
+  grid-column: 1;
+}
+.sto-theme-v2 .sto-detail .sto-order-row > label:nth-child(4) {
+  grid-column: 2;
+}
+.sto-theme-v2 .sto-detail .sto-order-row > .button {
+  grid-column: 3;
+  font-size: 0;
+}
+@media (max-width: 1500px) and (min-width: 1051px) {
+  .sto-theme-v2 .sto-department > .sto-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px 0;
+  }
+  .sto-theme-v2 .sto-table-head {
+    display: none;
+  }
+  .sto-theme-v2 .sto-record-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .sto-theme-v2 .sto-record-vehicle {
+    grid-column: 1/-1;
+  }
+  .sto-theme-v2 .sto-mobile-label {
+    display: block;
+    font-size: 16px;
+  }
+  .sto-theme-v2 .sto-record .sto-card-dates {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 650px) {
+  .sto-theme-v2 .sto-department > .sto-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .sto-theme-v2 .sto-record .sto-badge {
+    overflow-wrap: anywhere;
+  }
+  .sto-theme-v2 .sto-record-footer {
+    flex-wrap: wrap;
+  }
+  .sto-theme-v2 .sto-detail > .sto-card-heading {
+    flex-wrap: wrap;
+  }
+}
+
+.sto-theme-v2 .sto-department .hero-card__main > p,
+.sto-theme-v2 .sto-detail .muted,
+.sto-theme-v2 label[data-validation-error]::after {
+  font-size: 16px;
+}
+.sto-theme-v2 .sto-detail :is(span, b, time, li, p) {
+  font-size: max(1em, 16px) !important;
 }
