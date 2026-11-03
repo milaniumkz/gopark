@@ -132,7 +132,11 @@ test("sending a driver's vehicle to repair creates the journal incident with veh
   const { service, user, created, updated } = fixture();
   const incident = await service.createDriverIncidentAction(
     "driver",
-    { action: "repair", note: "Замена тормозов" },
+    {
+      action: "repair",
+      note: "Замена тормозов",
+      serviceDetails: { workshop: "main" },
+    },
     user,
   );
   assert.equal(created.length, 1);
@@ -491,4 +495,56 @@ test("manager identity uses the stored surname, first name and optional patronym
   ];
   const rows = await service.getManagers(user);
   assert.equal(rows[0]!.displayName, "Фамилия Имя Отчество");
+});
+
+test("manager dispatch requires workshop and accident metadata, stores painting lane and payer", async () => {
+  const { service, user, created } = fixture();
+  await assert.rejects(
+    service.createDriverIncidentAction(
+      "driver",
+      { action: "repair", note: "Причина" },
+      user,
+    ),
+    /цех/,
+  );
+  await assert.rejects(
+    service.createDriverIncidentAction(
+      "driver",
+      {
+        action: "repair",
+        note: "ДТП",
+        serviceDetails: { workshop: "body", repairCategory: "accident" },
+      },
+      user,
+    ),
+    /данные ДТП/,
+  );
+  const details = {
+    location: "Тест",
+    occurredAt: "2026-01-01T10:00:00Z",
+    fault: "other" as const,
+    insurer: "nsk" as const,
+    otherPlate: "TEST",
+    otherMake: "Test",
+    otherModel: "Test",
+  };
+  const result = await service.createDriverIncidentAction(
+    "driver",
+    {
+      action: "repair",
+      note: "После ДТП",
+      serviceDetails: {
+        workshop: "body",
+        repairCategory: "accident",
+        expectedPayer: "insurance",
+      },
+      accidentDetails: details,
+    },
+    user,
+  );
+  assert.equal(created.length, 1);
+  assert.equal(result.serviceDetails!.workshop, "body");
+  assert.equal(result.incidentType, "accident");
+  assert.equal(result.serviceDetails!.insurance!.insurer, "nsk");
+  assert.deepEqual(result.accidentDetails, details);
 });

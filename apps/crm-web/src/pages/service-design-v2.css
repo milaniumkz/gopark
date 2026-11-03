@@ -1199,3 +1199,64 @@
   outline: 2px solid #2869e7;
   outline-offset: -2px;
 }
+
+/* Both workshop routes allow the icon rail to expand on desktop too. */
+.shell--sto .sto-mobile-menu-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 9px 12px;
+  border: 1px solid #dce5f1;
+  border-radius: 8px;
+  background: #fff;
+  color: #000;
+  font: inherit;
+  cursor: pointer;
+}
+@media (min-width: 651px) {
+  .shell.shell--sto.shell--sto-menu-open {
+    grid-template-columns: 260px minmax(0, 1fr);
+  }
+  .shell--sto-menu-open .sidebar {
+    padding: 20px 12px 12px;
+  }
+  .shell--sto-menu-open .brand {
+    justify-content: flex-start;
+    gap: 10px;
+  }
+  .shell--sto-menu-open .brand__copy {
+    display: block;
+  }
+  .shell--sto-menu-open .brand__copy h1 {
+    font-size: 22px;
+  }
+  .shell--sto-menu-open .brand__copy p {
+    font-size: 12px;
+  }
+  .shell--sto-menu-open .nav__link {
+    justify-content: flex-start;
+    gap: 10px;
+  }
+  .shell--sto-menu-open .nav__label {
+    position: static;
+    width: auto;
+    height: auto;
+    clip-path: none;
+    font-size: 16px;
+  }
+  .shell--sto-menu-open .sidebar-footer > .sidebar-footer__button {
+    font-size: 14px;
+  }
+  .shell--sto-menu-open .sidebar-footer > .sidebar-footer__button:before {
+    display: none;
+  }
+  .shell--sto-menu-open .sidebar-footer__button--link > span,
+  .shell--sto-menu-open .user-pill__copy {
+    display: block;
+  }
+  .shell--sto-menu-open .user-pill {
+    justify-content: flex-start;
+    gap: 10px;
+  }
+}

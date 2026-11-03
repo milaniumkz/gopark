@@ -1,4 +1,4 @@
-import type { AccidentDetails } from "@gopark/contracts";
+import type { AccidentDetails, ServiceRepairDetails } from "@gopark/contracts";
 import { validateAccident } from "../../common/repositories/service-workflow.js";
 import {
   BadRequestException,
@@ -1086,6 +1086,10 @@ export class MobileManagerService {
       note?: string;
       accidentPhotoUrl?: string;
       accidentDetails?: AccidentDetails;
+      serviceDetails?: Pick<
+        ServiceRepairDetails,
+        "workshop" | "repairCategory" | "expectedPayer"
+      >;
     },
     currentUser: RequestUser | null,
   ): Promise<ManagerIncidentItem> {
@@ -1130,6 +1134,38 @@ export class MobileManagerService {
           "У водителя нет назначенной машины для отправки на СТО",
         );
       }
+      const dispatch = body.serviceDetails;
+      if (
+        !dispatch?.workshop ||
+        !["main", "body", "both"].includes(dispatch.workshop)
+      )
+        throw new BadRequestException(
+          "Выберите цех СТО. Если поля нет, обновите приложение",
+        );
+      const category = dispatch.repairCategory ?? "repair";
+      if (!["repair", "accident", "accident_repair"].includes(category))
+        throw new BadRequestException("Выберите вид обращения");
+      const accident = category !== "repair";
+      if (accident && !body.accidentDetails)
+        throw new BadRequestException("Заполните данные ДТП");
+      const accidentDetails = accident
+        ? validateAccident(body.accidentDetails!)
+        : undefined;
+      const payer = dispatch.expectedPayer ?? (accident ? undefined : "driver");
+      if (!payer || !["company", "driver", "insurance"].includes(payer))
+        throw new BadRequestException("Выберите плательщика");
+      const serviceDetails: ServiceRepairDetails = {
+        reason: note,
+        workshop: dispatch.workshop,
+        repairCategory: category,
+        expectedPayer: payer,
+        ...(accidentDetails
+          ? {
+              accidentFault: accidentDetails.fault,
+              insurance: { insurer: accidentDetails.insurer, paid: false },
+            }
+          : {}),
+      };
       const manager =
         currentUser?.role === "manager"
           ? await this.userRepository.getManagerProfile(
@@ -1145,6 +1181,10 @@ export class MobileManagerService {
           (i.incidentType === "repair" || i.incidentType === "accident"),
       );
       if (existing) {
+        if (existing.incidentType === "accident" && !accident)
+          throw new BadRequestException(
+            "Для машины после ДТП выберите ДТП или ДТП и ремонт и заполните данные происшествия",
+          );
         if (
           ["sent_to_service", "awaiting_repair", "in_repair"].includes(
             existing.serviceStage ?? "",
@@ -1155,28 +1195,38 @@ export class MobileManagerService {
           );
         const sent = await this.incidentRepository.update(existing.id, {
           serviceStage: "sent_to_service",
-          serviceDetails: { reason: note },
+          serviceDetails,
           repairNote: note,
+          incidentType: accident ? "accident" : "repair",
+          ...(accidentDetails
+            ? { accidentDetails, locationNote: accidentDetails.location }
+            : {}),
+          servicePayer: payer,
+          serviceCaseType:
+            payer === "insurance" ? "insurance" : "non_insurance",
         });
         if (!sent) throw new NotFoundException("Инцидент не найден");
         return sent;
       }
       const incident = await this.incidentRepository.create({
         title: `Ремонт: ${car.plateNumber} · ${driver.fullName}`,
-        incidentType: "repair",
+        incidentType: accident ? "accident" : "repair",
         status: "open",
         priority: "high",
         driverId,
         carId: car.id,
-        occurredAt,
+        occurredAt: accidentDetails?.occurredAt ?? occurredAt,
+        ...(accidentDetails
+          ? { accidentDetails, locationNote: accidentDetails.location }
+          : {}),
         description: note ?? "Автомобиль поставлен на ремонт бригадиром",
         repairNote: note,
         managerLabel: manager?.displayName ?? currentUser?.id ?? null,
         serviceStage: "sent_to_service",
-        serviceDetails: { reason: note },
-        serviceCaseType: "non_insurance",
+        serviceDetails,
+        serviceCaseType: payer === "insurance" ? "insurance" : "non_insurance",
         servicePaymentStatus: "unpaid",
-        servicePayer: "driver",
+        servicePayer: payer,
       });
       return incident;
     }

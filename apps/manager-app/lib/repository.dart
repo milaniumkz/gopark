@@ -152,6 +152,7 @@ class ManagerRepository {
     String? note,
     String? accidentPhotoUrl,
     Map<String, dynamic>? accidentDetails,
+    Map<String, dynamic>? serviceDetails,
   }) {
     return api.createDriverIncidentAction(
       driverId,
@@ -159,6 +160,7 @@ class ManagerRepository {
       note: note,
       accidentPhotoUrl: accidentPhotoUrl,
       accidentDetails: accidentDetails,
+      serviceDetails: serviceDetails,
     );
   }
 

@@ -7,7 +7,7 @@ Future<Map<String, dynamic>?> showAccidentForm(BuildContext context) async {
   final form = GlobalKey<FormState>();
   final controllers = List.generate(4, (_) => TextEditingController());
   var occurred = DateTime.now();
-  String fault = 'unknown', insurer = 'gosstrakh';
+  String? fault, insurer;
   try {
     return await showDialog<Map<String, dynamic>>(
         context: context,
@@ -70,7 +70,10 @@ Future<Map<String, dynamic>?> showAccidentForm(BuildContext context) async {
                                     DropdownButtonFormField<String>(
                                         initialValue: fault,
                                         decoration: const InputDecoration(
-                                            labelText: 'Кто виноват'),
+                                            labelText: 'Кто виноват *'),
+                                        validator: (v) => v == null
+                                            ? 'Укажите виновника'
+                                            : null,
                                         items: const [
                                           DropdownMenuItem(
                                               value: 'driver',
@@ -90,7 +93,10 @@ Future<Map<String, dynamic>?> showAccidentForm(BuildContext context) async {
                                     DropdownButtonFormField<String>(
                                         initialValue: insurer,
                                         decoration: const InputDecoration(
-                                            labelText: 'Страховая компания'),
+                                            labelText: 'Страховая компания *'),
+                                        validator: (v) => v == null
+                                            ? 'Выберите страховую'
+                                            : null,
                                         items: const [
                                           DropdownMenuItem(
                                               value: 'gosstrakh',
@@ -582,11 +588,20 @@ class ManagerRepairCard extends StatelessWidget {
   final String? note;
   @override
   Widget build(BuildContext context) {
-    const stages = ['sent_to_service', 'in_repair', 'completed'];
-    const titles = ['Отправлен на СТО', 'В ремонте', 'Машина готова'];
-    const keys = ['sentAt', 'repairStartedAt', 'completedAt'];
-    final current = stages
-        .indexOf(stage == 'awaiting_repair' ? 'sent_to_service' : stage ?? '');
+    const stages = [
+      'sent_to_service',
+      'awaiting_repair',
+      'in_repair',
+      'completed'
+    ];
+    const titles = [
+      'Отправлен на СТО',
+      'Ожидание ремонта',
+      'В ремонте',
+      'Машина готова'
+    ];
+    const keys = ['sentAt', 'arrivedAt', 'repairStartedAt', 'completedAt'];
+    final current = stages.indexOf(stage ?? '');
     String date(dynamic raw) {
       final d = DateTime.tryParse('$raw')?.toLocal();
       return d == null
@@ -695,7 +710,7 @@ class ManagerRepairCard extends StatelessWidget {
                         child: Text(
                             '${const {
                                   "sent_to_service": "Отправлен на СТО",
-                                  "awaiting_repair": "На СТО",
+                                  "awaiting_repair": "Ожидание ремонта",
                                   "in_repair": "В ремонте",
                                   "completed": "Завершён",
                                   "written_off": "Списан",

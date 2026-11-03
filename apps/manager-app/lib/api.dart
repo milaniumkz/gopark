@@ -1217,12 +1217,14 @@ class ManagerApiClient {
     String? note,
     String? accidentPhotoUrl,
     Map<String, dynamic>? accidentDetails,
+    Map<String, dynamic>? serviceDetails,
   }) async {
     final trimmedNote = note?.trim();
     final trimmedAccidentPhotoUrl = accidentPhotoUrl?.trim();
     final payload = {
       'action': action,
       if (accidentDetails != null) 'accidentDetails': accidentDetails,
+      if (serviceDetails != null) 'serviceDetails': serviceDetails,
       if (trimmedNote?.isNotEmpty == true) 'note': trimmedNote,
       if (trimmedAccidentPhotoUrl?.isNotEmpty == true)
         'accidentPhotoUrl': trimmedAccidentPhotoUrl,

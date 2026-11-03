@@ -12,6 +12,7 @@ import 'platform_storage.dart';
 import 'push_notifications.dart';
 import 'repository.dart';
 import 'service_screens.dart';
+import 'service_dispatch_form.dart';
 
 const _managerBg = ManagerDesign.background;
 const _managerSurface = ManagerDesign.surface;
@@ -1859,16 +1860,16 @@ class _ManagerDriversPageState extends State<ManagerDriversPage> {
     String successText,
   ) async {
     Map<String, dynamic>? accidentDetails;
+    Map<String, dynamic>? serviceDispatch;
     _ManagerIncidentDetails? details;
     if (action == 'accident') {
       accidentDetails = await showAccidentForm(context);
       if (accidentDetails == null) return;
     } else if (action == 'repair') {
-      details = await _showManagerRequiredNoteDialog(context,
-          title: 'Отправить на СТО',
-          noteLabel: 'Причина отправки на СТО *',
-          confirmLabel: 'Отправить на СТО');
-      if (details == null) return;
+      serviceDispatch = await showServiceDispatchForm(context);
+      if (serviceDispatch == null) return;
+      accidentDetails =
+          serviceDispatch['accidentDetails'] as Map<String, dynamic>?;
     } else if (action == 'inspection' || action == 'impound') {
       details = await _showManagerIncidentDetailsDialog(context,
           title: action == 'impound' ? 'Штрафстоянка' : 'Осмотр',
@@ -1882,7 +1883,9 @@ class _ManagerDriversPageState extends State<ManagerDriversPage> {
       await widget.repository.createDriverIncidentAction(
         driver.id,
         action,
-        note: details?.note,
+        note: serviceDispatch?['note'] as String? ?? details?.note,
+        serviceDetails:
+            serviceDispatch?['serviceDetails'] as Map<String, dynamic>?,
         accidentDetails: accidentDetails,
       );
       if (!mounted) {
@@ -3127,16 +3130,16 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
 
   Future<void> _createIncidentAction(String action, String successText) async {
     Map<String, dynamic>? accidentDetails;
+    Map<String, dynamic>? serviceDispatch;
     _ManagerIncidentDetails? details;
     if (action == 'accident') {
       accidentDetails = await showAccidentForm(context);
       if (accidentDetails == null) return;
     } else if (action == 'repair') {
-      details = await _showManagerRequiredNoteDialog(context,
-          title: 'Отправить на СТО',
-          noteLabel: 'Причина отправки на СТО *',
-          confirmLabel: 'Отправить на СТО');
-      if (details == null) return;
+      serviceDispatch = await showServiceDispatchForm(context);
+      if (serviceDispatch == null) return;
+      accidentDetails =
+          serviceDispatch['accidentDetails'] as Map<String, dynamic>?;
     } else if (action == 'inspection' || action == 'impound') {
       details = await _showManagerIncidentDetailsDialog(context,
           title: action == 'impound' ? 'Штрафстоянка' : 'Осмотр',
@@ -3149,7 +3152,9 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
       await widget.repository.createDriverIncidentAction(
         widget.driverId,
         action,
-        note: details?.note,
+        note: serviceDispatch?['note'] as String? ?? details?.note,
+        serviceDetails:
+            serviceDispatch?['serviceDetails'] as Map<String, dynamic>?,
         accidentDetails: accidentDetails,
         accidentPhotoUrl: details?.photoDataUrl,
       );
@@ -5443,7 +5448,7 @@ String _managerServiceStageLabel(String stage) {
     case 'inspection':
       return 'Осмотр';
     case 'awaiting_repair':
-      return 'На СТО';
+      return 'Ожидание ремонта';
     case 'in_repair':
       return 'В ремонте';
     case 'completed':

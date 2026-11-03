@@ -66,7 +66,9 @@ const roleLabels: Record<string, string> = {
 
 export function AppLayout() {
   const location = useLocation();
-  const isCompactWorkspace = ["/service", "/parts"].includes(location.pathname.replace(/\/+$/, ""));
+  const isCompactWorkspace = ["/service", "/parts"].includes(
+    location.pathname.replace(/\/+$/, ""),
+  );
   const [stoMobileMenuOpen, setStoMobileMenuOpen] = useState(false);
   useEffect(() => setStoMobileMenuOpen(false), [location.pathname]);
   useEffect(() => {
@@ -104,7 +106,7 @@ export function AppLayout() {
 
   return (
     <div
-      className={`shell shell--immersive${isCompactWorkspace ? ` shell--sto${stoMobileMenuOpen ? " shell--sto-menu-open" : ""}` : ""}${isSidebarOpen ? "" : " shell--sidebar-collapsed"}`}
+      className={`shell shell--immersive${isCompactWorkspace ? ` shell--sto${stoMobileMenuOpen ? " shell--sto-menu-open" : ""}` : ""}${isSidebarOpen || isCompactWorkspace ? "" : " shell--sidebar-collapsed"}`}
     >
       <aside className="sidebar" id="crm-navigation-sidebar">
         <div className="sidebar__body">
@@ -122,6 +124,10 @@ export function AppLayout() {
               title="Скрыть меню"
               aria-label="Скрыть меню"
               onClick={() => {
+                if (isCompactWorkspace) {
+                  setStoMobileMenuOpen(false);
+                  return;
+                }
                 localStorage.setItem("gopark.crm.sidebar", "closed");
                 setIsSidebarOpen(false);
               }}
@@ -170,9 +176,25 @@ export function AppLayout() {
           <button
             type="button"
             className="sidebar-footer__button"
-            title="Скрыть меню"
-            aria-label="Скрыть меню"
-            onClick={() =>
+            title={
+              isCompactWorkspace
+                ? stoMobileMenuOpen
+                  ? "Свернуть меню"
+                  : "Развернуть меню"
+                : "Скрыть меню"
+            }
+            aria-label={
+              isCompactWorkspace
+                ? stoMobileMenuOpen
+                  ? "Свернуть меню"
+                  : "Развернуть меню"
+                : "Скрыть меню"
+            }
+            onClick={() => {
+              if (isCompactWorkspace) {
+                setStoMobileMenuOpen((v) => !v);
+                return;
+              }
               setIsSidebarOpen((value) => {
                 const next = !value;
                 localStorage.setItem(
@@ -180,10 +202,14 @@ export function AppLayout() {
                   next ? "open" : "closed",
                 );
                 return next;
-              })
-            }
+              });
+            }}
           >
-            Скрыть меню
+            {isCompactWorkspace
+              ? stoMobileMenuOpen
+                ? "Свернуть меню"
+                : "Развернуть меню"
+              : "Скрыть меню"}
           </button>
           <NavLink
             to="/notifications"
@@ -242,10 +268,10 @@ export function AppLayout() {
             aria-expanded={stoMobileMenuOpen}
             onClick={() => setStoMobileMenuOpen((v) => !v)}
           >
-            ☰ Меню
+            {stoMobileMenuOpen ? "Свернуть меню" : "☰ Меню"}
           </button>
         )}
-        {!isSidebarOpen ? (
+        {!isSidebarOpen && !isCompactWorkspace ? (
           <button
             type="button"
             className="sidebar-reopen"

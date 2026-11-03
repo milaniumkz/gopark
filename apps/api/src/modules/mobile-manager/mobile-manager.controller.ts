@@ -1,4 +1,4 @@
-import type { AccidentDetails } from "@gopark/contracts";
+import type { AccidentDetails, ServiceRepairDetails } from "@gopark/contracts";
 import {
   Body,
   Controller,
@@ -160,7 +160,15 @@ export class MobileManagerController {
   createDriverIncidentAction(
     @Param("driverId") driverId: string,
     @Body()
-    body: { action?: string; note?: string; accidentDetails?: AccidentDetails },
+    body: {
+      action?: string;
+      note?: string;
+      accidentDetails?: AccidentDetails;
+      serviceDetails?: Pick<
+        ServiceRepairDetails,
+        "workshop" | "repairCategory" | "expectedPayer"
+      >;
+    },
     @CurrentUser() currentUser: RequestUser | null,
   ): Promise<ManagerIncidentItem> {
     return this.mobileManagerService.createDriverIncidentAction(
