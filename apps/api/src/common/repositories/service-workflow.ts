@@ -199,6 +199,7 @@ export function serviceWorkflow(
   )
     fail("Укажите корректное подтверждение прибытия");
   if (
+    changed &&
     stage === "awaiting_repair" &&
     !previous?.serviceDetails?.arrivedAt &&
     !confirmingArrival
