@@ -9,7 +9,7 @@ Future<Map<String, dynamic>?> showAccidentForm(BuildContext context) async {
   var occurred = DateTime.now();
   String? fault, insurer;
   try {
-    return await showDialog<Map<String, dynamic>>(
+    final route = DialogRoute<Map<String, dynamic>>(
         context: context,
         builder: (dialog) => StatefulBuilder(
             builder: (context, update) => AlertDialog(
@@ -141,6 +141,11 @@ Future<Map<String, dynamic>?> showAccidentForm(BuildContext context) async {
                         child: const Text('Сохранить ДТП'))
                   ],
                 )));
+    final result = await Navigator.of(context, rootNavigator: true).push(route);
+    // The pop future resolves before the outgoing dialog finishes rebuilding.
+    // Keep controllers alive until its reverse transition and removal complete.
+    await route.completed;
+    return result;
   } finally {
     for (final c in controllers) {
       c.dispose();
