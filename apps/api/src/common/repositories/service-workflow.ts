@@ -178,23 +178,32 @@ export function serviceWorkflow(
     fail("Выберите плательщика");
   if (input.accidentDetails)
     details.accidentFault = input.accidentDetails.fault;
-  const stage = merged.serviceStage;
+  const confirmingArrival =
+    input.serviceDetails?.arrivalConfirmed === true &&
+    !previous?.serviceDetails?.arrivedAt;
+  const stage =
+    merged.serviceStage === "sent_to_service" &&
+    !previous?.serviceDetails?.repairStartedAt &&
+    (confirmingArrival || previous?.serviceDetails?.arrivedAt)
+      ? "awaiting_repair"
+      : merged.serviceStage;
   if (
     stage &&
     ![...stages, "written_off", "writeoff_requested"].includes(stage)
   )
     fail("Неизвестный этап ремонта");
   const changed = stage !== previous?.serviceStage;
-  const confirmingArrival =
-    input.serviceDetails?.arrivalConfirmed === true &&
-    !previous?.serviceDetails?.arrivedAt;
   if (
     input.serviceDetails?.arrivalConfirmed !== undefined &&
     typeof input.serviceDetails.arrivalConfirmed !== "boolean"
   )
     fail("Укажите корректное подтверждение прибытия");
-  if (changed && stage === "awaiting_repair")
-    fail("Статус ожидания больше не используется. Подтвердите прибытие машины");
+  if (
+    stage === "awaiting_repair" &&
+    !previous?.serviceDetails?.arrivedAt &&
+    !confirmingArrival
+  )
+    fail("Сначала подтвердите прибытие машины на СТО");
   if (confirmingArrival && !previous)
     fail("Прибытие подтверждается после отправки машины на СТО");
   if (
@@ -313,7 +322,7 @@ export function serviceWorkflow(
       !(previous.serviceStage === "sent_to_service" && stage === "in_repair")
     )
       throw new ConflictException(
-        "Этапы СТО проходят по порядку: отправлен → ремонт → завершён",
+        "Этапы СТО проходят по порядку: отправлен → ожидание → ремонт → завершён",
       );
     if (["closed", "archived"].includes(previous.status))
       throw new ConflictException("Завершённый ремонт нельзя повторно открыть");
@@ -453,6 +462,7 @@ export function serviceWorkflow(
         details[key] = previous.serviceDetails[key];
     }
     return {
+      ...(stage !== merged.serviceStage ? { serviceStage: stage } : {}),
       serviceDetails: details,
       servicePaymentStatus:
         paid === 0

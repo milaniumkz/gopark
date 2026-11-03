@@ -34,10 +34,10 @@ import {
 } from "./service-validation";
 import "./service-workflow.css";
 import "./service-design-v2.css";
-const stages = ["sent_to_service", "in_repair", "completed"];
+const stages = ["sent_to_service", "awaiting_repair", "in_repair", "completed"];
 const labels: Record<string, string> = {
   sent_to_service: "Отправлен на СТО",
-  awaiting_repair: "На СТО",
+  awaiting_repair: "Ожидание ремонта",
   in_repair: "В ремонте",
   completed: "Завершён",
   written_off: "Списан",
@@ -429,8 +429,6 @@ function ServiceWorkshopPage({
         (filter === "active" && !closed(i)) ||
         (filter === "archived" && closed(i)) ||
         (filter === "overdue_start" && waitingLate(i)) ||
-        (filter === "sent_to_service" &&
-          i.serviceStage === "awaiting_repair") ||
         i.serviceStage === filter) &&
       [
         vehicleLabel(i),
@@ -2467,11 +2465,7 @@ function ServiceWorkshopPage({
                 <div
                   key={s}
                   className={
-                    stages.indexOf(
-                      selected.serviceStage === "awaiting_repair"
-                        ? "sent_to_service"
-                        : (selected.serviceStage ?? ""),
-                    ) >= n
+                    stages.indexOf(selected.serviceStage ?? "") >= n
                       ? "sto-step--done"
                       : ""
                   }
@@ -2480,9 +2474,14 @@ function ServiceWorkshopPage({
                   <span>
                     {stamp(
                       selected.serviceDetails?.[
-                        (["sentAt", "repairStartedAt", "completedAt"] as const)[
-                          n
-                        ]
+                        (
+                          [
+                            "sentAt",
+                            "arrivedAt",
+                            "repairStartedAt",
+                            "completedAt",
+                          ] as const
+                        )[n]
                       ],
                     )}
                   </span>
@@ -3409,7 +3408,7 @@ function ServiceWorkshopPage({
                     selected.serviceStage === "sent_to_service" &&
                     !selected.serviceDetails?.arrivedAt
                       ? void save(
-                          undefined,
+                          "awaiting_repair",
                           { ...details, arrivalConfirmed: true },
                           false,
                         )

@@ -70,7 +70,13 @@ function mapIncidentRecord(incident: any): ManagerIncidentItem {
     statusHistory: incident.statusHistory ?? [],
     serviceDetails,
     accidentDetails: incident.accidentDetails ?? null,
-    serviceStage: incident.serviceStage ?? null,
+    serviceStage:
+      incident.serviceStage === "sent_to_service" &&
+      incident.serviceDetails?.arrivedAt &&
+      !incident.serviceDetails?.repairStartedAt &&
+      !["closed", "archived"].includes(incident.status)
+        ? "awaiting_repair"
+        : (incident.serviceStage ?? null),
     serviceCaseType: incident.serviceCaseType ?? null,
     servicePaymentStatus:
       serviceDetails?.serviceCost !== undefined

@@ -120,7 +120,7 @@ test(
       });
       assert.ok(notice!.details.includes(car.plateNumber));
       assert.ok(notice!.details.includes("Кузовной цех"));
-      await repo.update(sent.id, {
+      const arrived = await repo.update(sent.id, {
         serviceDetails: {
           arrivalConfirmed: true,
           reason: sent.serviceDetails!.reason,
@@ -128,6 +128,13 @@ test(
           plannedRepairDate: "2099-12-31",
         },
       });
+      assert.equal(arrived!.serviceStage, "awaiting_repair");
+      assert.equal(
+        (await db.incident.findUniqueOrThrow({ where: { id: sent.id } }))
+          .serviceStage,
+        "awaiting_repair",
+      );
+      assert.equal(arrived!.serviceDetails!.repairStartedAt, undefined);
       const arrivalEvent = await db.outboxEvent.findFirst({
         where: {
           aggregateId: sent.id,

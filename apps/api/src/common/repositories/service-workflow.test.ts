@@ -574,3 +574,34 @@ test("manual painting profit is persisted and validated without changing quote o
   );
   assert.equal(serviceProfit(main.serviceDetails), 300);
 });
+
+test("confirmed arrival enters waiting; starting repair leaves waiting and preserves arrival date", () => {
+  const arrival = serviceWorkflow(
+    {
+      serviceDetails: {
+        reason: "Тормоза",
+        arrivalConfirmed: true,
+        waitingComment: "Ждём мастера",
+        plannedRepairDate: "2099-12-31",
+      },
+    },
+    previous,
+  );
+  assert.equal(arrival.serviceStage, "awaiting_repair");
+  assert.equal(arrival.serviceDetails?.repairStartedAt, undefined);
+  const waiting: ManagerIncidentItem = {
+    ...previous,
+    serviceStage: arrival.serviceStage ?? undefined,
+    serviceDetails: arrival.serviceDetails ?? undefined,
+  };
+  const repair = serviceWorkflow({ serviceStage: "in_repair" }, waiting);
+  assert.ok(repair.serviceDetails?.repairStartedAt);
+  assert.equal(
+    repair.serviceDetails?.arrivedAt,
+    arrival.serviceDetails?.arrivedAt,
+  );
+  assert.throws(
+    () => serviceWorkflow({ serviceStage: "awaiting_repair" }, previous),
+    /прибытие/,
+  );
+});

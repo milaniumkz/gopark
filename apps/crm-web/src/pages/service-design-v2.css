@@ -1160,41 +1160,24 @@
   font-size: max(1em, 16px) !important;
 }
 
-/* Keep dashboard colours independent of the black text colour. */
-.sto-theme-v2 .sto-stats > .sto-stat:nth-child(5n + 1) {
-  --sto-stat-bg: #dbeafe;
-  --sto-stat-line: #3b82f6;
+/* Approved mock: one light dashboard strip, with colour on key amounts only. */
+.shell--sto
+  .content
+  .sto-theme-v2
+  .sto-department
+  > .sto-stats
+  .sto-stat:nth-child(4)
+  > strong {
+  color: #d36d45 !important;
+  -webkit-text-fill-color: #d36d45;
 }
-.sto-theme-v2 .sto-stats > .sto-stat:nth-child(5n + 2) {
-  --sto-stat-bg: #ede9fe;
-  --sto-stat-line: #8b5cf6;
-}
-.sto-theme-v2 .sto-stats > .sto-stat:nth-child(5n + 3) {
-  --sto-stat-bg: #dcfce7;
-  --sto-stat-line: #22c55e;
-}
-.sto-theme-v2 .sto-stats > .sto-stat:nth-child(5n + 4) {
-  --sto-stat-bg: #ffedd5;
-  --sto-stat-line: #f97316;
-}
-.sto-theme-v2 .sto-stats > .sto-stat:nth-child(5n + 5) {
-  --sto-stat-bg: #ccfbf1;
-  --sto-stat-line: #14b8a6;
-}
-.sto-theme-v2 .sto-department > .sto-stats {
-  gap: 8px;
-}
-.sto-theme-v2 .sto-department .sto-stats > .sto-stat {
-  background: var(--sto-stat-bg) !important;
-  border: 1px solid var(--sto-stat-line);
-  border-top: 3px solid var(--sto-stat-line);
-  border-radius: 8px;
-  padding: 10px;
-}
-.sto-theme-v2 .sto-stats > .sto-stat--filter:hover {
-  box-shadow: inset 0 0 0 1px var(--sto-stat-line);
-}
-.sto-theme-v2 .sto-stats > .sto-stat--selected {
-  outline: 2px solid #000;
-  outline-offset: 2px;
+.shell--sto
+  .content
+  .sto-theme-v2
+  .sto-department
+  > .sto-stats
+  .sto-stat:nth-child(5)
+  > strong {
+  color: #258161 !important;
+  -webkit-text-fill-color: #258161;
 }
