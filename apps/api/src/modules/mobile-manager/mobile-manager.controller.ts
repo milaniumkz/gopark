@@ -76,6 +76,21 @@ export class MobileManagerController {
     return this.mobileManagerService.getVehicles(currentUser);
   }
 
+  @Post("vehicles/:vehicleId/incidents")
+  @Roles("owner", "admin", "finance", "manager")
+  createVehicleIncidentAction(
+    @Param("vehicleId") vehicleId: string,
+    @Body()
+    body: Parameters<MobileManagerService["createDriverIncidentAction"]>[1],
+    @CurrentUser() currentUser: RequestUser | null,
+  ): Promise<ManagerIncidentItem> {
+    return this.mobileManagerService.createVehicleIncidentAction(
+      vehicleId,
+      body,
+      currentUser,
+    );
+  }
+
   @Get("vehicles/:vehicleId")
   @Roles("owner", "admin", "finance", "manager")
   getVehicleDetail(

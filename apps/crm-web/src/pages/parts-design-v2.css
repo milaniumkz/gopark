@@ -1,7 +1,7 @@
 /* The approved STO working-journal style, scoped to the parts workspace. */
 .parts-page.parts-design-v2 {
   color: #000;
-  font-size: 16px;
+  font-size: 14px;
   line-height: 1.45;
   gap: 18px;
   min-width: 0;
@@ -14,15 +14,15 @@
   padding: 20px;
 }
 .parts-page.parts-design-v2 .hero-card h2 {
-  font-size: 30px;
+  font-size: 28px;
   line-height: 1.2;
   margin: 4px 0 10px;
 }
 .parts-page.parts-design-v2 .hero-card p {
-  font-size: 16px;
+  font-size: 14px;
 }
 .parts-page.parts-design-v2 .eyebrow {
-  font-size: 16px;
+  font-size: 14px;
   letter-spacing: 0;
   text-transform: none;
 }
@@ -36,7 +36,7 @@
   overflow: visible;
 }
 .parts-page.parts-design-v2 .panel h3 {
-  font-size: 21px;
+  font-size: 19px;
   margin: 0 0 14px;
 }
 .parts-page.parts-design-v2 .toolbar {
@@ -52,7 +52,7 @@
 .parts-page.parts-design-v2 .toolbar label {
   display: grid;
   gap: 5px;
-  font-size: 16px;
+  font-size: 14px;
 }
 .parts-page.parts-design-v2 input,
 .parts-page.parts-design-v2 select,
@@ -106,10 +106,10 @@
   display: none;
 }
 .parts-page.parts-design-v2 .stats-grid .metric-card span {
-  font-size: 16px;
+  font-size: 14px;
 }
 .parts-page.parts-design-v2 .stats-grid .metric-card strong {
-  font-size: 27px;
+  font-size: 25px;
   line-height: 1.3;
   overflow-wrap: anywhere;
 }
@@ -127,7 +127,7 @@
   padding: 12px;
 }
 .parts-page.parts-design-v2 .parts-period-stats strong {
-  font-size: 24px;
+  font-size: 22px;
   overflow-wrap: anywhere;
 }
 .parts-page.parts-design-v2 .muted {
@@ -203,10 +203,10 @@
   box-shadow: 0 20px 60px #152b3f30;
 }
 .parts-page.parts-design-v2 .entity-modal__header h3 {
-  font-size: 24px;
+  font-size: 22px;
 }
 .parts-page.parts-design-v2 .entity-modal__body {
-  font-size: 16px;
+  font-size: 14px;
 }
 @media (max-width: 750px) {
   .parts-page.parts-design-v2 .stats-grid,

@@ -548,3 +548,56 @@ test("manager dispatch requires workshop and accident metadata, stores painting 
   assert.equal(result.serviceDetails!.insurance!.insurer, "nsk");
   assert.deepEqual(result.accidentDetails, details);
 });
+
+test("vehicle actions work without a driver and cannot access another manager's vehicle", async () => {
+  const { service, user, created } = fixture();
+  const sent = await service.createVehicleIncidentAction(
+    "own-0",
+    { action: "repair", note: "Причина", serviceDetails: { workshop: "both" } },
+    user,
+  );
+  assert.equal(sent.carId, "own-0");
+  assert.equal(sent.driverId, undefined);
+  assert.equal(sent.serviceDetails!.workshop, "both");
+  const accident = {
+    location: "Test",
+    occurredAt: "2026-01-01T10:00:00Z",
+    fault: "other" as const,
+    insurer: "nsk" as const,
+    otherPlate: "TEST",
+    otherMake: "Test",
+    otherModel: "Test",
+  };
+  const dtp = await service.createVehicleIncidentAction(
+    "own-1",
+    { action: "accident", accidentDetails: accident },
+    user,
+  );
+  assert.equal(dtp.incidentType, "accident");
+  assert.equal(dtp.carId, "own-1");
+  assert.equal(dtp.driverId, undefined);
+  const impound = await service.createVehicleIncidentAction(
+    "own-2",
+    { action: "impound", note: "Место" },
+    user,
+  );
+  assert.equal(impound.carId, "own-2");
+  assert.equal(impound.serviceStage, "impound");
+  await assert.rejects(
+    service.createVehicleIncidentAction(
+      "other",
+      { action: "impound", note: "Test" },
+      user,
+    ),
+    /недоступен/,
+  );
+  await assert.rejects(
+    service.createVehicleIncidentAction(
+      "other-company",
+      { action: "impound", note: "Test" },
+      user,
+    ),
+    /недоступен/,
+  );
+  assert.equal(created.length, 3);
+});

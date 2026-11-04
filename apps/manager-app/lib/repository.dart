@@ -146,6 +146,16 @@ class ManagerRepository {
           String driverId, String day, String comment) =>
       api.saveDriverCalendarComment(driverId, day, comment);
 
+  Future<ManagerIncidentDto> createVehicleIncidentAction(
+          String vehicleId, String action,
+          {String? note,
+          Map<String, dynamic>? serviceDetails,
+          Map<String, dynamic>? accidentDetails}) =>
+      api.createVehicleIncidentAction(vehicleId, action,
+          note: note,
+          serviceDetails: serviceDetails,
+          accidentDetails: accidentDetails);
+
   Future<ManagerIncidentDto> createDriverIncidentAction(
     String driverId,
     String action, {

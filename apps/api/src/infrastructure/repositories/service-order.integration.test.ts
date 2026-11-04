@@ -357,3 +357,81 @@ test(
     }
   },
 );
+
+test(
+  "vehicle-only incidents update status atomically and duplicate dispatches cannot create two repairs",
+  { skip: process.env.REPAIR_INTEGRATION !== "true" },
+  async () => {
+    assert.equal(
+      new URL(process.env.DATABASE_URL!).pathname,
+      "/gopark_contract_test",
+    );
+    const { PrismaClient } = createRequire(import.meta.url)("@prisma/client");
+    const db = new PrismaClient();
+    const repo = new IncidentPrismaRepository({
+      client: db,
+    } as unknown as PrismaService);
+    let carId: string | undefined;
+    const ids: string[] = [];
+    try {
+      const car = await db.car.create({
+        data: {
+          vin: `VEHICLE-ACTIONS-${Date.now()}`,
+          plateNumber: "ISOLATED-ACTIONS",
+          make: "Test",
+          model: "Test",
+          status: "free",
+        },
+      });
+      carId = car.id;
+      for (const action of ["accident", "impound"]) {
+        const item = await repo.create({
+          title: "Test",
+          carId,
+          incidentType: action,
+          serviceStage: action,
+          status: "open",
+          priority: "high",
+          enforceUniqueVehicleIncident: true,
+        });
+        ids.push(item.id);
+        assert.equal(
+          (await db.car.findUniqueOrThrow({ where: { id: carId } })).status,
+          action,
+        );
+        await repo.update(item.id, { status: "closed" });
+        await db.car.update({ where: { id: carId }, data: { status: "free" } });
+      }
+      const request = {
+        title: "Dispatch",
+        carId,
+        incidentType: "repair",
+        serviceStage: "sent_to_service",
+        status: "open",
+        priority: "high",
+        serviceDetails: { reason: "Test", workshop: "main" as const },
+        enforceUniqueVehicleIncident: true,
+      };
+      const results = await Promise.allSettled([
+        repo.create(request),
+        repo.create({ ...request }),
+      ]);
+      for (const r of results)
+        if (r.status === "fulfilled") ids.push(r.value.id);
+      assert.equal(results.filter((r) => r.status === "fulfilled").length, 1);
+      assert.equal(
+        (await db.car.findUniqueOrThrow({ where: { id: carId } })).status,
+        "maintenance",
+      );
+    } finally {
+      if (ids.length) {
+        await db.outboxEvent.deleteMany({
+          where: { aggregateId: { in: ids } },
+        });
+        await db.incident.deleteMany({ where: { id: { in: ids } } });
+      }
+      if (carId) await db.car.delete({ where: { id: carId } });
+      await db.$disconnect();
+    }
+  },
+);

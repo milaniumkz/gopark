@@ -421,6 +421,123 @@ export class MobileManagerService {
       : null;
   }
 
+  async createVehicleIncidentAction(
+    vehicleId: string,
+    body: Parameters<MobileManagerService["createDriverIncidentAction"]>[1],
+    currentUser: RequestUser | null,
+  ): Promise<ManagerIncidentItem> {
+    const car = await this.getVehicleDetail(vehicleId, currentUser);
+    if (!car) throw new NotFoundException("Автомобиль недоступен");
+    if (["sold", "written_off"].includes(car.status))
+      throw new BadRequestException("Этот автомобиль выбыл из парка");
+    if (car.assignedDriverId) {
+      const assigned = await this.carRepository.getAssignedByDriver(
+        car.assignedDriverId,
+      );
+      if (assigned?.id !== car.id)
+        throw new ConflictException(
+          "Назначение машины изменилось. Обновите карточку",
+        );
+      return this.createDriverIncidentAction(
+        car.assignedDriverId,
+        body,
+        currentUser,
+      );
+    }
+    const action = body.action?.trim();
+    const note = this.trimOrNull(body.note);
+    if (!["repair", "accident", "impound"].includes(action ?? ""))
+      throw new BadRequestException("Недоступное действие");
+    if (action !== "accident" && !note)
+      throw new BadRequestException("Укажите причину");
+    const list = currentUser?.companyName
+      ? await this.incidentRepository.listByCompany(currentUser.companyName)
+      : await this.incidentRepository.list();
+    const existing = list.find(
+      (i) =>
+        i.carId === car.id &&
+        !closedIncident(i.status) &&
+        (action === "repair"
+          ? ["repair", "accident"].includes(i.incidentType ?? "")
+          : i.incidentType === action),
+    );
+    const manager =
+      currentUser?.role === "manager"
+        ? await this.userRepository.getManagerProfile(
+            currentUser.id,
+            currentUser.companyName ?? null,
+          )
+        : null;
+    if (action === "repair") {
+      const { serviceDetails, accidentDetails, payer, accident } =
+        validateManagerDispatch(note!, body);
+      if (
+        existing &&
+        ["sent_to_service", "awaiting_repair", "in_repair"].includes(
+          existing.serviceStage ?? "",
+        )
+      )
+        throw new ConflictException("Машина уже отправлена на СТО");
+      if (existing?.incidentType === "accident" && !accident)
+        throw new BadRequestException("Выберите ДТП или ДТП и ремонт");
+      const data = {
+        incidentType: accident ? "accident" : "repair",
+        serviceStage: "sent_to_service",
+        serviceDetails,
+        repairNote: note,
+        servicePayer: payer,
+        serviceCaseType: payer === "insurance" ? "insurance" : "non_insurance",
+        ...(accidentDetails
+          ? { accidentDetails, locationNote: accidentDetails.location }
+          : {}),
+      };
+      if (existing) {
+        const sent = await this.incidentRepository.update(existing.id, data);
+        if (!sent) throw new NotFoundException("Инцидент не найден");
+        return sent;
+      }
+      return this.incidentRepository.create({
+        enforceUniqueVehicleIncident: true,
+        ...data,
+        title: `СТО: ${car.plateNumber}`,
+        status: "open",
+        priority: "high",
+        carId: car.id,
+        occurredAt: accidentDetails?.occurredAt ?? new Date().toISOString(),
+        description: note,
+        managerLabel: manager?.displayName ?? currentUser?.id ?? null,
+        servicePaymentStatus: "unpaid",
+      });
+    }
+    if (existing)
+      throw new ConflictException(
+        "По автомобилю уже есть открытый инцидент этого типа",
+      );
+    if (action === "accident" && !body.accidentDetails)
+      throw new BadRequestException("Заполните данные ДТП");
+    const accidentDetails =
+      action === "accident"
+        ? validateAccident(body.accidentDetails!)
+        : undefined;
+    return this.incidentRepository.create({
+      enforceUniqueVehicleIncident: true,
+      title: `${action === "accident" ? "ДТП" : "Штрафстоянка"}: ${car.plateNumber}`,
+      incidentType: action!,
+      status: "open",
+      priority: "high",
+      carId: car.id,
+      occurredAt: accidentDetails?.occurredAt ?? new Date().toISOString(),
+      description: note ?? "ДТП зафиксировано бригадиром",
+      repairNote: note,
+      managerLabel: manager?.displayName ?? currentUser?.id ?? null,
+      serviceStage: action!,
+      serviceCaseType: action!,
+      ...(accidentDetails
+        ? { accidentDetails, locationNote: accidentDetails.location }
+        : {}),
+    });
+  }
+
   async getManagers(
     currentUser: RequestUser | null,
   ): Promise<ManagerTeamItem[]> {
@@ -1105,6 +1222,7 @@ export class MobileManagerService {
     if (action === "inspection") {
       const car = await this.carRepository.getAssignedByDriver(driverId);
       const incident = await this.incidentRepository.create({
+        enforceUniqueVehicleIncident: true,
         carId: car?.id,
         title: `Осмотр: ${driver.fullName}`,
         incidentType: "inspection",
@@ -1134,38 +1252,8 @@ export class MobileManagerService {
           "У водителя нет назначенной машины для отправки на СТО",
         );
       }
-      const dispatch = body.serviceDetails;
-      if (
-        !dispatch?.workshop ||
-        !["main", "body", "both"].includes(dispatch.workshop)
-      )
-        throw new BadRequestException(
-          "Выберите цех СТО. Если поля нет, обновите приложение",
-        );
-      const category = dispatch.repairCategory ?? "repair";
-      if (!["repair", "accident", "accident_repair"].includes(category))
-        throw new BadRequestException("Выберите вид обращения");
-      const accident = category !== "repair";
-      if (accident && !body.accidentDetails)
-        throw new BadRequestException("Заполните данные ДТП");
-      const accidentDetails = accident
-        ? validateAccident(body.accidentDetails!)
-        : undefined;
-      const payer = dispatch.expectedPayer ?? (accident ? undefined : "driver");
-      if (!payer || !["company", "driver", "insurance"].includes(payer))
-        throw new BadRequestException("Выберите плательщика");
-      const serviceDetails: ServiceRepairDetails = {
-        reason: note,
-        workshop: dispatch.workshop,
-        repairCategory: category,
-        expectedPayer: payer,
-        ...(accidentDetails
-          ? {
-              accidentFault: accidentDetails.fault,
-              insurance: { insurer: accidentDetails.insurer, paid: false },
-            }
-          : {}),
-      };
+      const { serviceDetails, accidentDetails, payer, accident } =
+        validateManagerDispatch(note, body);
       const manager =
         currentUser?.role === "manager"
           ? await this.userRepository.getManagerProfile(
@@ -1209,6 +1297,7 @@ export class MobileManagerService {
         return sent;
       }
       const incident = await this.incidentRepository.create({
+        enforceUniqueVehicleIncident: true,
         title: `Ремонт: ${car.plateNumber} · ${driver.fullName}`,
         incidentType: accident ? "accident" : "repair",
         status: "open",
@@ -1239,6 +1328,7 @@ export class MobileManagerService {
       await this.driverRepository.update(driverId, { status: "accident" });
       await this.updateAssignedCarStatus(driverId, "accident");
       const incident = await this.incidentRepository.create({
+        enforceUniqueVehicleIncident: true,
         title: `ДТП: ${driver.fullName}`,
         incidentType: "accident",
         status: "open",
@@ -1269,6 +1359,7 @@ export class MobileManagerService {
       const car = await this.carRepository.getAssignedByDriver(driverId);
       await this.updateAssignedCarStatus(driverId, "impound");
       const incident = await this.incidentRepository.create({
+        enforceUniqueVehicleIncident: true,
         carId: car?.id,
         title: `Штрафстоянка: ${driver.fullName}`,
         incidentType: "impound",
@@ -1928,4 +2019,49 @@ function displayDriverStatus(
     )
     ? vehicleStatus!
     : status;
+}
+
+function validateManagerDispatch(
+  note: string,
+  body: {
+    serviceDetails?: Pick<
+      ServiceRepairDetails,
+      "workshop" | "repairCategory" | "expectedPayer"
+    >;
+    accidentDetails?: AccidentDetails;
+  },
+) {
+  const dispatch = body.serviceDetails;
+  if (
+    !dispatch?.workshop ||
+    !["main", "body", "both"].includes(dispatch.workshop)
+  )
+    throw new BadRequestException(
+      "Выберите цех СТО. Если поля нет, обновите приложение",
+    );
+  const category = dispatch.repairCategory ?? "repair";
+  if (!["repair", "accident", "accident_repair"].includes(category))
+    throw new BadRequestException("Выберите вид обращения");
+  const accident = category !== "repair";
+  if (accident && !body.accidentDetails)
+    throw new BadRequestException("Заполните данные ДТП");
+  const accidentDetails = accident
+    ? validateAccident(body.accidentDetails!)
+    : undefined;
+  const payer = dispatch.expectedPayer ?? (accident ? undefined : "driver");
+  if (!payer || !["company", "driver", "insurance"].includes(payer))
+    throw new BadRequestException("Выберите плательщика");
+  const serviceDetails: ServiceRepairDetails = {
+    reason: note,
+    workshop: dispatch.workshop,
+    repairCategory: category,
+    expectedPayer: payer,
+    ...(accidentDetails
+      ? {
+          accidentFault: accidentDetails.fault,
+          insurance: { insurer: accidentDetails.insurer, paid: false },
+        }
+      : {}),
+  };
+  return { serviceDetails, accidentDetails, payer, accident };
 }

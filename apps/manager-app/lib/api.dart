@@ -1211,6 +1211,23 @@ class ManagerApiClient {
     return _decodeObject(response);
   }
 
+  Future<ManagerIncidentDto> createVehicleIncidentAction(
+      String vehicleId, String action,
+      {String? note,
+      Map<String, dynamic>? serviceDetails,
+      Map<String, dynamic>? accidentDetails}) async {
+    final response = await _authorizedPost(
+        Uri.parse('$baseUrl/mobile/manager/vehicles/$vehicleId/incidents'),
+        headers: const {'content-type': 'application/json'},
+        body: jsonEncode({
+          'action': action,
+          if (note != null) 'note': note,
+          if (serviceDetails != null) 'serviceDetails': serviceDetails,
+          if (accidentDetails != null) 'accidentDetails': accidentDetails
+        }));
+    return ManagerIncidentDto.fromJson(_decodeObject(response));
+  }
+
   Future<ManagerIncidentDto> createDriverIncidentAction(
     String driverId,
     String action, {

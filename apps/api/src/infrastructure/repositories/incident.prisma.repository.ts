@@ -363,6 +363,26 @@ export class IncidentPrismaRepository implements IncidentRepository {
     if (prisma) {
       return prisma.$transaction(async (tx: any) => {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(2036548158)`;
+        if (input.enforceUniqueVehicleIncident && input.carId) {
+          const duplicate = await tx.incident.count({
+            where: {
+              carId: input.carId,
+              status: "open",
+              ...(isServiceRepair(input)
+                ? {
+                    incidentType: { in: ["repair", "accident"] },
+                    serviceStage: {
+                      in: ["sent_to_service", "awaiting_repair", "in_repair"],
+                    },
+                  }
+                : { incidentType: input.incidentType }),
+            },
+          });
+          if (duplicate)
+            throw new ConflictException(
+              "По автомобилю уже есть открытая заявка. Обновите карточку",
+            );
+        }
         if (input.serviceDetails)
           input = {
             ...input,
@@ -467,6 +487,24 @@ export class IncidentPrismaRepository implements IncidentRepository {
       });
     }
 
+    if (
+      input.enforceUniqueVehicleIncident &&
+      input.carId &&
+      seedManagerIncidents.some(
+        (i) =>
+          i.carId === input.carId &&
+          i.status === "open" &&
+          (isServiceRepair(input)
+            ? ["repair", "accident"].includes(i.incidentType ?? "") &&
+              ["sent_to_service", "awaiting_repair", "in_repair"].includes(
+                i.serviceStage ?? "",
+              )
+            : i.incidentType === input.incidentType),
+      )
+    )
+      throw new ConflictException(
+        "По автомобилю уже есть открытая заявка. Обновите карточку",
+      );
     const incident: ManagerIncidentItem = {
       id: `inc_${seedManagerIncidents.length + 1}`,
       title: input.title,
@@ -760,9 +798,22 @@ async function syncRepairCar(tx: any, incident: any): Promise<void> {
       });
     }
   }
-  if (!incident.carId || !isServiceRepair(incident)) return;
+  if (!incident.carId) return;
   const car = await tx.car.findUnique({ where: { id: incident.carId } });
   if (!car || ["sold", "written_off"].includes(car.status)) return;
+  if (!isServiceRepair(incident)) {
+    if (
+      incident.status === "open" &&
+      ["accident", "impound"].includes(incident.incidentType) &&
+      incident.serviceStage === incident.incidentType
+    ) {
+      await tx.car.update({
+        where: { id: car.id },
+        data: { status: incident.incidentType },
+      });
+    }
+    return;
+  }
   const stage = incident.serviceStage;
   if (stage === "written_off") {
     await tx.car.update({
@@ -851,9 +902,18 @@ function repairLifecycle(incident: {
 }
 
 function syncSeedRepairCar(incident: ManagerIncidentItem): void {
-  if (!incident.carId || !isServiceRepair(incident)) return;
+  if (!incident.carId) return;
   const car = seedCars.find((item) => item.id === incident.carId);
   if (!car || ["sold", "written_off"].includes(car.status)) return;
+  if (!isServiceRepair(incident)) {
+    if (
+      incident.status === "open" &&
+      ["accident", "impound"].includes(incident.incidentType ?? "") &&
+      incident.serviceStage === incident.incidentType
+    )
+      car.status = incident.incidentType!;
+    return;
+  }
   if (incident.serviceStage === "written_off") {
     car.status = "written_off";
     return;

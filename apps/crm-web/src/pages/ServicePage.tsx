@@ -38,12 +38,12 @@ import "./service-design-v2.css";
 const stages = ["sent_to_service", "awaiting_repair", "in_repair", "completed"];
 const labels: Record<string, string> = {
   sent_to_service: "Отправлен на СТО",
+  accident: "ДТП зарегистрировано",
   awaiting_repair: "Ожидание ремонта",
   in_repair: "В ремонте",
   completed: "Завершён",
   written_off: "Списан",
   writeoff_requested: "Запрошено списание",
-  accident: "ДТП",
   inspection: "Осмотр",
   impound: "Штрафстоянка",
 };
@@ -295,6 +295,19 @@ function ServiceWorkshopPage({
   );
   const paymentAttemptRef = useRef<{ key: string; id: string } | null>(null);
   const [showDispatch, setShowDispatch] = useState(false);
+  useEffect(() => {
+    if (selected || showDispatch || busy) return;
+    const refresh = () => {
+      if (document.visibilityState === "visible")
+        void incidents.refetch({ silent: true }).catch(() => undefined);
+    };
+    const timer = window.setInterval(refresh, 15000);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [incidents.refetch, selected, showDispatch, busy]);
   const [dispatchFault, setDispatchFault] = useState<
     "" | "driver" | "other" | "both" | "unknown"
   >("");
@@ -332,6 +345,7 @@ function ServiceWorkshopPage({
     .filter(
       (i) =>
         i.incidentType === "repair" ||
+        (i.incidentType === "accident" && i.serviceStage === "accident") ||
         i.serviceStage === "awaiting_repair" ||
         stages.includes(i.serviceStage ?? ""),
     );
@@ -371,6 +385,18 @@ function ServiceWorkshopPage({
     (i.carId ? carById.get(i.carId)?.companyName : null) ??
     driverById.get(i.driverId ?? "")?.companyName ??
     i.serviceDetails?.manualVehicle?.companyName;
+  const unassignedRecords = allRecords.filter(
+    (i) =>
+      !["main", "body", "both"].includes(i.serviceDetails?.workshop ?? "") &&
+      (company === "all" || recordCompany(i) === company) &&
+      (!search ||
+        [vehicleLabel(i), repairReason(i)]
+          .join(" ")
+          .toLowerCase()
+          .includes(search.toLowerCase())) &&
+      (filter === "all" ||
+        (["completed", "archived"].includes(filter) ? closed(i) : !closed(i))),
+  );
   const matchesKind = (i: ManagerIncidentItem) => {
     if (kind === "all") return true;
     if (kind === "accident_all") return i.incidentType === "accident";
@@ -1423,6 +1449,15 @@ function ServiceWorkshopPage({
         </div>
         <div className="sto-record-meta" role="row">
           <div role="cell" aria-colspan={4}>
+            {!["main", "body", "both"].includes(
+              i.serviceDetails?.workshop ?? "",
+            ) && (
+              <p className="sto-late">
+                {i.serviceStage === "accident"
+                  ? "ДТП зарегистрировано — отправка на СТО ещё не оформлена"
+                  : "Цех не указан — выберите цех в карточке"}
+              </p>
+            )}
             <p className="sto-record-reason" title={repairReason(i)}>
               <span>Причина: </span>
               {repairReason(i)}
@@ -1434,20 +1469,23 @@ function ServiceWorkshopPage({
               )}
             </p>
             {!!dates.length && (
-              <dl className="sto-card-dates" aria-label="Даты статусов">
-                {dates.map((entry, index) => (
-                  <div key={`${entry.label}-${entry.at}-${index}`}>
-                    <dt>{entry.label}</dt>
-                    <dd>
-                      <time dateTime={entry.at}>
-                        {entry.dateOnly
-                          ? formatDateOnly(entry.at)
-                          : stamp(entry.at)}
-                      </time>
-                    </dd>
-                  </div>
-                ))}
-              </dl>
+              <details className="sto-record-dates">
+                <summary>Даты статусов</summary>
+                <dl className="sto-card-dates" aria-label="Даты статусов">
+                  {dates.map((entry, index) => (
+                    <div key={`${entry.label}-${entry.at}-${index}`}>
+                      <dt>{entry.label}</dt>
+                      <dd>
+                        <time dateTime={entry.at}>
+                          {entry.dateOnly
+                            ? formatDateOnly(entry.at)
+                            : stamp(entry.at)}
+                        </time>
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </details>
             )}
             {(closed(i) || i.serviceStage === "completed") && (
               <dl className="sto-card-finance" aria-label="Итоги ремонта">
@@ -1661,6 +1699,19 @@ function ServiceWorkshopPage({
               {shop === "main" ? "30% · автоматически" : "Прибыль · вручную"}
             </span>
           </div>
+          {shop === "main" && !activeMetric && !!unassignedRecords.length && (
+            <section
+              className="sto-unassigned"
+              aria-label="Ремонты без указанного цеха"
+            >
+              <h3>Цех не указан · {unassignedRecords.length}</h3>
+              <p>
+                Ранее отправленные ремонты. Откройте карточку и выберите цех. В
+                показатели цехов эти записи пока не входят.
+              </p>
+              {unassignedRecords.map(renderRepairCard)}
+            </section>
+          )}
           <div className="sto-primary-filters sto-filters">
             <label>
               Поиск
@@ -1949,28 +2000,8 @@ function ServiceWorkshopPage({
               Показано заказов: {rows.length}
             </div>
             {!rows.length && <p className="muted">Машин по фильтрам нет</p>}
-            {((shop === "main" &&
-              allRecords.some((i) => !i.serviceDetails?.workshop)) ||
-              !!untracked.length) && <h3>Цех пока не указан</h3>}
+            {!!untracked.length && <h3>Автомобили без открытого кейса</h3>}
             <div className="sto-cards">
-              {(shop === "main" && !activeMetric ? allRecords : [])
-                .filter(
-                  (i) =>
-                    !i.serviceDetails?.workshop &&
-                    (company === "all" || recordCompany(i) === company) &&
-                    (filter === "all" ||
-                      (filter === "active"
-                        ? !closed(i)
-                        : filter === "archived"
-                          ? closed(i)
-                          : i.serviceStage === filter)) &&
-                    (!search ||
-                      [vehicleLabel(i), repairReason(i)]
-                        .join(" ")
-                        .toLowerCase()
-                        .includes(search.toLowerCase())),
-                )
-                .map(renderRepairCard)}
               {untracked.map((c) => (
                 <article className="sto-card" key={c.id}>
                   <div className="sto-card-heading">
@@ -2543,10 +2574,44 @@ function ServiceWorkshopPage({
           </details>
           <fieldset disabled={!canEdit || busy}>
             <div className="sto-filters">
+              {selected.serviceStage === "accident" && (
+                <label>
+                  Кто оплачивает *
+                  <select
+                    required
+                    value={details.expectedPayer ?? ""}
+                    onChange={(e) =>
+                      setDetails({
+                        ...details,
+                        expectedPayer: e.target
+                          .value as ServicePaymentEntry["payer"],
+                        ...(e.target.value === "insurance"
+                          ? {
+                              insurance: {
+                                insurer: accidentDraft.insurer,
+                                paid: false,
+                              },
+                            }
+                          : {}),
+                      })
+                    }
+                  >
+                    <option value="" disabled>
+                      Выберите плательщика
+                    </option>
+                    {Object.entries(payerLabels).map(([v, l]) => (
+                      <option key={v} value={v}>
+                        {l}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <label>
                 Цех
                 <select
                   aria-label="Цех"
+                  required
                   value={details.workshop ?? ""}
                   onChange={(e) =>
                     setDetails({
@@ -3428,30 +3493,37 @@ function ServiceWorkshopPage({
                   className="button"
                   disabled={busy}
                   onClick={() =>
-                    selected.serviceStage === "sent_to_service" &&
-                    !selected.serviceDetails?.arrivedAt
-                      ? void save(
-                          "awaiting_repair",
-                          { ...details, arrivalConfirmed: true },
-                          false,
-                        )
-                      : void save(
-                          ["sent_to_service", "awaiting_repair"].includes(
-                            selected.serviceStage ?? "",
+                    selected.serviceStage === "accident"
+                      ? void save("sent_to_service", {
+                          ...details,
+                          repairCategory: "accident",
+                        })
+                      : selected.serviceStage === "sent_to_service" &&
+                          !selected.serviceDetails?.arrivedAt
+                        ? void save(
+                            "awaiting_repair",
+                            { ...details, arrivalConfirmed: true },
+                            false,
                           )
-                            ? "in_repair"
-                            : "completed",
-                        )
+                        : void save(
+                            ["sent_to_service", "awaiting_repair"].includes(
+                              selected.serviceStage ?? "",
+                            )
+                              ? "in_repair"
+                              : "completed",
+                          )
                   }
                 >
-                  {selected.serviceStage === "sent_to_service" &&
-                  !selected.serviceDetails?.arrivedAt
-                    ? "Подтвердить прибытие"
-                    : ["sent_to_service", "awaiting_repair"].includes(
-                          selected.serviceStage ?? "",
-                        )
-                      ? "Начать ремонт"
-                      : "Завершить ремонт"}
+                  {selected.serviceStage === "accident"
+                    ? "Отправить на СТО"
+                    : selected.serviceStage === "sent_to_service" &&
+                        !selected.serviceDetails?.arrivedAt
+                      ? "Подтвердить прибытие"
+                      : ["sent_to_service", "awaiting_repair"].includes(
+                            selected.serviceStage ?? "",
+                          )
+                        ? "Начать ремонт"
+                        : "Завершить ремонт"}
                 </button>
               )}
             </div>

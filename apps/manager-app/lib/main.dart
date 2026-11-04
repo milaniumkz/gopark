@@ -13,6 +13,7 @@ import 'push_notifications.dart';
 import 'repository.dart';
 import 'service_screens.dart';
 import 'service_dispatch_form.dart';
+import 'vehicle_incident_actions.dart';
 
 const _managerBg = ManagerDesign.background;
 const _managerSurface = ManagerDesign.surface;
@@ -1473,6 +1474,20 @@ class _ManagerVehiclesPageState extends State<ManagerVehiclesPage> {
                 icon: Icons.directions_car_filled_rounded,
               ),
               const SizedBox(height: 6),
+              if (!['sold', 'written_off'].contains(detail.status))
+                ManagerVehicleIncidentActions(
+                    repository: widget.repository,
+                    vehicleId: detail.id,
+                    onSaved: () {
+                      Navigator.pop(context);
+                      if (mounted) {
+                        setState(() {});
+                        ScaffoldMessenger.of(this.context).showSnackBar(
+                            const SnackBar(
+                                content: Text('Данные автомобиля сохранены')));
+                      }
+                    }),
+              const SizedBox(height: 12),
               ManagerInfoCard(
                 title: 'Открытые инциденты',
                 lines: openIncidents.isEmpty
