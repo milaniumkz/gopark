@@ -26,6 +26,10 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
+      - uses: actions/checkout@v4
+      - name: Verify reset in isolated PostgreSQL
+        if: inputs.operation == 'reset-keep-owner'
+        run: bash scripts/test_reset_keep_owner.sh
       - name: Configure SSH
         run: |
           mkdir -p ~/.ssh
@@ -43,7 +47,11 @@ jobs:
           [[ -z "$ROLLBACK_SHA" || "$ROLLBACK_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$VEHICLE_PLATE" =~ ^[a-zA-Z0-9[:space:]-]{0,32}$ ]]
           [[ -z "$WORKSHOP" || "$WORKSHOP" =~ ^(main|body|both)$ ]]
-          ssh -i ~/.ssh/id_ed25519 -p "${{ secrets.PROD_SSH_PORT }}" "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}" "OPERATION='$OPERATION' ROLLBACK_SHA='$ROLLBACK_SHA' VEHICLE_PLATE='$VEHICLE_PLATE' WORKSHOP='$WORKSHOP' bash -s" <<'REMOTE'
+          RESET_SQL_PATH="/tmp/gopark-owner-reset-$GITHUB_RUN_ID.sql"
+          if [ "$OPERATION" = reset-keep-owner ]; then
+            scp -i ~/.ssh/id_ed25519 -P "${{ secrets.PROD_SSH_PORT }}" scripts/reset_database_keep_owner.sql "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}:$RESET_SQL_PATH"
+          fi
+          ssh -i ~/.ssh/id_ed25519 -p "${{ secrets.PROD_SSH_PORT }}" "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}" "OPERATION='$OPERATION' ROLLBACK_SHA='$ROLLBACK_SHA' VEHICLE_PLATE='$VEHICLE_PLATE' WORKSHOP='$WORKSHOP' RESET_SQL_PATH='$RESET_SQL_PATH' bash -s" <<'REMOTE'
           set -euo pipefail
           BASE="/home/client"
           CONFIG_DIR="$BASE/gopark"
@@ -57,6 +65,38 @@ jobs:
           }
 
           case "$OPERATION" in
+            reset-keep-owner)
+              test -s "$RESET_SQL_PATH"
+              test "$(docker exec gopark-postgres psql -U gopark -d gopark -Atc "SELECT count(*) FROM users WHERE role::text='owner' AND status::text='active'")" = 1
+              REDIS_DB=$(docker exec gopark-api node -e 'const u=new URL(process.env.REDIS_URL);const db=u.pathname.slice(1)||"0";if(!/^[0-9]+$/.test(db))throw Error("Invalid Redis DB");process.stdout.write(db)')
+              docker exec gopark-redis redis-cli -n "$REDIS_DB" PING | grep -qx PONG
+              umask 077
+              BACKUP="$BASE/backups/owner-only-reset-$(date -u +%Y%m%dT%H%M%S)-$$"
+              mkdir -p "$BACKUP"
+              resume_services() { docker start gopark-api gopark-worker >/dev/null; }
+              trap resume_services EXIT
+              docker stop --time 30 gopark-api gopark-worker >/dev/null
+              docker exec gopark-postgres pg_dump -U gopark -d gopark -Fc > "$BACKUP/database.dump"
+              docker exec -i gopark-postgres pg_restore --list < "$BACKUP/database.dump" > "$BACKUP/database.contents"
+              test -s "$BACKUP/database.dump"
+              test -s "$BACKUP/database.contents"
+              cp "$CONFIG_DIR/.env" "$BACKUP/server.env"
+              cat "$BASE/gopark-current-sha" > "$BACKUP/release-sha"
+              docker exec gopark-redis redis-cli SAVE > "$BACKUP/redis-save.log"
+              docker cp gopark-redis:/data/dump.rdb "$BACKUP/redis.rdb"
+              test -s "$BACKUP/redis.rdb"
+              echo "Verified database, Redis and configuration backup: $BACKUP"
+              docker exec -i gopark-postgres psql -U gopark -d gopark -v ON_ERROR_STOP=1 < "$RESET_SQL_PATH"
+              docker exec gopark-redis redis-cli -n "$REDIS_DB" FLUSHDB | grep -qx OK
+              resume_services
+              trap - EXIT
+              for attempt in $(seq 1 30); do
+                if curl --max-time 5 -fsS http://127.0.0.1:3000/api/health; then break; fi
+                sleep 2
+              done
+              curl --max-time 5 -fsS http://127.0.0.1:3000/api/health
+              docker exec gopark-api node --input-type=module -e 'const {PrismaClient}=await import("./apps/api/node_modules/@prisma/client/default.js");const p=new PrismaClient();try{const owners=await p.user.findMany({select:{id:true,email:true,role:true,status:true}});const tables=await p.$queryRawUnsafe("SELECT tablename FROM pg_tables WHERE schemaname=\x27public\x27 AND tablename NOT IN (\x27users\x27,\x27_prisma_migrations\x27)");const nonempty=[];for(const t of tables){if(!/^[a-z_][a-z0-9_]*$/i.test(t.tablename))throw Error("Unexpected table name");const r=await p.$queryRawUnsafe(`SELECT count(*) AS n FROM public.${t.tablename}`);if(Number(r[0].n)!==0)nonempty.push({table:t.tablename,count:String(r[0].n)});}console.log(JSON.stringify({accounts:owners,nonemptyBusinessTables:nonempty}));if(owners.length!==1||owners[0].role!=="owner"||nonempty.length)throw Error("Post-reset verification failed");}finally{await p.$disconnect()}'
+              ;;
             prepare-database-reset)
               umask 077
               BACKUP="$BASE/backups/before-requested-reset-$(date -u +%Y%m%dT%H%M%S)-$$"
