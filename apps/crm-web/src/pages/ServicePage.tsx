@@ -937,6 +937,10 @@ function ServiceWorkshopPage({
       ? w.serviceAmount === undefined || w.laborAmount === undefined
       : w.amount === undefined);
   async function submitPayment(action: "partial" | "full") {
+    if (selected?.serviceStage === "accident") {
+      setMessage("Сначала отправьте автомобиль на СТО");
+      return;
+    }
     if (busy || savingRef.current || paymentSubmitRef.current) return;
     paymentSubmitRef.current = true;
     setPaymentAction(action);
@@ -3310,6 +3314,12 @@ function ServiceWorkshopPage({
                 </p>
               )}
             <h4>Оплаты</h4>
+            {selected.serviceStage === "accident" && (
+              <p>
+                Сначала выберите цех и нажмите «Отправить на СТО». После
+                отправки можно сохранять работы и оплаты.
+              </p>
+            )}
             <p className="sto-record-payment" aria-label="Статус оплаты">
               {paymentCaption(
                 details.serviceCost,
@@ -3429,7 +3439,11 @@ function ServiceWorkshopPage({
               <button
                 type="button"
                 className="button button--secondary"
-                disabled={busy || paymentAction !== null}
+                disabled={
+                  busy ||
+                  paymentAction !== null ||
+                  selected.serviceStage === "accident"
+                }
                 onClick={() => void submitPayment("partial")}
               >
                 {paymentAction === "partial"
@@ -3448,6 +3462,7 @@ function ServiceWorkshopPage({
                       details.serviceCost)
                 }
                 disabled={
+                  selected.serviceStage === "accident" ||
                   busy ||
                   paymentAction !== null ||
                   (!incompleteOrder &&
@@ -3481,13 +3496,15 @@ function ServiceWorkshopPage({
           </p>
           {canEdit && (
             <div className="row-actions">
-              <button
-                className="button button--secondary"
-                disabled={busy}
-                onClick={() => void save()}
-              >
-                Сохранить
-              </button>
+              {selected.serviceStage !== "accident" && (
+                <button
+                  className="button button--secondary"
+                  disabled={busy}
+                  onClick={() => void save()}
+                >
+                  Сохранить
+                </button>
+              )}
               {!closed(selected) && (
                 <button
                   className="button"
