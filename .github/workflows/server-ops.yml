@@ -65,6 +65,9 @@ jobs:
           }
 
           case "$OPERATION" in
+            redis-diagnostic)
+              docker exec gopark-api node --input-type=module -e 'import {createRequire} from "node:module";const require=createRequire("/app/apps/api/package.json");const Redis=require("ioredis");const u=new URL(process.env.REDIS_URL);console.log(JSON.stringify({redis:{host:u.hostname,port:u.port||"6379",database:u.pathname.slice(1)||"0",authenticated:!!(u.username||u.password),protocol:u.protocol}}));const r=new Redis(process.env.REDIS_URL,{lazyConnect:true,connectTimeout:5000,maxRetriesPerRequest:1,retryStrategy:()=>null});try{await r.connect();console.log(JSON.stringify({ping:await r.ping(),keys:await r.dbsize()}));}finally{r.disconnect();}'
+              ;;
             reset-keep-owner)
               test -s "$RESET_SQL_PATH"
               test "$(docker exec gopark-postgres psql -U gopark -d gopark -Atc "SELECT count(*) FROM users WHERE role::text='owner' AND status::text='active'")" = 1
