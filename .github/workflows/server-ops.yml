@@ -57,6 +57,19 @@ jobs:
           }
 
           case "$OPERATION" in
+            prepare-database-reset)
+              umask 077
+              BACKUP="$BASE/backups/before-requested-reset-$(date -u +%Y%m%dT%H%M%S)-$$"
+              mkdir -p "$BACKUP"
+              docker exec gopark-postgres pg_dump -U gopark -d gopark -Fc > "$BACKUP/database.dump"
+              test -s "$BACKUP/database.dump"
+              docker exec -i gopark-postgres pg_restore --list < "$BACKUP/database.dump" > "$BACKUP/database.contents"
+              test -s "$BACKUP/database.contents"
+              cp "$CONFIG_DIR/.env" "$BACKUP/server.env"
+              cat "$BASE/gopark-current-sha" > "$BACKUP/release-sha"
+              echo "Verified pre-reset database and configuration backup: $BACKUP"
+              docker exec gopark-api node --input-type=module -e 'const {PrismaClient}=await import("./apps/api/node_modules/@prisma/client/default.js");const p=new PrismaClient();try{const admins=await p.user.findMany({where:{role:{in:["owner","admin"]}},select:{id:true,role:true,email:true,phone:true,status:true,firstName:true,lastName:true}});console.log(JSON.stringify({administrators:admins,counts:{users:await p.user.count(),drivers:await p.driver.count(),cars:await p.car.count(),contracts:await p.contract.count(),incidents:await p.incident.count()}}));}finally{await p.$disconnect()}'
+              ;;
             send-vehicle-service)
               test -n "$VEHICLE_PLATE"
               [[ "$WORKSHOP" =~ ^(main|body|both)$ ]]
