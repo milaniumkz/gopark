@@ -7,6 +7,9 @@ on:
         description: status, incident-schema, logs, restart, redeploy, rollback
         required: true
         default: status
+      workshop:
+        description: Workshop for an explicitly requested vehicle handoff (main, body, both)
+        required: false
       vehicle_plate:
         description: Vehicle plate for read-only vehicle diagnostics
         required: false
@@ -34,11 +37,13 @@ jobs:
           OPERATION: ${{ github.event.inputs.operation }}
           ROLLBACK_SHA: ${{ github.event.inputs.rollback_sha }}
           VEHICLE_PLATE: ${{ github.event.inputs.vehicle_plate }}
+          WORKSHOP: ${{ github.event.inputs.workshop }}
         run: |
           [[ "$OPERATION" =~ ^[a-z-]+$ ]]
           [[ -z "$ROLLBACK_SHA" || "$ROLLBACK_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$VEHICLE_PLATE" =~ ^[a-zA-Z0-9[:space:]-]{0,32}$ ]]
-          ssh -i ~/.ssh/id_ed25519 -p "${{ secrets.PROD_SSH_PORT }}" "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}" "OPERATION='$OPERATION' ROLLBACK_SHA='$ROLLBACK_SHA' VEHICLE_PLATE='$VEHICLE_PLATE' bash -s" <<'REMOTE'
+          [[ -z "$WORKSHOP" || "$WORKSHOP" =~ ^(main|body|both)$ ]]
+          ssh -i ~/.ssh/id_ed25519 -p "${{ secrets.PROD_SSH_PORT }}" "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}" "OPERATION='$OPERATION' ROLLBACK_SHA='$ROLLBACK_SHA' VEHICLE_PLATE='$VEHICLE_PLATE' WORKSHOP='$WORKSHOP' bash -s" <<'REMOTE'
           set -euo pipefail
           BASE="/home/client"
           CONFIG_DIR="$BASE/gopark"
@@ -52,6 +57,17 @@ jobs:
           }
 
           case "$OPERATION" in
+            send-vehicle-service)
+              test -n "$VEHICLE_PLATE"
+              [[ "$WORKSHOP" =~ ^(main|body|both)$ ]]
+              umask 077
+              BACKUP="$BASE/backups/service-handoff-$(date -u +%Y%m%dT%H%M%S)-$$"
+              mkdir -p "$BACKUP"
+              docker exec -e "LOOKUP_PLATE=$VEHICLE_PLATE" gopark-api node --input-type=module -e 'const {PrismaClient}=await import("./apps/api/node_modules/@prisma/client/default.js");const p=new PrismaClient();try{const norm=s=>String(s??"").replace(/[^A-Za-z0-9]/g,"").toUpperCase();const cars=(await p.car.findMany({select:{id:true,plateNumber:true,status:true}})).filter(c=>norm(c.plateNumber).includes(norm(process.env.LOOKUP_PLATE)));if(cars.length!==1)throw Error("Expected exactly one matching vehicle");const cases=await p.incident.findMany({where:{carId:cars[0].id,status:"open",incidentType:{in:["repair","accident"]}}});if(cases.length!==1)throw Error("Expected exactly one active incident; refusing to choose a record");process.stdout.write(JSON.stringify({car:cars[0],incident:cases[0]}));}finally{await p.$disconnect()}' > "$BACKUP/incident-before.json"
+              test -s "$BACKUP/incident-before.json"
+              docker exec -i -e "TARGET_WORKSHOP=$WORKSHOP" gopark-api node --input-type=module -e 'import fs from "node:fs";const before=JSON.parse(fs.readFileSync(0,"utf8"));const {PrismaClient}=await import("./apps/api/node_modules/@prisma/client/default.js");const {IncidentPrismaRepository}=await import("./apps/api/dist/apps/api/src/infrastructure/repositories/incident.prisma.repository.js");const p=new PrismaClient();try{const current=await p.incident.findUnique({where:{id:before.incident.id}});if(!current||current.status!=="open"||new Date(current.updatedAt).getTime()!==new Date(before.incident.updatedAt).getTime())throw Error("Incident changed; refresh and retry");const shop=process.env.TARGET_WORKSHOP;if(!["main","body","both"].includes(shop))throw Error("Invalid workshop");const active=["sent_to_service","awaiting_repair","in_repair"].includes(current.serviceStage);if(!active&&current.serviceStage!=="accident")throw Error("Unsupported current stage for handoff");if(!(active&&current.serviceDetails?.workshop===shop)){const d=current.serviceDetails??{};const reason=d.reason?.trim()||current.repairNote?.trim()||current.description?.trim()||(current.incidentType==="accident"?"ДТП":"Ремонт");await new IncidentPrismaRepository({client:p}).update(current.id,{serviceStage:active?current.serviceStage:"sent_to_service",serviceDetails:{...d,reason,workshop:shop,repairCategory:d.repairCategory??(current.incidentType==="accident"?"accident":"repair")},...(!d.expectedPayer&&!(d.payments?.length)?{servicePayer:null}:{})});}const item=await p.incident.findUniqueOrThrow({where:{id:current.id}});const car=await p.car.findUniqueOrThrow({where:{id:before.car.id},select:{plateNumber:true,status:true}});if(item.serviceDetails?.workshop!==shop||!["sent_to_service","awaiting_repair","in_repair"].includes(item.serviceStage))throw Error("Handoff verification failed");console.log(JSON.stringify({car,incidentId:item.id,stage:item.serviceStage,workshop:item.serviceDetails.workshop,expectedPayer:item.serviceDetails.expectedPayer??null,payer:item.servicePayer??null,sentAt:item.serviceDetails.sentAt??null,arrivedAt:item.serviceDetails.arrivedAt??null}));}finally{await p.$disconnect()}' < "$BACKUP/incident-before.json"
+              echo "Saved handoff preimage on the server: $BACKUP"
+              ;;
             vehicle-diagnostic)
               test -n "$VEHICLE_PLATE"
               cat "$BASE/gopark-current-sha"
