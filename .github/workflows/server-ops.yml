@@ -65,6 +65,14 @@ jobs:
           }
 
           case "$OPERATION" in
+            verify-owner-reset)
+              docker exec gopark-api node -e 'fetch("http://127.0.0.1:3000/api/health").then(async r=>{if(!r.ok)throw Error("API unhealthy");console.log(await r.text())}).catch(e=>{console.error(e.message);process.exit(1)})'
+              docker exec gopark-crm-web nginx -t
+              docker exec gopark-crm-web nginx -s reload
+              docker exec gopark-redis timeout 10 redis-cli PING | grep -qx PONG
+              curl --max-time 10 --retry 5 --retry-delay 2 --retry-all-errors -fsS http://127.0.0.1:3000/api/health
+              docker exec gopark-api node --input-type=module -e 'const {PrismaClient}=await import("./apps/api/node_modules/@prisma/client/default.js");const p=new PrismaClient();try{const owners=await p.user.findMany({select:{id:true,email:true,role:true,status:true}});const tables=await p.$queryRawUnsafe("SELECT tablename FROM pg_tables WHERE schemaname=\x27public\x27 AND tablename NOT IN (\x27users\x27,\x27_prisma_migrations\x27)");const nonempty=[];for(const t of tables){if(!/^[a-z_][a-z0-9_]*$/i.test(t.tablename))throw Error("Unexpected table name");const r=await p.$queryRawUnsafe(`SELECT count(*) AS n FROM public.${t.tablename}`);if(Number(r[0].n)!==0)nonempty.push({table:t.tablename,count:String(r[0].n)});}console.log(JSON.stringify({accounts:owners,nonemptyBusinessTables:nonempty}));if(owners.length!==1||owners[0].role!=="owner"||nonempty.length)throw Error("Post-reset verification failed");}finally{await p.$disconnect()}'
+              ;;
             recover-redis)
               umask 077
               BACKUP="$BASE/backups/redis-recovery-$(date -u +%Y%m%dT%H%M%S)-$$"
@@ -98,7 +106,7 @@ jobs:
               umask 077
               BACKUP="$BASE/backups/owner-only-reset-$(date -u +%Y%m%dT%H%M%S)-$$"
               mkdir -p "$BACKUP"
-              resume_services() { docker start gopark-api gopark-worker >/dev/null; }
+              resume_services() { docker start gopark-api gopark-worker >/dev/null; docker exec gopark-crm-web nginx -s reload; }
               trap resume_services EXIT
               docker stop --time 30 gopark-api gopark-worker >/dev/null
               docker exec gopark-postgres pg_dump -U gopark -d gopark -Fc > "$BACKUP/database.dump"
