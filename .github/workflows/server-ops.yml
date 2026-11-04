@@ -7,6 +7,9 @@ on:
         description: status, incident-schema, logs, restart, redeploy, rollback
         required: true
         default: status
+      vehicle_plate:
+        description: Vehicle plate for read-only vehicle diagnostics
+        required: false
       rollback_sha:
         description: Required only for rollback
         required: false
@@ -30,8 +33,12 @@ jobs:
         env:
           OPERATION: ${{ github.event.inputs.operation }}
           ROLLBACK_SHA: ${{ github.event.inputs.rollback_sha }}
+          VEHICLE_PLATE: ${{ github.event.inputs.vehicle_plate }}
         run: |
-          ssh -i ~/.ssh/id_ed25519 -p "${{ secrets.PROD_SSH_PORT }}" "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}" "OPERATION='$OPERATION' ROLLBACK_SHA='$ROLLBACK_SHA' bash -s" <<'REMOTE'
+          [[ "$OPERATION" =~ ^[a-z-]+$ ]]
+          [[ -z "$ROLLBACK_SHA" || "$ROLLBACK_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$VEHICLE_PLATE" =~ ^[a-zA-Z0-9[:space:]-]{0,32}$ ]]
+          ssh -i ~/.ssh/id_ed25519 -p "${{ secrets.PROD_SSH_PORT }}" "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}" "OPERATION='$OPERATION' ROLLBACK_SHA='$ROLLBACK_SHA' VEHICLE_PLATE='$VEHICLE_PLATE' bash -s" <<'REMOTE'
           set -euo pipefail
           BASE="/home/client"
           CONFIG_DIR="$BASE/gopark"
@@ -45,6 +52,11 @@ jobs:
           }
 
           case "$OPERATION" in
+            vehicle-diagnostic)
+              test -n "$VEHICLE_PLATE"
+              cat "$BASE/gopark-current-sha"
+              docker exec -e "LOOKUP_PLATE=$VEHICLE_PLATE" gopark-api node --input-type=module -e 'const {PrismaClient}=await import("./apps/api/node_modules/@prisma/client/default.js");const p=new PrismaClient();try{const norm=s=>String(s??"").replace(/[^A-Za-z0-9]/g,"").toUpperCase();const key=norm(process.env.LOOKUP_PLATE);const cars=(await p.car.findMany({select:{id:true,plateNumber:true,status:true}})).filter(c=>norm(c.plateNumber).includes(key));const cases=await p.incident.findMany({where:{carId:{in:cars.map(c=>c.id)}},orderBy:{createdAt:"desc"},take:20,select:{id:true,carId:true,incidentType:true,status:true,serviceStage:true,createdAt:true,occurredAt:true,serviceDetails:true,accidentDetails:true}});console.log(JSON.stringify({cars,incidents:cases.map(({serviceDetails,accidentDetails,...i})=>({...i,workshop:serviceDetails?.workshop??null,hasReason:!!serviceDetails?.reason,repairCategory:serviceDetails?.repairCategory??null,hasAccidentDetails:!!accidentDetails,sentAt:serviceDetails?.sentAt??null,arrivedAt:serviceDetails?.arrivedAt??null}))}));}finally{await p.$disconnect()}'
+              ;;
             repair-consistency)
               docker exec gopark-api node --input-type=module -e 'const {PrismaClient}=await import("./apps/api/node_modules/@prisma/client/default.js");const p=new PrismaClient();try{const cars=await p.car.findMany({where:{status:"maintenance"},select:{id:true,status:true,assignments:{where:{endedAt:null},select:{driverId:true}}}});const driverIds=cars.flatMap(c=>c.assignments.map(a=>a.driverId));const incidents=await p.incident.findMany({where:{OR:[{carId:{in:cars.map(c=>c.id)}},{driverId:{in:driverIds}}]},select:{id:true,carId:true,driverId:true,incidentType:true,status:true,serviceStage:true,occurredAt:true,serviceDetails:true}});console.log(JSON.stringify({repairCars:cars,relatedIncidents:incidents.map(({serviceDetails,...i})=>({...i,workshop:serviceDetails?.workshop??null,hasReason:!!serviceDetails?.reason}))}));const recent=await p.incident.findMany({where:{incidentType:{in:["repair","accident"]}},orderBy:{createdAt:"desc"},take:20,select:{id:true,carId:true,createdAt:true,occurredAt:true,status:true,serviceStage:true,serviceDetails:true}});console.log(JSON.stringify({recentRepairs:recent.map(({serviceDetails,...i})=>({...i,workshop:serviceDetails?.workshop??null}))}));}finally{await p.$disconnect()}'
               ;;
