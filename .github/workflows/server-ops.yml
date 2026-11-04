@@ -65,6 +65,23 @@ jobs:
           }
 
           case "$OPERATION" in
+            recover-redis)
+              umask 077
+              BACKUP="$BASE/backups/redis-recovery-$(date -u +%Y%m%dT%H%M%S)-$$"
+              mkdir -p "$BACKUP/data"
+              docker stop --time 15 gopark-redis >/dev/null
+              trap 'docker start gopark-redis >/dev/null' EXIT
+              docker cp gopark-redis:/data/. "$BACKUP/data/"
+              test -n "$(find "$BACKUP/data" -type f -print -quit)"
+              echo "Redis data backup: $BACKUP"
+              docker start gopark-redis >/dev/null
+              trap - EXIT
+              for attempt in $(seq 1 15); do
+                if docker exec gopark-redis timeout 5 redis-cli PING | grep -qx PONG; then break; fi
+                sleep 2
+              done
+              docker exec gopark-redis timeout 5 redis-cli PING | grep -qx PONG
+              ;;
             redis-state)
               docker inspect --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' gopark-redis
               docker logs --tail 40 gopark-redis 2>&1 | tail -25
@@ -77,7 +94,7 @@ jobs:
               test -s "$RESET_SQL_PATH"
               test "$(docker exec gopark-postgres psql -U gopark -d gopark -Atc "SELECT count(*) FROM users WHERE role::text='owner' AND status::text='active'")" = 1
               REDIS_DB=$(docker exec gopark-api node -e 'const u=new URL(process.env.REDIS_URL);const db=u.pathname.slice(1)||"0";if(!/^[0-9]+$/.test(db))throw Error("Invalid Redis DB");process.stdout.write(db)')
-              docker exec gopark-redis redis-cli -n "$REDIS_DB" PING | grep -qx PONG
+              docker exec gopark-redis timeout 10 redis-cli -n "$REDIS_DB" PING | grep -qx PONG
               umask 077
               BACKUP="$BASE/backups/owner-only-reset-$(date -u +%Y%m%dT%H%M%S)-$$"
               mkdir -p "$BACKUP"
@@ -90,12 +107,12 @@ jobs:
               test -s "$BACKUP/database.contents"
               cp "$CONFIG_DIR/.env" "$BACKUP/server.env"
               cat "$BASE/gopark-current-sha" > "$BACKUP/release-sha"
-              docker exec gopark-redis redis-cli SAVE > "$BACKUP/redis-save.log"
+              docker exec gopark-redis timeout 10 redis-cli SAVE > "$BACKUP/redis-save.log"
               docker cp gopark-redis:/data/dump.rdb "$BACKUP/redis.rdb"
               test -s "$BACKUP/redis.rdb"
               echo "Verified database, Redis and configuration backup: $BACKUP"
               docker exec -i gopark-postgres psql -U gopark -d gopark -v ON_ERROR_STOP=1 < "$RESET_SQL_PATH"
-              docker exec gopark-redis redis-cli -n "$REDIS_DB" FLUSHDB | grep -qx OK
+              docker exec gopark-redis timeout 10 redis-cli -n "$REDIS_DB" FLUSHDB | grep -qx OK
               resume_services
               trap - EXIT
               for attempt in $(seq 1 30); do
