@@ -80,7 +80,7 @@ void main() {
     expect(result?['serviceDetails']['workshop'], 'body');
     expect(result?['note'], 'Покраска крыла');
   });
-  testWidgets('DTP requires payer and accident details before sending',
+  testWidgets('DTP requires accident details but payer can be assigned later',
       (tester) async {
     await tester.pumpWidget(
         const MaterialApp(home: Scaffold(body: ServiceDispatchFormDialog())));
@@ -90,7 +90,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Отправить на СТО'));
     await tester.pumpAndSettle();
-    expect(find.text('Выберите плательщика'), findsOneWidget);
+    expect(find.text('Выберите плательщика'), findsNothing);
     expect(
         find.text(
             'Укажите место, дату ДТП, виновника, страховую и второго участника'),

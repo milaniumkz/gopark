@@ -84,11 +84,14 @@ class _DispatchState extends State<ServiceDispatchFormDialog> {
                           if (category != 'repair') ...[
                             const SizedBox(height: 16),
                             DropdownButtonFormField<String>(
-                                initialValue: payer,
+                                initialValue: payer ?? 'later',
                                 isExpanded: true,
                                 decoration: const InputDecoration(
-                                    labelText: 'Кто оплачивает *'),
+                                    labelText: 'Плательщик (можно позже)'),
                                 items: const [
+                                  DropdownMenuItem(
+                                      value: 'later',
+                                      child: Text('Укажут на СТО')),
                                   DropdownMenuItem(
                                       value: 'company', child: Text('GoPark')),
                                   DropdownMenuItem(
@@ -97,9 +100,8 @@ class _DispatchState extends State<ServiceDispatchFormDialog> {
                                       value: 'insurance',
                                       child: Text('Страховая компания'))
                                 ],
-                                validator: (v) =>
-                                    v == null ? 'Выберите плательщика' : null,
-                                onChanged: (v) => setState(() => payer = v)),
+                                onChanged: (v) => setState(
+                                    () => payer = v == 'later' ? null : v)),
                             const SizedBox(height: 12),
                             OutlinedButton.icon(
                                 icon: const Icon(Icons.description_outlined),
@@ -142,7 +144,7 @@ class _DispatchState extends State<ServiceDispatchFormDialog> {
                   'serviceDetails': {
                     'workshop': workshop,
                     'repairCategory': category,
-                    'expectedPayer': category == 'repair' ? 'driver' : payer
+                    if (payer != null) 'expectedPayer': payer
                   },
                   if (category != 'repair') 'accidentDetails': accident
                 });

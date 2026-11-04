@@ -25,10 +25,6 @@ void main() {
     await t.tap(find.text('ДТП').last);
     await t.pumpAndSettle();
     await t.enterText(find.byType(TextFormField), 'Повреждение крыла');
-    await t.tap(find.byType(DropdownButtonFormField<String>).last);
-    await t.pumpAndSettle();
-    await t.tap(find.text('GoPark').last);
-    await t.pumpAndSettle();
     await t.ensureVisible(find.text('Заполнить данные ДТП *'));
     await t.tap(find.text('Заполнить данные ДТП *'));
     await t.pumpAndSettle();
@@ -54,5 +50,7 @@ void main() {
     expect(t.takeException(), isNull);
     expect(result?['accidentDetails']['otherPlate'], 'TEST-02');
     expect(result?['serviceDetails']['workshop'], 'both');
+    expect(
+        (result?['serviceDetails'] as Map).containsKey('expectedPayer'), false);
   });
 }

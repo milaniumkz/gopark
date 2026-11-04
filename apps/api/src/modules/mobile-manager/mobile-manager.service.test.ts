@@ -601,3 +601,29 @@ test("vehicle actions work without a driver and cannot access another manager's 
   );
   assert.equal(created.length, 3);
 });
+
+test("STO dispatch leaves payer unspecified until employees record it", async () => {
+  const { service, user } = fixture();
+  const result = await service.createDriverIncidentAction(
+    "driver",
+    {
+      action: "repair",
+      note: "ДТП",
+      serviceDetails: { workshop: "body", repairCategory: "accident" },
+      accidentDetails: {
+        location: "Test",
+        occurredAt: "2026-01-01T10:00:00Z",
+        fault: "other",
+        insurer: "nsk",
+        otherPlate: "TEST",
+        otherMake: "Test",
+        otherModel: "Test",
+      },
+    },
+    user,
+  );
+  assert.equal(result.serviceDetails!.expectedPayer, undefined);
+  assert.equal(result.servicePayer, null);
+  assert.equal(result.serviceDetails!.workshop, "body");
+  assert.equal(result.serviceStage, "sent_to_service");
+});

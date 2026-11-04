@@ -485,8 +485,13 @@ export class MobileManagerService {
         serviceStage: "sent_to_service",
         serviceDetails,
         repairNote: note,
-        servicePayer: payer,
-        serviceCaseType: payer === "insurance" ? "insurance" : "non_insurance",
+        servicePayer: payer ?? null,
+        ...(payer
+          ? {
+              serviceCaseType:
+                payer === "insurance" ? "insurance" : "non_insurance",
+            }
+          : {}),
         ...(accidentDetails
           ? { accidentDetails, locationNote: accidentDetails.location }
           : {}),
@@ -1289,9 +1294,13 @@ export class MobileManagerService {
           ...(accidentDetails
             ? { accidentDetails, locationNote: accidentDetails.location }
             : {}),
-          servicePayer: payer,
-          serviceCaseType:
-            payer === "insurance" ? "insurance" : "non_insurance",
+          servicePayer: payer ?? null,
+          ...(payer
+            ? {
+                serviceCaseType:
+                  payer === "insurance" ? "insurance" : "non_insurance",
+              }
+            : {}),
         });
         if (!sent) throw new NotFoundException("Инцидент не найден");
         return sent;
@@ -1313,9 +1322,13 @@ export class MobileManagerService {
         managerLabel: manager?.displayName ?? currentUser?.id ?? null,
         serviceStage: "sent_to_service",
         serviceDetails,
-        serviceCaseType: payer === "insurance" ? "insurance" : "non_insurance",
+        serviceCaseType: payer
+          ? payer === "insurance"
+            ? "insurance"
+            : "non_insurance"
+          : null,
         servicePaymentStatus: "unpaid",
-        servicePayer: payer,
+        servicePayer: payer ?? null,
       });
       return incident;
     }
@@ -2048,14 +2061,17 @@ function validateManagerDispatch(
   const accidentDetails = accident
     ? validateAccident(body.accidentDetails!)
     : undefined;
-  const payer = dispatch.expectedPayer ?? (accident ? undefined : "driver");
-  if (!payer || !["company", "driver", "insurance"].includes(payer))
+  const payer = dispatch.expectedPayer ?? undefined;
+  if (
+    payer !== undefined &&
+    !["company", "driver", "insurance"].includes(payer)
+  )
     throw new BadRequestException("Выберите плательщика");
   const serviceDetails: ServiceRepairDetails = {
     reason: note,
     workshop: dispatch.workshop,
     repairCategory: category,
-    expectedPayer: payer,
+    ...(payer ? { expectedPayer: payer } : {}),
     ...(accidentDetails
       ? {
           accidentFault: accidentDetails.fault,

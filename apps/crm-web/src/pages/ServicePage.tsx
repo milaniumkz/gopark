@@ -700,12 +700,10 @@ function ServiceWorkshopPage({
     }
     if (
       repairCategory !== "repair" &&
-      (!dispatchFault ||
-        !dispatchPayer ||
-        (dispatchPayer === "insurance" && !dispatchInsurer))
+      (!dispatchFault || (dispatchPayer === "insurance" && !dispatchInsurer))
     ) {
       setMessage(
-        "Для ДТП укажите виновность, плательщика и страховую компанию при страховой оплате",
+        "Для ДТП укажите виновность и страховую компанию при страховой оплате",
       );
       return;
     }
@@ -714,7 +712,7 @@ function ServiceWorkshopPage({
         ? {}
         : {
             accidentFault: dispatchFault,
-            expectedPayer: dispatchPayer,
+            ...(dispatchPayer ? { expectedPayer: dispatchPayer } : {}),
             ...(dispatchPayer === "insurance"
               ? { insurance: { insurer: dispatchInsurer, paid: false } }
               : {}),
@@ -763,7 +761,12 @@ function ServiceWorkshopPage({
         }
       }
       if (!car) throw new Error("Выберите автомобиль");
-      const existing = allRecords.find((i) => i.carId === car.id && !closed(i));
+      const existing = allRecords.find(
+        (i) =>
+          i.carId === car.id &&
+          !closed(i) &&
+          !(i.incidentType === "accident" && i.serviceStage === "accident"),
+      );
       if (existing)
         throw new Error(
           "У машины уже есть открытый ремонт. Откройте его карточку.",
@@ -2192,9 +2195,8 @@ function ServiceWorkshopPage({
                       </select>
                     </label>
                     <label>
-                      Кто оплачивает ДТП *
+                      Плательщик ДТП (можно позже)
                       <select
-                        required
                         aria-label="Кто оплачивает ДТП"
                         value={dispatchPayer}
                         onChange={(e) =>
@@ -2203,7 +2205,7 @@ function ServiceWorkshopPage({
                           )
                         }
                       >
-                        <option value="">Выберите плательщика</option>
+                        <option value="">Укажут на СТО</option>
                         {Object.entries(payerLabels).map(([v, l]) => (
                           <option key={v} value={v}>
                             {l}
@@ -2578,31 +2580,32 @@ function ServiceWorkshopPage({
           </details>
           <fieldset disabled={!canEdit || busy}>
             <div className="sto-filters">
-              {selected.serviceStage === "accident" && (
+              {!closed(selected) && (
                 <label>
-                  Кто оплачивает *
+                  Плательщик (можно позже)
                   <select
-                    required
                     value={details.expectedPayer ?? ""}
                     onChange={(e) =>
                       setDetails({
                         ...details,
-                        expectedPayer: e.target
-                          .value as ServicePaymentEntry["payer"],
+                        expectedPayer: (e.target.value || undefined) as
+                          | ServicePaymentEntry["payer"]
+                          | undefined,
                         ...(e.target.value === "insurance"
                           ? {
                               insurance: {
-                                insurer: accidentDraft.insurer,
-                                paid: false,
+                                ...details.insurance,
+                                insurer:
+                                  details.insurance?.insurer ??
+                                  accidentDraft.insurer,
+                                paid: details.insurance?.paid ?? false,
                               },
                             }
                           : {}),
                       })
                     }
                   >
-                    <option value="" disabled>
-                      Выберите плательщика
-                    </option>
+                    <option value="">Укажут на СТО</option>
                     {Object.entries(payerLabels).map(([v, l]) => (
                       <option key={v} value={v}>
                         {l}
