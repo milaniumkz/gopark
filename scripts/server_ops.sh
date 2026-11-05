@@ -1,0 +1,186 @@
+#!/usr/bin/env bash
+set -euo pipefail
+BASE="/home/client"
+CONFIG_DIR="$BASE/gopark"
+CURRENT="${BASE}/gopark-current"
+if [ -L "$CURRENT" ]; then APP_DIR="$(readlink -f "$CURRENT")"; else APP_DIR="$CONFIG_DIR"; fi
+cd "$APP_DIR"
+compose() {
+  local args=(-p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml)
+  if [ -f release-images.yml ]; then args+=(-f release-images.yml); fi
+  docker compose "${args[@]}" "$@"
+}
+
+case "$OPERATION" in
+  verify-owner-reset)
+    docker exec gopark-api node -e 'fetch("http://127.0.0.1:3000/api/health").then(async r=>{if(!r.ok)throw Error("API unhealthy");console.log(await r.text())}).catch(e=>{console.error(e.message);process.exit(1)})'
+    docker exec gopark-crm-web nginx -t
+    docker exec gopark-crm-web nginx -s reload
+    docker exec gopark-redis timeout 10 redis-cli PING | grep -qx PONG
+    curl --max-time 10 --retry 5 --retry-delay 2 --retry-all-errors -fsS http://127.0.0.1:3000/api/health
+    docker exec gopark-api node --input-type=module -e 'const {PrismaClient}=await import("./apps/api/node_modules/@prisma/client/default.js");const p=new PrismaClient();try{const owners=await p.user.findMany({select:{id:true,email:true,role:true,status:true}});const tables=await p.$queryRawUnsafe("SELECT tablename FROM pg_tables WHERE schemaname=\x27public\x27 AND tablename NOT IN (\x27users\x27,\x27_prisma_migrations\x27)");const nonempty=[];for(const t of tables){if(!/^[a-z_][a-z0-9_]*$/i.test(t.tablename))throw Error("Unexpected table name");const r=await p.$queryRawUnsafe(`SELECT count(*) AS n FROM public.${t.tablename}`);if(Number(r[0].n)!==0)nonempty.push({table:t.tablename,count:String(r[0].n)});}console.log(JSON.stringify({accounts:owners,nonemptyBusinessTables:nonempty}));if(owners.length!==1||owners[0].role!=="owner"||nonempty.length)throw Error("Post-reset verification failed");}finally{await p.$disconnect()}'
+    ;;
+  recover-redis)
+    umask 077
+    BACKUP="$BASE/backups/redis-recovery-$(date -u +%Y%m%dT%H%M%S)-$$"
+    mkdir -p "$BACKUP/data"
+    docker stop --time 15 gopark-redis >/dev/null
+    trap 'docker start gopark-redis >/dev/null' EXIT
+    docker cp gopark-redis:/data/. "$BACKUP/data/"
+    test -n "$(find "$BACKUP/data" -type f -print -quit)"
+    echo "Redis data backup: $BACKUP"
+    docker start gopark-redis >/dev/null
+    trap - EXIT
+    for attempt in $(seq 1 15); do
+      if docker exec gopark-redis timeout 5 redis-cli PING | grep -qx PONG; then break; fi
+      sleep 2
+    done
+    docker exec gopark-redis timeout 5 redis-cli PING | grep -qx PONG
+    ;;
+  redis-state)
+    docker inspect --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' gopark-redis
+    docker logs --tail 40 gopark-redis 2>&1 | tail -25
+    docker stats --no-stream --format '{{.Name}} {{.CPUPerc}} {{.MemUsage}}' gopark-redis
+    ;;
+  redis-diagnostic)
+    docker exec gopark-api node --input-type=module -e 'import {createRequire} from "node:module";const require=createRequire("/app/apps/api/package.json");const Redis=require("ioredis");const u=new URL(process.env.REDIS_URL);console.log(JSON.stringify({redis:{host:u.hostname,port:u.port||"6379",database:u.pathname.slice(1)||"0",authenticated:!!(u.username||u.password),protocol:u.protocol}}));const r=new Redis(process.env.REDIS_URL,{lazyConnect:true,connectTimeout:5000,maxRetriesPerRequest:1,retryStrategy:()=>null});try{await r.connect();console.log(JSON.stringify({ping:await r.ping(),keys:await r.dbsize()}));}finally{r.disconnect();}'
+    ;;
+  reset-keep-owner)
+    test -s "$RESET_SQL_PATH"
+    test "$(docker exec gopark-postgres psql -U gopark -d gopark -Atc "SELECT count(*) FROM users WHERE role::text='owner' AND status::text='active'")" = 1
+    REDIS_DB=$(docker exec gopark-api node -e 'const u=new URL(process.env.REDIS_URL);const db=u.pathname.slice(1)||"0";if(!/^[0-9]+$/.test(db))throw Error("Invalid Redis DB");process.stdout.write(db)')
+    docker exec gopark-redis timeout 10 redis-cli -n "$REDIS_DB" PING | grep -qx PONG
+    umask 077
+    BACKUP="$BASE/backups/owner-only-reset-$(date -u +%Y%m%dT%H%M%S)-$$"
+    mkdir -p "$BACKUP"
+    resume_services() { docker start gopark-api gopark-worker >/dev/null; docker exec gopark-crm-web nginx -s reload; }
+    trap resume_services EXIT
+    docker stop --time 30 gopark-api gopark-worker >/dev/null
+    docker exec gopark-postgres pg_dump -U gopark -d gopark -Fc > "$BACKUP/database.dump"
+    docker exec -i gopark-postgres pg_restore --list < "$BACKUP/database.dump" > "$BACKUP/database.contents"
+    test -s "$BACKUP/database.dump"
+    test -s "$BACKUP/database.contents"
+    cp "$CONFIG_DIR/.env" "$BACKUP/server.env"
+    cat "$BASE/gopark-current-sha" > "$BACKUP/release-sha"
+    docker exec gopark-redis timeout 10 redis-cli SAVE > "$BACKUP/redis-save.log"
+    docker cp gopark-redis:/data/dump.rdb "$BACKUP/redis.rdb"
+    test -s "$BACKUP/redis.rdb"
+    echo "Verified database, Redis and configuration backup: $BACKUP"
+    docker exec -i gopark-postgres psql -U gopark -d gopark -v ON_ERROR_STOP=1 < "$RESET_SQL_PATH"
+    docker exec gopark-redis timeout 10 redis-cli -n "$REDIS_DB" FLUSHDB | grep -qx OK
+    resume_services
+    trap - EXIT
+    for attempt in $(seq 1 30); do
+      if curl --max-time 5 -fsS http://127.0.0.1:3000/api/health; then break; fi
+      sleep 2
+    done
+    curl --max-time 5 -fsS http://127.0.0.1:3000/api/health
+    docker exec gopark-api node --input-type=module -e 'const {PrismaClient}=await import("./apps/api/node_modules/@prisma/client/default.js");const p=new PrismaClient();try{const owners=await p.user.findMany({select:{id:true,email:true,role:true,status:true}});const tables=await p.$queryRawUnsafe("SELECT tablename FROM pg_tables WHERE schemaname=\x27public\x27 AND tablename NOT IN (\x27users\x27,\x27_prisma_migrations\x27)");const nonempty=[];for(const t of tables){if(!/^[a-z_][a-z0-9_]*$/i.test(t.tablename))throw Error("Unexpected table name");const r=await p.$queryRawUnsafe(`SELECT count(*) AS n FROM public.${t.tablename}`);if(Number(r[0].n)!==0)nonempty.push({table:t.tablename,count:String(r[0].n)});}console.log(JSON.stringify({accounts:owners,nonemptyBusinessTables:nonempty}));if(owners.length!==1||owners[0].role!=="owner"||nonempty.length)throw Error("Post-reset verification failed");}finally{await p.$disconnect()}'
+    ;;
+  prepare-database-reset)
+    umask 077
+    BACKUP="$BASE/backups/before-requested-reset-$(date -u +%Y%m%dT%H%M%S)-$$"
+    mkdir -p "$BACKUP"
+    docker exec gopark-postgres pg_dump -U gopark -d gopark -Fc > "$BACKUP/database.dump"
+    test -s "$BACKUP/database.dump"
+    docker exec -i gopark-postgres pg_restore --list < "$BACKUP/database.dump" > "$BACKUP/database.contents"
+    test -s "$BACKUP/database.contents"
+    cp "$CONFIG_DIR/.env" "$BACKUP/server.env"
+    cat "$BASE/gopark-current-sha" > "$BACKUP/release-sha"
+    echo "Verified pre-reset database and configuration backup: $BACKUP"
+    docker exec gopark-api node --input-type=module -e 'const {PrismaClient}=await import("./apps/api/node_modules/@prisma/client/default.js");const p=new PrismaClient();try{const admins=await p.user.findMany({where:{role:{in:["owner","admin"]}},select:{id:true,role:true,email:true,phone:true,status:true,firstName:true,lastName:true}});console.log(JSON.stringify({administrators:admins,counts:{users:await p.user.count(),drivers:await p.driver.count(),cars:await p.car.count(),contracts:await p.contract.count(),incidents:await p.incident.count()}}));}finally{await p.$disconnect()}'
+    ;;
+  send-vehicle-service)
+    test -n "$VEHICLE_PLATE"
+    [[ "$WORKSHOP" =~ ^(main|body|both)$ ]]
+    umask 077
+    BACKUP="$BASE/backups/service-handoff-$(date -u +%Y%m%dT%H%M%S)-$$"
+    mkdir -p "$BACKUP"
+    docker exec -e "LOOKUP_PLATE=$VEHICLE_PLATE" gopark-api node --input-type=module -e 'const {PrismaClient}=await import("./apps/api/node_modules/@prisma/client/default.js");const p=new PrismaClient();try{const norm=s=>String(s??"").replace(/[^A-Za-z0-9]/g,"").toUpperCase();const cars=(await p.car.findMany({select:{id:true,plateNumber:true,status:true}})).filter(c=>norm(c.plateNumber).includes(norm(process.env.LOOKUP_PLATE)));if(cars.length!==1)throw Error("Expected exactly one matching vehicle");const cases=await p.incident.findMany({where:{carId:cars[0].id,status:"open",incidentType:{in:["repair","accident"]}}});if(cases.length!==1)throw Error("Expected exactly one active incident; refusing to choose a record");process.stdout.write(JSON.stringify({car:cars[0],incident:cases[0]}));}finally{await p.$disconnect()}' > "$BACKUP/incident-before.json"
+    test -s "$BACKUP/incident-before.json"
+    docker exec -i -e "TARGET_WORKSHOP=$WORKSHOP" gopark-api node --input-type=module -e 'import fs from "node:fs";import {isDeepStrictEqual} from "node:util";const before=JSON.parse(fs.readFileSync(0,"utf8"));const {PrismaClient}=await import("./apps/api/node_modules/@prisma/client/default.js");const {IncidentPrismaRepository}=await import("./apps/api/dist/apps/api/src/infrastructure/repositories/incident.prisma.repository.js");const p=new PrismaClient();try{const current=await p.incident.findUnique({where:{id:before.incident.id}});if(!current||current.status!=="open"||!isDeepStrictEqual(JSON.parse(JSON.stringify(current)),before.incident))throw Error("Incident changed; refresh and retry");const shop=process.env.TARGET_WORKSHOP;if(!["main","body","both"].includes(shop))throw Error("Invalid workshop");const active=["sent_to_service","awaiting_repair","in_repair"].includes(current.serviceStage);if(!active&&current.serviceStage!=="accident")throw Error("Unsupported current stage for handoff");if(!(active&&current.serviceDetails?.workshop===shop)){const d=current.serviceDetails??{};const reason=d.reason?.trim()||current.repairNote?.trim()||current.description?.trim()||(current.incidentType==="accident"?"ДТП":"Ремонт");await new IncidentPrismaRepository({client:p}).update(current.id,{serviceStage:active?current.serviceStage:"sent_to_service",serviceDetails:{...d,reason,workshop:shop,repairCategory:d.repairCategory??(current.incidentType==="accident"?"accident":"repair")},...(!d.expectedPayer&&!(d.payments?.length)?{servicePayer:null}:{})});}const item=await p.incident.findUniqueOrThrow({where:{id:current.id}});const car=await p.car.findUniqueOrThrow({where:{id:before.car.id},select:{plateNumber:true,status:true}});if(item.serviceDetails?.workshop!==shop||!["sent_to_service","awaiting_repair","in_repair"].includes(item.serviceStage))throw Error("Handoff verification failed");console.log(JSON.stringify({car,incidentId:item.id,stage:item.serviceStage,workshop:item.serviceDetails.workshop,expectedPayer:item.serviceDetails.expectedPayer??null,payer:item.servicePayer??null,sentAt:item.serviceDetails.sentAt??null,arrivedAt:item.serviceDetails.arrivedAt??null}));}finally{await p.$disconnect()}' < "$BACKUP/incident-before.json"
+    echo "Saved handoff preimage on the server: $BACKUP"
+    ;;
+  vehicle-diagnostic)
+    test -n "$VEHICLE_PLATE"
+    cat "$BASE/gopark-current-sha"
+    docker exec -e "LOOKUP_PLATE=$VEHICLE_PLATE" gopark-api node --input-type=module -e 'const {PrismaClient}=await import("./apps/api/node_modules/@prisma/client/default.js");const p=new PrismaClient();try{const norm=s=>String(s??"").replace(/[^A-Za-z0-9]/g,"").toUpperCase();const key=norm(process.env.LOOKUP_PLATE);const cars=(await p.car.findMany({select:{id:true,plateNumber:true,status:true}})).filter(c=>norm(c.plateNumber).includes(key));const cases=await p.incident.findMany({where:{carId:{in:cars.map(c=>c.id)}},orderBy:{createdAt:"desc"},take:20,select:{id:true,carId:true,incidentType:true,status:true,serviceStage:true,createdAt:true,occurredAt:true,serviceDetails:true,accidentDetails:true}});console.log(JSON.stringify({cars,incidents:cases.map(({serviceDetails,accidentDetails,...i})=>({...i,workshop:serviceDetails?.workshop??null,hasReason:!!serviceDetails?.reason,repairCategory:serviceDetails?.repairCategory??null,hasAccidentDetails:!!accidentDetails,sentAt:serviceDetails?.sentAt??null,arrivedAt:serviceDetails?.arrivedAt??null}))}));}finally{await p.$disconnect()}'
+    ;;
+  repair-consistency)
+    docker exec gopark-api node --input-type=module -e 'const {PrismaClient}=await import("./apps/api/node_modules/@prisma/client/default.js");const p=new PrismaClient();try{const cars=await p.car.findMany({where:{status:"maintenance"},select:{id:true,status:true,assignments:{where:{endedAt:null},select:{driverId:true}}}});const driverIds=cars.flatMap(c=>c.assignments.map(a=>a.driverId));const incidents=await p.incident.findMany({where:{OR:[{carId:{in:cars.map(c=>c.id)}},{driverId:{in:driverIds}}]},select:{id:true,carId:true,driverId:true,incidentType:true,status:true,serviceStage:true,occurredAt:true,serviceDetails:true}});console.log(JSON.stringify({repairCars:cars,relatedIncidents:incidents.map(({serviceDetails,...i})=>({...i,workshop:serviceDetails?.workshop??null,hasReason:!!serviceDetails?.reason}))}));const recent=await p.incident.findMany({where:{incidentType:{in:["repair","accident"]}},orderBy:{createdAt:"desc"},take:20,select:{id:true,carId:true,createdAt:true,occurredAt:true,status:true,serviceStage:true,serviceDetails:true}});console.log(JSON.stringify({recentRepairs:recent.map(({serviceDetails,...i})=>({...i,workshop:serviceDetails?.workshop??null}))}));}finally{await p.$disconnect()}'
+    ;;
+  manager-vehicles)
+    docker exec gopark-api node --input-type=module -e 'const {PrismaClient}=await import("./apps/api/node_modules/@prisma/client/default.js");const p=new PrismaClient();try{const users=await p.user.findMany({where:{role:"manager"},select:{id:true,firstName:true,lastName:true,companyName:true,manager:{select:{id:true,level:true,_count:{select:{cars:true,drivers:true}}}}}});console.log(JSON.stringify(users));const cars=await p.car.findMany({select:{id:true,managerId:true,companyName:true,status:true,assignments:{where:{endedAt:null},select:{driver:{select:{managerId:true,companyName:true}}}}}});console.log(JSON.stringify({cars}));}finally{await p.$disconnect()}'
+    ;;
+  contract-numbers)
+    docker exec gopark-postgres psql -U gopark -d gopark -v ON_ERROR_STOP=1 -c 'SELECT contract_number, status FROM contracts ORDER BY created_at;'
+    docker exec gopark-api node --input-type=module -e 'const {PrismaClient}=await import("./apps/api/node_modules/@prisma/client/default.js");const {ContractPrismaRepository}=await import("./apps/api/dist/apps/api/src/infrastructure/repositories/contract.prisma.repository.js");const client=new PrismaClient();try{console.log(JSON.stringify({nextContractNumber:await new ContractPrismaRepository({client}).getNextNumber()}))}finally{await client.$disconnect()}'
+    ;;
+  contract-term-diagnostic)
+    docker exec gopark-postgres psql -U gopark -d gopark -v ON_ERROR_STOP=1 -x -c "SELECT c.contract_number, d.first_name, d.last_name, d.weekly_day_off, c.start_date::date, c.end_date::date, c.term_months, c.principal_amount, c.upfront_amount, c.financed_amount, c.installment_amount, c.created_at, (SELECT coalesce(sum(o.paid_amount),0) FROM obligations o WHERE o.contract_id=c.id) AS schedule_paid, (SELECT coalesce(sum(o.amount-o.paid_amount),0) FROM obligations o WHERE o.contract_id=c.id) AS raw_debt, (SELECT count(*) FROM payments p WHERE p.contract_id=c.id) AS payments_count, (SELECT coalesce(sum(p.amount),0) FROM payments p WHERE p.contract_id=c.id) AS payments_total, (c.end_date::date-c.start_date::date+1) AS calendar_days, (SELECT count(*) FROM obligations o WHERE o.contract_id=c.id AND o.type::text='installment') AS schedule_rows, (SELECT sum(o.amount) FROM obligations o WHERE o.contract_id=c.id AND o.type::text='installment') AS schedule_total FROM contracts c JOIN drivers d ON d.id=c.driver_id ORDER BY c.created_at DESC LIMIT 1;"
+    ;;
+  status)
+    compose ps
+    cat "$BASE/gopark-current-sha" 2>/dev/null || true
+    curl -fsS http://127.0.0.1:3000/api/health
+    ;;
+  dashboard-totals)
+    # Aggregate diagnostics only: no names, phone numbers or record identifiers.
+    docker exec gopark-postgres psql -U gopark -d gopark -v ON_ERROR_STOP=1 -c "SELECT CURRENT_DATE AS server_date; SELECT status, count(*) AS drivers FROM drivers GROUP BY status; SELECT c.status AS contract_status, d.status AS driver_status, count(*) AS contracts, sum(c.installment_amount) AS daily_payment FROM contracts c LEFT JOIN drivers d ON d.id=c.driver_id GROUP BY c.status,d.status; SELECT o.due_date::date AS due_date, o.type, c.status AS contract_status, d.status AS driver_status, EXISTS(SELECT 1 FROM car_assignments a JOIN cars car ON car.id=a.car_id WHERE a.driver_id=o.driver_id AND a.ended_at IS NULL AND car.status='assigned') AS assigned, count(*) AS obligations, sum(o.amount) AS charged, sum(o.paid_amount) AS paid, sum(GREATEST(COALESCE((o.metadata->>'installmentAmount')::numeric,o.amount)-LEAST(o.paid_amount,COALESCE((o.metadata->>'installmentAmount')::numeric,o.amount)),0)) AS open_installment FROM obligations o LEFT JOIN contracts c ON c.id=o.contract_id LEFT JOIN drivers d ON d.id=o.driver_id WHERE o.due_date::date BETWEEN CURRENT_DATE AND CURRENT_DATE+6 GROUP BY o.due_date::date,o.type,c.status,d.status,assigned ORDER BY o.due_date::date,o.type;"
+    docker exec gopark-api node --input-type=module -e 'const {DashboardService}=await import("./apps/api/dist/apps/api/src/modules/dashboard/dashboard.service.js");const date=new Date().toISOString().slice(0,10);const overview=await new DashboardService().getOverview("today",null,date,date);console.log(JSON.stringify({date,plannedPayment:overview.plannedPayment,debt:overview.debt,actualPayment:overview.actualPayment,overpayment:overview.overpayment}));process.exit(0)'
+    ;;
+  incident-schema)
+    cat "$BASE/gopark-current-sha" 2>/dev/null || true
+    find "$APP_DIR/apps/api/prisma/migrations" -maxdepth 2 -type f -name migration.sql -printf '%P\n' 2>/dev/null || true
+    docker exec gopark-postgres psql -U gopark -d gopark -v ON_ERROR_STOP=1 -c "SELECT to_regclass('public._prisma_migrations') AS migration_table; SELECT column_name, data_type FROM information_schema.columns WHERE table_schema='public' AND table_name='incidents' ORDER BY ordinal_position;"
+    if docker exec gopark-postgres psql -U gopark -d gopark -Atc "SELECT to_regclass('public._prisma_migrations') IS NOT NULL" | grep -q '^t$'; then
+      docker exec gopark-postgres psql -U gopark -d gopark -c 'SELECT migration_name, finished_at, rolled_back_at FROM _prisma_migrations ORDER BY started_at;'
+    fi
+    ;;
+  logs)
+    compose logs --tail=200 api worker crm-web | sed -E 's/(Authorization: Bearer )[A-Za-z0-9._-]+/\1[redacted]/g'
+    ;;
+  recover-contract-runtime)
+    # Restore only compiled module files in the existing application containers.
+    # Database, Redis, configuration and volumes are untouched.
+    RECOVERY_DIR=$(mktemp -d /tmp/gopark-contract-runtime.XXXXXX)
+    docker cp gopark-api:/app/apps/api/dist/packages/contracts/src/. "$RECOVERY_DIR/"
+    test -f "$RECOVERY_DIR/platform.js"
+    for container in gopark-api gopark-worker; do
+      docker cp "$RECOVERY_DIR/." "$container:/app/packages/contracts/src/"
+    done
+    docker restart gopark-api gopark-worker
+    docker restart gopark-crm-web
+    for attempt in $(seq 1 30); do
+      if curl --max-time 5 -fsS http://127.0.0.1:3000/api/health; then
+        echo 'Recovered application health'
+        exit 0
+      fi
+      sleep 2
+    done
+    exit 1
+    ;;
+  restart)
+    compose restart api worker crm-web
+    curl -fsS http://127.0.0.1:3000/api/health
+    ;;
+  redeploy)
+    compose up -d --no-deps --force-recreate api worker crm-web
+    curl -fsS http://127.0.0.1:3000/api/health
+    ;;
+  rollback)
+    test -n "$ROLLBACK_SHA"
+    TARGET="$BASE/gopark-releases/$ROLLBACK_SHA"
+    test -d "$TARGET"
+    cd "$TARGET"
+    compose build api crm-web
+    compose up -d --no-deps --force-recreate api worker crm-web
+    ln -sfn "$TARGET" "$CURRENT"
+    echo "$ROLLBACK_SHA" > "$BASE/gopark-current-sha"
+    curl -fsS http://127.0.0.1:3000/api/health
+    ;;
+  *)
+    echo "Unsupported operation"
+    exit 2
+    ;;
+esac
