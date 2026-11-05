@@ -116,6 +116,23 @@ case "$OPERATION" in
     docker exec gopark-postgres psql -U gopark -d gopark -v ON_ERROR_STOP=1 -c 'SELECT contract_number, status FROM contracts ORDER BY created_at;'
     docker exec gopark-api node --input-type=module -e 'const {PrismaClient}=await import("./apps/api/node_modules/@prisma/client/default.js");const {ContractPrismaRepository}=await import("./apps/api/dist/apps/api/src/infrastructure/repositories/contract.prisma.repository.js");const client=new PrismaClient();try{console.log(JSON.stringify({nextContractNumber:await new ContractPrismaRepository({client}).getNextNumber()}))}finally{await client.$disconnect()}'
     ;;
+  repair-contract-schedule)
+    [[ "$CONTRACT_NUMBER" =~ ^[0-9]{1,12}$ ]]
+    test -s "$REPAIR_SCRIPT_PATH"
+    umask 077
+    BACKUP="$BASE/backups/contract-schedule-$(date -u +%Y%m%dT%H%M%S)-$$"
+    mkdir -p "$BACKUP"
+    docker exec gopark-postgres pg_dump -U gopark -d gopark -Fc > "$BACKUP/database.dump"
+    docker exec -i gopark-postgres pg_restore --list < "$BACKUP/database.dump" > "$BACKUP/database.contents"
+    test -s "$BACKUP/database.dump"
+    test -s "$BACKUP/database.contents"
+    cp "$CONFIG_DIR/.env" "$BACKUP/server.env"
+    docker cp "$REPAIR_SCRIPT_PATH" gopark-api:/tmp/gopark-repair-contract.mjs
+    docker exec -e "CONTRACT_NUMBER=$CONTRACT_NUMBER" gopark-api node /tmp/gopark-repair-contract.mjs preview > "$BACKUP/contract-before.json"
+    test -s "$BACKUP/contract-before.json"
+    echo "Verified backup before schedule repair: $BACKUP"
+    docker exec -i -e "CONTRACT_NUMBER=$CONTRACT_NUMBER" gopark-api node /tmp/gopark-repair-contract.mjs repair < "$BACKUP/contract-before.json"
+    ;;
   contract-term-diagnostic)
     docker exec gopark-postgres psql -U gopark -d gopark -v ON_ERROR_STOP=1 -x -c "SELECT c.contract_number, d.first_name, d.last_name, d.weekly_day_off, c.start_date::date, c.end_date::date, c.term_months, c.principal_amount, c.upfront_amount, c.financed_amount, c.installment_amount, c.created_at, (SELECT coalesce(sum(o.paid_amount),0) FROM obligations o WHERE o.contract_id=c.id) AS schedule_paid, (SELECT coalesce(sum(o.amount-o.paid_amount),0) FROM obligations o WHERE o.contract_id=c.id) AS raw_debt, (SELECT count(*) FROM payments p WHERE p.contract_id=c.id) AS payments_count, (SELECT coalesce(sum(p.amount),0) FROM payments p WHERE p.contract_id=c.id) AS payments_total, (c.end_date::date-c.start_date::date+1) AS calendar_days, (SELECT count(*) FROM obligations o WHERE o.contract_id=c.id AND o.type::text='installment') AS schedule_rows, (SELECT sum(o.amount) FROM obligations o WHERE o.contract_id=c.id AND o.type::text='installment') AS schedule_total FROM contracts c JOIN drivers d ON d.id=c.driver_id ORDER BY c.created_at DESC LIMIT 1;"
     ;;

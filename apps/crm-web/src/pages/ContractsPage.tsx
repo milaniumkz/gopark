@@ -1,3 +1,4 @@
+import { formatContractTerm } from "../lib/contract-term";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Outlet, useSearchParams } from "react-router-dom";
 import { patchJson } from "../lib/api";
@@ -283,8 +284,8 @@ export function ContractsPage() {
   const debtTotal = activeContracts.reduce((sum, item) => sum + item.currentDebt, 0);
   const calculatedTermMonths = useMemo(() => calculateTermMonthsFromDates(startDate, endDate), [endDate, startDate]);
   const payableDays = useMemo(
-    () => calculatePayableDays(startDate, endDate, driverWeekOffMap.get(driverId) ?? null),
-    [driverId, driverWeekOffMap, endDate, startDate],
+    () => calculatePayableDays(startDate, endDate, driverMode === "new" ? newDriverWeeklyDayOff : (driverWeekOffMap.get(driverId) ?? null)),
+    [driverId, driverMode, newDriverWeeklyDayOff, driverWeekOffMap, endDate, startDate],
   );
   const newCarModelOptions = getVehicleModelOptions(newCarMake);
   const calculatedInstallmentDay = useMemo(() => {
@@ -329,11 +330,11 @@ export function ContractsPage() {
     }
 
     const payableDaysNeeded = Math.ceil(principal / dailyPayment);
-    const nextEndDate = calculateEndDateFromPayableDays(startDate, payableDaysNeeded, driverWeekOffMap.get(driverId) ?? null);
+    const nextEndDate = calculateEndDateFromPayableDays(startDate, payableDaysNeeded, driverMode === "new" ? newDriverWeeklyDayOff : (driverWeekOffMap.get(driverId) ?? null));
     if (nextEndDate && nextEndDate !== endDate) {
       setEndDate(nextEndDate);
     }
-  }, [driverId, driverWeekOffMap, endDate, installmentAmount, principalAmount, startDate]);
+  }, [driverId, driverMode, newDriverWeeklyDayOff, driverWeekOffMap, endDate, installmentAmount, principalAmount, startDate]);
 
   useEffect(() => {
     setStatusFilter(searchParams.get("status") ?? "active");
@@ -827,7 +828,7 @@ export function ContractsPage() {
                 </div>
               </div>
               <p className="panel-note">
-                Срок и дата выплаты рассчитываются автоматически из суммы договора и ежедневного платежа: {calculatedTermMonths > 0 ? `${calculatedTermMonths} мес.` : "укажите сумму и платёж"}.
+                Срок и дата выплаты рассчитываются автоматически из суммы договора и ежедневного платежа: {calculatedTermMonths > 0 ? formatContractTerm(startDate, endDate) : "укажите сумму и платёж"}.
                 {" "}Рабочих дней в графике: {payableDays || "—"}. ОСАГО и КАСКО считаются на 1 год от даты начала.
               </p>
               {carMode === "existing" && isPrincipalAbovePreviousIssue ? (

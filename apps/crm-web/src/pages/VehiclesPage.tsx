@@ -1,3 +1,4 @@
+import { formatContractTerm } from "../lib/contract-term";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Outlet, useNavigate, useSearchParams } from "react-router-dom";
 import { formatCurrency, formatDateOnly, getStatusLabel, getStatusTone } from "../lib/utils";
@@ -1119,7 +1120,7 @@ export function VehiclesPage() {
               ) : null}
               {assignDriverId ? (
                 <p className="panel-note">
-                  Дата выплаты и срок рассчитываются автоматически из суммы договора и ежедневного платежа: {calculatedTermMonths > 0 ? `${calculatedTermMonths} мес.` : "укажите сумму и платёж"}.
+                  Дата выплаты и срок рассчитываются автоматически из суммы договора и ежедневного платежа: {calculatedTermMonths > 0 ? formatContractTerm(startDate, endDate) : "укажите сумму и платёж"}.
                   {" "}Рабочих дней в графике: {payableDays || "—"}. Страховку и GPS можно вводить ежедневно или ежемесячно.
                 </p>
               ) : null}

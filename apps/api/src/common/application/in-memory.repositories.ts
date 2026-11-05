@@ -1,3 +1,4 @@
+import { buildInstallmentSchedule } from "../contracts/installment-schedule.js";
 import { IncidentPrismaRepository } from "../../infrastructure/repositories/incident.prisma.repository.js";
 import type { PrismaService } from "../../infrastructure/prisma/prisma.service.js";
 import { nextContractNumber } from "../repositories/contract-number.js";
@@ -126,18 +127,6 @@ function buildDailyInstallmentDueDates(startDate: string, endDate: string, weekl
   }
 
   return dueDates;
-}
-
-function buildInstallmentSchedule(
-  dueDates: string[],
-  financedAmount: number,
-  _installmentAmount: number,
-): Array<{ dueDate: string; amount: number }> {
-  if (!dueDates.length || financedAmount <= 0) {
-    return [];
-  }
-
-  return dueDates.map((dueDate) => ({ dueDate, amount: 2300 }));
 }
 
 function addMonths(date: string, months: number): string {
@@ -644,7 +633,7 @@ export class InMemoryContractRepository implements ContractRepository {
       amount: entry.amount + dailyInsuranceAmount + dailyGpsAmount,
       metadata: buildInstallmentObligationMetadata(entry.amount, dailyGpsAmount, dailyInsuranceAmount),
     }));
-    const equalInstallmentAmount = schedule[0]?.amount ?? input.installmentAmount;
+    const equalInstallmentAmount = input.installmentAmount;
 
     const item = {
       id: `ctr_${seedContracts.length + 1}`,
@@ -790,7 +779,7 @@ export class InMemoryContractRepository implements ContractRepository {
     const driver = seedDrivers.find((entry) => entry.id === detailItem.driverId);
     const recalculatedDueDates = buildDailyInstallmentDueDates(nextStartDate, nextEndDate, driver?.weeklyDayOff);
     const recalculatedSchedule = buildInstallmentSchedule(recalculatedDueDates, nextFinancedAmount, nextInstallmentAmount);
-    const storedInstallmentAmount = recalculatedSchedule[0]?.amount ?? nextInstallmentAmount;
+    const storedInstallmentAmount = nextInstallmentAmount;
     const scheduleChanged =
       nextInstallmentDay !== currentInstallmentDay
       || nextTermMonths !== currentTermMonths

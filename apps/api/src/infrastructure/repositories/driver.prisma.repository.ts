@@ -1,3 +1,4 @@
+import { openPrincipalAmount } from "../../common/contracts/principal-debt.js";
 import type { DriverDetail, DriverListItem, DriverRiskStatusChangeItem, ManagerRiskStatusReviewItem } from "@gopark/contracts";
 import type { CreateDriverDto } from "../../modules/drivers/dto/create-driver.dto.js";
 import type { UpdateDriverDto } from "../../modules/drivers/dto/update-driver.dto.js";
@@ -127,6 +128,8 @@ export class DriverPrismaRepository implements DriverRepository {
               status: true,
               obligations: {
                 select: {
+                  type: true,
+                  metadata: true,
                   amount: true,
                   paidAmount: true,
                 },
@@ -171,7 +174,7 @@ export class DriverPrismaRepository implements DriverRepository {
         photoReviewNote: driver.photoReviewNote ?? null,
         assignedCarId: driver.assignments[0]?.carId ?? null,
         currentDebt: obligations.reduce(
-          (sum: number, item: any) => sum + (decimalToNumber(item.amount) - decimalToNumber(item.paidAmount)),
+          (sum: number, item: any) => sum + openPrincipalAmount(item.type, item.metadata, decimalToNumber(item.amount), decimalToNumber(item.paidAmount)),
           0,
         ),
         totalObligations: obligations.reduce((sum: number, item: any) => sum + decimalToNumber(item.amount), 0),

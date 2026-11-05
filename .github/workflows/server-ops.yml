@@ -7,6 +7,9 @@ on:
         description: status, incident-schema, logs, restart, redeploy, rollback
         required: true
         default: status
+      contract_number:
+        description: Explicit contract number for a requested schedule repair
+        required: false
       workshop:
         description: Workshop for an explicitly requested vehicle handoff (main, body, both)
         required: false
@@ -42,7 +45,9 @@ jobs:
           ROLLBACK_SHA: ${{ github.event.inputs.rollback_sha }}
           VEHICLE_PLATE: ${{ github.event.inputs.vehicle_plate }}
           WORKSHOP: ${{ github.event.inputs.workshop }}
+          CONTRACT_NUMBER: ${{ github.event.inputs.contract_number }}
         run: |
+          [[ -z "$CONTRACT_NUMBER" || "$CONTRACT_NUMBER" =~ ^[0-9]{1,12}$ ]]
           [[ "$OPERATION" =~ ^[a-z-]+$ ]]
           [[ -z "$ROLLBACK_SHA" || "$ROLLBACK_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$VEHICLE_PLATE" =~ ^[a-zA-Z0-9[:space:]-]{0,32}$ ]]
@@ -51,6 +56,9 @@ jobs:
           if [ "$OPERATION" = reset-keep-owner ]; then
             scp -i ~/.ssh/id_ed25519 -P "${{ secrets.PROD_SSH_PORT }}" scripts/reset_database_keep_owner.sql "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}:$RESET_SQL_PATH"
           fi
+          if [ "$OPERATION" = repair-contract-schedule ]; then
+            scp -i ~/.ssh/id_ed25519 -P "${{ secrets.PROD_SSH_PORT }}" scripts/repair_contract_schedule.mjs "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}:/tmp/gopark-repair-contract-$GITHUB_RUN_ID.mjs"
+          fi
           OPS_SCRIPT_PATH="/tmp/gopark-server-ops-$GITHUB_RUN_ID.sh"
           scp -i ~/.ssh/id_ed25519 -P "${{ secrets.PROD_SSH_PORT }}" scripts/server_ops.sh "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}:$OPS_SCRIPT_PATH"
-          ssh -i ~/.ssh/id_ed25519 -p "${{ secrets.PROD_SSH_PORT }}" "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}" "OPERATION='$OPERATION' ROLLBACK_SHA='$ROLLBACK_SHA' VEHICLE_PLATE='$VEHICLE_PLATE' WORKSHOP='$WORKSHOP' RESET_SQL_PATH='$RESET_SQL_PATH' bash '$OPS_SCRIPT_PATH'"
+          ssh -i ~/.ssh/id_ed25519 -p "${{ secrets.PROD_SSH_PORT }}" "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}" "OPERATION='$OPERATION' CONTRACT_NUMBER='$CONTRACT_NUMBER' REPAIR_SCRIPT_PATH='/tmp/gopark-repair-contract-$GITHUB_RUN_ID.mjs' ROLLBACK_SHA='$ROLLBACK_SHA' VEHICLE_PLATE='$VEHICLE_PLATE' WORKSHOP='$WORKSHOP' RESET_SQL_PATH='$RESET_SQL_PATH' bash '$OPS_SCRIPT_PATH'"

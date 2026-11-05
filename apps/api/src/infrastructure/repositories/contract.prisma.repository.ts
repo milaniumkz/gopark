@@ -1,3 +1,6 @@
+import { openPrincipalAmount as getOpenObligationAmount } from "../../common/contracts/principal-debt.js";
+import { BadRequestException } from "@nestjs/common";
+import { buildInstallmentSchedule } from "../../common/contracts/installment-schedule.js";
 import { nextContractNumber } from "../../common/repositories/contract-number.js";
 import type { ContractDetail, ContractListItem } from "@gopark/contracts";
 import type { CreateContractDto } from "../../modules/contracts/dto/create-contract.dto.js";
@@ -7,7 +10,6 @@ import { PrismaService } from "../prisma/prisma.service.js";
 import { seedCars, seedContractDetails, seedContracts, seedDrivers, seedObligations } from "../../data/seed.js";
 import { decimalToNumber, toDateOnly } from "../prisma/prisma.utils.js";
 
-const STANDARD_DAILY_INSTALLMENT_AMOUNT = 2300;
 
 function toContractStartDate(value: string): Date {
   const normalized = value.includes("T") ? value.slice(0, 10) : value;
@@ -78,18 +80,6 @@ function buildDailyInstallmentDueDates(startDate: string, endDate: string, weekl
   return dueDates;
 }
 
-function buildInstallmentSchedule(
-  dueDates: string[],
-  financedAmount: number,
-  _installmentAmount: number,
-): Array<{ dueDate: string; amount: number }> {
-  if (!dueDates.length || financedAmount <= 0) {
-    return [];
-  }
-
-  return dueDates.map((dueDate) => ({ dueDate, amount: STANDARD_DAILY_INSTALLMENT_AMOUNT }));
-}
-
 function addMonths(date: string, months: number): string {
   const source = new Date(`${date}T00:00:00.000Z`);
   source.setUTCMonth(source.getUTCMonth() + months);
@@ -130,16 +120,6 @@ function readObligationBreakdown(metadata: unknown, fallbackAmount: number) {
     gpsAmount: typeof value.gpsAmount === "number" ? value.gpsAmount : 0,
     insuranceAmount: typeof value.insuranceAmount === "number" ? value.insuranceAmount : 0,
   };
-}
-
-function getOpenObligationAmount(type: string, metadata: unknown, amount: number, paidAmount: number): number {
-  if (type !== "installment") {
-    return Math.max(0, amount - paidAmount);
-  }
-
-  const breakdown = readObligationBreakdown(metadata, amount);
-  const paidTowardInstallment = Math.min(Math.max(0, paidAmount), breakdown.installmentAmount);
-  return Math.max(0, breakdown.installmentAmount - paidTowardInstallment);
 }
 
 function getTodayDateOnly(): string {
@@ -554,7 +534,7 @@ export class ContractPrismaRepository implements ContractRepository {
       const monthlyGpsAmount = resolveMonthlyStoredAmount(input.monthlyGpsAmount, input.gpsBillingMode);
       const dailyInsuranceAmount = resolveDailyChargeAmount(input.monthlyInsuranceAmount, input.insuranceBillingMode);
       const dailyGpsAmount = resolveDailyChargeAmount(input.monthlyGpsAmount, input.gpsBillingMode);
-      const equalInstallmentAmount = schedule[0]?.amount ?? input.installmentAmount;
+      const equalInstallmentAmount = input.installmentAmount;
       const osagoEndDate = addOneYearDateOnly(input.osagoStartDate);
       const cascoEndDate = addOneYearDateOnly(input.cascoStartDate);
       const contract = await prisma.$transaction(async (tx: any) => {
@@ -705,7 +685,7 @@ export class ContractPrismaRepository implements ContractRepository {
         installmentAmount: decimalToNumber(contract.installmentAmount),
         monthlyInsuranceAmount,
         monthlyGpsAmount,
-        currentDebt: schedule.reduce((sum, item) => sum + item.amount + dailyInsuranceAmount + dailyGpsAmount, 0) + insuranceSchedule.reduce((sum, item) => sum + item.amount, 0) + gpsSchedule.reduce((sum, item) => sum + item.amount, 0),
+        currentDebt: schedule.reduce((sum, item) => sum + item.amount, 0),
         termMonths,
         startDate: input.startDate,
         endDate: input.endDate,
@@ -780,9 +760,9 @@ export class ContractPrismaRepository implements ContractRepository {
       const nextContractNumber = input.contractNumber?.trim() || current.contractNumber;
       const nextPrincipalAmount = input.principalAmount ?? decimalToNumber(current.principalAmount);
       const nextFinancedAmount = input.financedAmount ?? decimalToNumber(current.financedAmount);
-      const nextInstallmentAmount = STANDARD_DAILY_INSTALLMENT_AMOUNT;
-      const nextMonthlyInsuranceAmount = input.monthlyInsuranceAmount ?? (decimalToNumber(current.monthlyInsuranceAmount ?? 0) || null);
-      const nextMonthlyGpsAmount = input.monthlyGpsAmount ?? (decimalToNumber(current.monthlyGpsAmount ?? 0) || null);
+      const nextInstallmentAmount = input.installmentAmount ?? decimalToNumber(current.installmentAmount);
+      const nextMonthlyInsuranceAmount = input.monthlyInsuranceAmount !== undefined ? input.monthlyInsuranceAmount : (decimalToNumber(current.monthlyInsuranceAmount ?? 0) || null);
+      const nextMonthlyGpsAmount = input.monthlyGpsAmount !== undefined ? input.monthlyGpsAmount : (decimalToNumber(current.monthlyGpsAmount ?? 0) || null);
       const nextStartDate: string = input.startDate ?? toDateOnly(current.startDate);
       const nextEndDate: string = input.endDate ?? (current.endDate ? toDateOnly(current.endDate) : nextStartDate);
       const nextInstallmentDay = input.installmentDay ?? (new Date(`${nextEndDate}T00:00:00.000Z`).getUTCDate() || current.installmentDay);
@@ -817,10 +797,26 @@ export class ContractPrismaRepository implements ContractRepository {
       });
       const effectiveCarManagerId = currentCar?.managerId ?? driver?.managerId ?? null;
       const recalculatedDueDates = buildDailyInstallmentDueDates(nextStartDate, nextEndDate, driver?.weeklyDayOff);
-      const recalculatedSchedule = buildInstallmentSchedule(recalculatedDueDates, nextFinancedAmount, nextInstallmentAmount);
-      const storedInstallmentAmount = recalculatedSchedule[0]?.amount ?? nextInstallmentAmount;
+      const recalculatedSchedule = scheduleChanged ? buildInstallmentSchedule(recalculatedDueDates, nextFinancedAmount, nextInstallmentAmount) : [];
+      const storedInstallmentAmount = nextInstallmentAmount;
 
+      const existingObligations = scheduleChanged ? await prisma.obligation.findMany({ where: { contractId }, select: { type: true, metadata: true } }) : [];
+      const oldBreakdown = existingObligations.filter((o: any) => o.type === "installment").map((o: any) => readObligationBreakdown(o.metadata, 0));
+      const dailyInsurance = oldBreakdown.find((b: any) => b.insuranceAmount > 0)?.insuranceAmount ?? 0;
+      const dailyGps = oldBreakdown.find((b: any) => b.gpsAmount > 0)?.gpsAmount ?? 0;
+      const nextDailyInsurance = dailyInsurance > 0 ? (nextMonthlyInsuranceAmount ?? 0) / 30 : 0;
+      const nextDailyGps = dailyGps > 0 ? (nextMonthlyGpsAmount ?? 0) / 30 : 0;
+      const recurringCharges = scheduleChanged ? [
+        ...buildRecurringChargeSchedule("insurance", nextMonthlyInsuranceAmount ?? undefined, dailyInsurance > 0 ? "daily" : "monthly", nextStartDate, nextEndDate, recalculatedDueDates),
+        ...buildRecurringChargeSchedule("gps", nextMonthlyGpsAmount ?? undefined, dailyGps > 0 ? "daily" : "monthly", nextStartDate, nextEndDate, recalculatedDueDates),
+      ] : [];
       await prisma.$transaction(async (tx: any) => {
+        // Serialize contract edits; refuse to replace paid or deferred schedule rows.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(2036548157)`;
+        if (scheduleChanged) await tx.$queryRaw`SELECT id FROM obligations WHERE contract_id = ${contractId}::uuid FOR UPDATE`;
+        if (scheduleChanged && await tx.obligation.findFirst({ where: { contractId, OR: [{ paidAmount: { gt: 0 } }, { deferredUntil: { not: null } }, { deferredByStatusRequestId: { not: null } }] } })) {
+          throw new BadRequestException("Нельзя перестроить график договора после оплат или подтверждённых переносов.");
+        }
         await tx.contract.update({
           where: { id: contractId },
           data: {
@@ -911,18 +907,20 @@ export class ContractPrismaRepository implements ContractRepository {
             where: { contractId },
           });
           if (recalculatedSchedule.length) {
-            const dailyInsuranceAmount = 0;
-            const dailyGpsAmount = 0;
             await tx.obligation.createMany({
-              data: recalculatedSchedule.map(({ dueDate, amount }, index) => ({
+              data: [...recalculatedSchedule.map(({ dueDate, amount }, index) => ({
                 contractId,
                 driverId: current.driverId,
                 type: "installment",
                 dueDate: new Date(`${dueDate}T00:00:00.000Z`),
-                amount: amount + dailyInsuranceAmount + dailyGpsAmount,
-                metadata: buildInstallmentObligationMetadata(amount, 0, 0),
+                amount: Math.round((amount + nextDailyInsurance + nextDailyGps) * 100) / 100,
+                metadata: buildInstallmentObligationMetadata(amount, nextDailyGps, nextDailyInsurance),
                 externalReference: `${nextContractNumber}:${index + 1}`,
-              })),
+              })), ...recurringCharges.map(({ type, dueDate, amount }, index) => ({
+                contractId, driverId: current.driverId, type,
+                dueDate: new Date(`${dueDate}T00:00:00.000Z`), amount,
+                externalReference: `${nextContractNumber}:${type}:${index + 1}`,
+              }))],
             });
           }
         }

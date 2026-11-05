@@ -1,3 +1,4 @@
+import { openPrincipalAmount as getOpenObligationAmount } from "../../common/contracts/principal-debt.js";
 import type { VehicleDetail, VehicleListItem } from "@gopark/contracts";
 import type { CreateCarDto } from "../../modules/cars/dto/create-car.dto.js";
 import type { UpdateCarDto } from "../../modules/cars/dto/update-car.dto.js";
@@ -33,16 +34,6 @@ function readInstallmentAmount(metadata: unknown, fallbackAmount: number): numbe
     : {};
 
   return typeof value.installmentAmount === "number" ? value.installmentAmount : fallbackAmount;
-}
-
-function getOpenObligationAmount(type: string, metadata: unknown, amount: number, paidAmount: number): number {
-  if (type !== "installment") {
-    return Math.max(0, amount - paidAmount);
-  }
-
-  const installmentAmount = readInstallmentAmount(metadata, amount);
-  const paidTowardInstallment = Math.min(Math.max(0, paidAmount), installmentAmount);
-  return Math.max(0, installmentAmount - paidTowardInstallment);
 }
 
 function mapVehicleDocumentFields(car: {

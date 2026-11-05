@@ -1,3 +1,4 @@
+import { formatContractTerm } from "../lib/contract-term";
 import { DateRangePicker } from "../ui/DateRangePicker";
 import { Link } from "react-router-dom";
 import { useState } from "react";
@@ -1362,7 +1363,7 @@ export function DashboardPage() {
                 <input value={quickEndDate} onChange={(event) => setQuickEndDate(event.target.value)} type="date" min="2020-01-01" />
               </div>
               <p className="panel-note">
-                Дата выплаты считается автоматически из суммы и ежедневного платежа: {quickTermMonths > 0 ? `${quickTermMonths} мес.` : "укажите сумму и платёж"}.
+                Дата выплаты считается автоматически из суммы и ежедневного платежа: {quickTermMonths > 0 ? formatContractTerm(quickStartDate, quickEndDate) : "укажите сумму и платёж"}.
                 {" "}Рабочих дней: {quickPayableDays || "—"}.
               </p>
               <div className="toolbar">
