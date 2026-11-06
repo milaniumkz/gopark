@@ -1,3 +1,4 @@
+import { getLocalDateOnly } from "../lib/utils";
 import { formatContractTerm } from "../lib/contract-term";
 import { DateRangePicker } from "../ui/DateRangePicker";
 import { Link } from "react-router-dom";
@@ -239,13 +240,6 @@ function toOptionalNumber(value: string): number | undefined {
   return Number.isFinite(amount) && amount > 0 ? amount : undefined;
 }
 
-function getLocalDateOnly(date = new Date()): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
 function getDashboardPeriodRange(period: "today" | "week" | "month" | "year"): { startDate: string; endDate: string } {
   const start = new Date(`${getLocalDateOnly()}T00:00:00.000Z`);
   const end = new Date(start);
@@ -320,7 +314,7 @@ export function DashboardPage() {
   const [quickOsagoStartDate, setQuickOsagoStartDate] = useState("");
   const [quickHasCasco, setQuickHasCasco] = useState(false);
   const [quickCascoStartDate, setQuickCascoStartDate] = useState("");
-  const [quickStartDate, setQuickStartDate] = useState(new Date().toISOString().slice(0, 10));
+  const [quickStartDate, setQuickStartDate] = useState(getLocalDateOnly);
   const [quickEndDate, setQuickEndDate] = useState("");
   const [idleVehicleFilter, setIdleVehicleFilter] = useState<DashboardIdleVehicleFilter>("all");
   const paymentPeriodRange = getDashboardPeriodRange(period);
@@ -400,6 +394,10 @@ export function DashboardPage() {
     () => calculatePayableDays(quickStartDate, quickEndDate, quickDriverWeeklyDayOff || null),
     [quickDriverWeeklyDayOff, quickEndDate, quickStartDate],
   );
+
+  useEffect(() => {
+    if (isQuickCreateOpen) setQuickStartDate(getLocalDateOnly());
+  }, [isQuickCreateOpen]);
 
   useEffect(() => {
     setDashboardDateFrom(paymentPeriodRange.startDate);
@@ -921,7 +919,7 @@ export function DashboardPage() {
       setQuickOsagoStartDate("");
       setQuickHasCasco(false);
       setQuickCascoStartDate("");
-      setQuickStartDate("");
+      setQuickStartDate(getLocalDateOnly());
       setQuickEndDate("");
     } catch (quickCreateError) {
       setQuickCreateMessage(quickCreateError instanceof Error ? quickCreateError.message : "Не удалось создать водителя, авто и договор.");

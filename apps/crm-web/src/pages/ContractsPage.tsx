@@ -1,3 +1,4 @@
+import { getLocalDateOnly } from "../lib/utils";
 import { formatContractTerm } from "../lib/contract-term";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Outlet, useSearchParams } from "react-router-dom";
@@ -166,7 +167,7 @@ export function ContractsPage() {
   const [osagoStartDate, setOsagoStartDate] = useState("");
   const [hasCasco, setHasCasco] = useState(false);
   const [cascoStartDate, setCascoStartDate] = useState("");
-  const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
+  const [startDate, setStartDate] = useState(getLocalDateOnly);
   const [endDate, setEndDate] = useState("");
   const [formMessage, setFormMessage] = useState<string | null>(null);
   const [isCreatePanelOpen, setIsCreatePanelOpen] = useState(false);
@@ -320,6 +321,10 @@ export function ContractsPage() {
   );
   const isPrincipalAbovePreviousIssue =
     selectedCarMaxIssuedAmount > 0 && Number(principalAmount) > selectedCarMaxIssuedAmount;
+
+  useEffect(() => {
+    if (isCreatePanelOpen) setStartDate(getLocalDateOnly());
+  }, [isCreatePanelOpen]);
 
   useEffect(() => {
     const principal = Number(principalAmount);
@@ -528,7 +533,7 @@ export function ContractsPage() {
     setOsagoStartDate("");
     setHasCasco(false);
     setCascoStartDate("");
-    setStartDate("");
+    setStartDate(getLocalDateOnly());
     setEndDate("");
     if (driverMode === "new") {
       setNewDriverFirstName("");

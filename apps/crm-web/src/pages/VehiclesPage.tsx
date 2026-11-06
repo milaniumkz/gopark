@@ -1,3 +1,4 @@
+import { getLocalDateOnly } from "../lib/utils";
 import { formatContractTerm } from "../lib/contract-term";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Outlet, useNavigate, useSearchParams } from "react-router-dom";
@@ -203,7 +204,7 @@ export function VehiclesPage() {
   const [monthlyGpsAmount, setMonthlyGpsAmount] = useState("");
   const [insuranceMode, setInsuranceMode] = useState<"monthly" | "daily">("monthly");
   const [gpsMode, setGpsMode] = useState<"monthly" | "daily">("monthly");
-  const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
+  const [startDate, setStartDate] = useState(getLocalDateOnly);
   const [endDate, setEndDate] = useState("");
   const [formMessage, setFormMessage] = useState<string | null>(null);
   const [presetNotice, setPresetNotice] = useState<string | null>(null);
@@ -496,6 +497,10 @@ export function VehiclesPage() {
   }, [endDate]);
 
   useEffect(() => {
+    if (isCreateModalOpen) setStartDate(getLocalDateOnly());
+  }, [isCreateModalOpen]);
+
+  useEffect(() => {
     const principal = Number(principalAmount);
     const dailyPayment = Number(installmentAmount);
     if (!startDate || !Number.isFinite(principal) || !Number.isFinite(dailyPayment) || principal <= 0 || dailyPayment <= 0) {
@@ -773,7 +778,7 @@ export function VehiclesPage() {
     setMonthlyGpsAmount("");
     setInsuranceMode("monthly");
     setGpsMode("monthly");
-    setStartDate("");
+    setStartDate(getLocalDateOnly());
     setEndDate("");
     setFormMessage(assignDriverId ? "Автомобиль добавлен, договор создан, машина выведена на линию." : "Автомобиль добавлен.");
     vinInputRef.current?.focus();
