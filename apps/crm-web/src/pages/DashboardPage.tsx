@@ -1,4 +1,3 @@
-import { getDefaultContractCompany, getLocalDateOnly } from "../lib/utils";
 import { formatContractTerm } from "../lib/contract-term";
 import { DateRangePicker } from "../ui/DateRangePicker";
 import { Link } from "react-router-dom";
@@ -24,6 +23,8 @@ import type {
 } from "@gopark/contracts";
 import { fetchJson, fetchJsonWithQuery, patchJson, postJson } from "../lib/api";
 import {
+  getDefaultContractCompany,
+  getLocalDateOnly,
   downloadCsv,
   formatCurrency,
   formatDateOnly,
