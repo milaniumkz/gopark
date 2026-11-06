@@ -1,4 +1,4 @@
-import { getLocalDateOnly } from "../lib/utils";
+import { getDefaultContractCompany, getLocalDateOnly } from "../lib/utils";
 import { formatContractTerm } from "../lib/contract-term";
 import { DateRangePicker } from "../ui/DateRangePicker";
 import { Link } from "react-router-dom";
@@ -299,7 +299,7 @@ export function DashboardPage() {
   const [quickMake, setQuickMake] = useState("");
   const [quickModel, setQuickModel] = useState("");
   const quickModelOptions = getVehicleModelOptions(quickMake);
-  const [quickCompanyName, setQuickCompanyName] = useState(session.companyName?.trim() || "");
+  const [quickCompanyName, setQuickCompanyName] = useState("");
   const [quickProductionYear, setQuickProductionYear] = useState("");
   const [quickMileage, setQuickMileage] = useState("");
   const nextContractNumber = useApiQuery<{ contractNumber: string }>("contracts/next-number");
@@ -394,6 +394,11 @@ export function DashboardPage() {
     () => calculatePayableDays(quickStartDate, quickEndDate, quickDriverWeeklyDayOff || null),
     [quickDriverWeeklyDayOff, quickEndDate, quickStartDate],
   );
+
+  const defaultContractCompany = getDefaultContractCompany(companies, session.companyName);
+  useEffect(() => {
+    if (isQuickCreateOpen) setQuickCompanyName((current) => current || defaultContractCompany);
+  }, [isQuickCreateOpen, defaultContractCompany]);
 
   useEffect(() => {
     if (isQuickCreateOpen) setQuickStartDate(getLocalDateOnly());
@@ -907,7 +912,7 @@ export function DashboardPage() {
       setQuickModel("");
       setQuickProductionYear("");
       setQuickMileage("");
-      setQuickCompanyName("");
+      setQuickCompanyName(defaultContractCompany);
       void nextContractNumber.refetch({ silent: true }).catch(() => undefined);
       setQuickPrincipalAmount("");
       setQuickDailyPayment("");

@@ -1,4 +1,4 @@
-import { getLocalDateOnly } from "../lib/utils";
+import { getDefaultContractCompany, getLocalDateOnly } from "../lib/utils";
 import { formatContractTerm } from "../lib/contract-term";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Outlet, useSearchParams } from "react-router-dom";
@@ -153,7 +153,7 @@ export function ContractsPage() {
   const [newCarProductionYear, setNewCarProductionYear] = useState("");
   const [newCarMileage, setNewCarMileage] = useState("");
   const [newCarColor, setNewCarColor] = useState("");
-  const [newRecordCompanyName, setNewRecordCompanyName] = useState(session.companyName?.trim() || "");
+  const [newRecordCompanyName, setNewRecordCompanyName] = useState("");
   const nextContractNumber = useApiQuery<{ contractNumber: string }>("contracts/next-number");
   const contractNumber = nextContractNumber.data?.contractNumber ?? "";
   const [principalAmount, setPrincipalAmount] = useState("1000000");
@@ -321,6 +321,11 @@ export function ContractsPage() {
   );
   const isPrincipalAbovePreviousIssue =
     selectedCarMaxIssuedAmount > 0 && Number(principalAmount) > selectedCarMaxIssuedAmount;
+
+  const defaultContractCompany = getDefaultContractCompany(companies, session.companyName);
+  useEffect(() => {
+    if (isCreatePanelOpen) setNewRecordCompanyName((current) => current || defaultContractCompany);
+  }, [isCreatePanelOpen, defaultContractCompany]);
 
   useEffect(() => {
     if (isCreatePanelOpen) setStartDate(getLocalDateOnly());
@@ -518,7 +523,7 @@ export function ContractsPage() {
     nextSearchParams.delete("driverId");
     nextSearchParams.delete("carId");
     setSearchParams(nextSearchParams, { replace: true });
-    setNewRecordCompanyName("");
+    setNewRecordCompanyName(defaultContractCompany);
     setDriverId("");
     setCarId("");
     void nextContractNumber.refetch({ silent: true }).catch(() => undefined);

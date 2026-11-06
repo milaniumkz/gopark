@@ -1,4 +1,4 @@
-import { getLocalDateOnly } from "../lib/utils";
+import { getDefaultContractCompany, getLocalDateOnly } from "../lib/utils";
 import { formatContractTerm } from "../lib/contract-term";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Outlet, useNavigate, useSearchParams } from "react-router-dom";
@@ -496,6 +496,11 @@ export function VehiclesPage() {
     return new Date(endDate).getDate() || 15;
   }, [endDate]);
 
+  const defaultContractCompany = getDefaultContractCompany(companies, session.companyName);
+  useEffect(() => {
+    if (isCreateModalOpen) setCompanyName((current) => current || defaultContractCompany);
+  }, [isCreateModalOpen, defaultContractCompany]);
+
   useEffect(() => {
     if (isCreateModalOpen) setStartDate(getLocalDateOnly());
   }, [isCreateModalOpen]);
@@ -755,7 +760,7 @@ export function VehiclesPage() {
     setPlateNumber("");
     setMake("");
     setModel("");
-    setCompanyName("");
+    setCompanyName(defaultContractCompany);
     setProductionYear("");
     setMileage("");
     setColor("");

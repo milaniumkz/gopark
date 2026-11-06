@@ -441,3 +441,9 @@ export function getAuditActionLabel(action: string): string {
 
   return labels[action] ?? action;
 }
+
+/** Resolve the existing company name; do not create a second spelling. */
+export function getDefaultContractCompany(companies: string[], fallback?: string | null): string {
+  return companies.find((name) => ["гоупарк", "гопарк", "gopark"].includes(name.toLowerCase().replace(/[\s._-]/g, "")))
+    ?? (fallback && companies.includes(fallback) ? fallback : "");
+}
