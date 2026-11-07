@@ -105,7 +105,9 @@ class DriverShell extends StatefulWidget {
 class _DriverShellState extends State<DriverShell> with WidgetsBindingObserver {
   int index = 0;
   int unreadNotifications = 0;
-  final repository = DriverRepository(DriverApiClient());
+  late final repository = DriverRepository(DriverApiClient(
+    onSessionRefreshed: _persistRefreshedSession,
+  ));
   DriverAuthSessionDto? session;
   String? authError;
   String? authInfo;
@@ -160,6 +162,17 @@ class _DriverShellState extends State<DriverShell> with WidgetsBindingObserver {
     } catch (_) {
       await removeStorageValue(_driverSessionStorageKey);
     }
+  }
+
+  Future<void> _persistRefreshedSession(DriverAuthSessionDto refreshed) async {
+    await writeStorageValue(
+      _driverSessionStorageKey, _encodeDriverStoredSession(refreshed),
+    );
+    if (repository.currentSession?.refreshToken != refreshed.refreshToken) {
+      if (repository.currentSession == null) await removeStorageValue(_driverSessionStorageKey);
+      return;
+    }
+    if (mounted) setState(() => session = refreshed);
   }
 
   Future<void> _refreshStoredSession() async {
@@ -1812,11 +1825,17 @@ class _DriverPayoutPageState extends State<DriverPayoutPage> {
   void _reload() {
     _summaryFuture = widget.repository.loadHomeSummary(widget.driverId);
     _payoutsFuture = widget.repository.loadPayouts(widget.driverId);
+    // History may fail before its FutureBuilder becomes visible.
+    _payoutsFuture.ignore();
   }
 
   Future<void> _refresh() async {
     setState(_reload);
-    await Future.wait([_summaryFuture, _payoutsFuture]);
+    try {
+      await Future.wait([_summaryFuture, _payoutsFuture]);
+    } catch (_) {
+      // FutureBuilders show each error without an uncaught retry exception.
+    }
   }
 
   @override
@@ -1829,310 +1848,327 @@ class _DriverPayoutPageState extends State<DriverPayoutPage> {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<DriverHomeSummaryDto>(
-      future: _summaryFuture,
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return ListView(
-            padding: const EdgeInsets.all(20),
-            children: [
-              const _DriverHero(
-                title: 'Вывод средств',
-                subtitle: 'Баланс, выбор суммы и история заявок',
-                icon: Icons.account_balance_wallet_rounded,
-              ),
-              const SizedBox(height: 20),
-              _DriverErrorCard(
-                title: 'Не удалось загрузить баланс',
-                lines: const ['Проверь соединение и попробуй обновить экран.'],
-                onRetry: _refresh,
-              ),
-            ],
+    return Scaffold(
+      appBar: AppBar(title: const Text('Вывод средств')),
+      body: SafeArea(
+          child: FutureBuilder<DriverHomeSummaryDto>(
+        future: _summaryFuture,
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return ListView(
+              padding: const EdgeInsets.all(20),
+              children: [
+                const _DriverHero(
+                  title: 'Вывод средств',
+                  subtitle: 'Баланс, выбор суммы и история заявок',
+                  icon: Icons.account_balance_wallet_rounded,
+                ),
+                const SizedBox(height: 20),
+                _DriverErrorCard(
+                  title: 'Не удалось загрузить баланс',
+                  lines: [
+                    snapshot.error is DriverApiException
+                        ? (snapshot.error! as DriverApiException).message
+                        : 'Проверь соединение и попробуй обновить экран.'
+                  ],
+                  onRetry: _refresh,
+                ),
+              ],
+            );
+          }
+
+          final data = snapshot.data;
+          final available = (data?.availableToWithdraw ?? 0).toInt();
+          final quickAmounts = <int>{
+            5000,
+            10000,
+            20000,
+            available,
+          }.where((value) => value > 0).toList()
+            ..sort();
+          final customAmount = int.tryParse(amountController.text.trim());
+          final requestedBase = customAmount ?? selectedAmount;
+          final int amountToRequest =
+              available > 0 ? requestedBase.clamp(0, available) : 0;
+          final hasInvalidCustomAmount =
+              amountController.text.trim().isNotEmpty && customAmount == null;
+          final cardDigits = cardNumberController.text.replaceAll(
+            RegExp(r'\D'),
+            '',
           );
-        }
+          final cardHolder = cardHolderController.text.trim();
+          final canUseCard = cardDigits.length >= 12 && cardHolder.length >= 3;
+          final payoutDestination = canUseCard
+              ? 'Карта **** ${cardDigits.substring(cardDigits.length - 4)} · $cardHolder'
+              : null;
 
-        final data = snapshot.data;
-        final available = (data?.availableToWithdraw ?? 0).toInt();
-        final quickAmounts = <int>{5000, 10000, 20000, available}
-            .where((value) => value > 0)
-            .toList()
-          ..sort();
-        final customAmount = int.tryParse(amountController.text.trim());
-        final requestedBase = customAmount ?? selectedAmount;
-        final int amountToRequest =
-            available > 0 ? requestedBase.clamp(0, available) : 0;
-        final hasInvalidCustomAmount =
-            amountController.text.trim().isNotEmpty && customAmount == null;
-        final cardDigits = cardNumberController.text.replaceAll(
-          RegExp(r'\D'),
-          '',
-        );
-        final cardHolder = cardHolderController.text.trim();
-        final canUseCard = cardDigits.length >= 12 && cardHolder.length >= 3;
-        final payoutDestination = canUseCard
-            ? 'Карта **** ${cardDigits.substring(cardDigits.length - 4)} · $cardHolder'
-            : null;
-
-        return RefreshIndicator(
-          onRefresh: _refresh,
-          child: ListView(
-            padding: const EdgeInsets.all(20),
-            children: [
-              const _DriverHero(
-                title: 'Вывод средств',
-                subtitle: 'Баланс, выбор суммы и история заявок',
-                icon: Icons.account_balance_wallet_rounded,
-              ),
-              const SizedBox(height: 20),
-              HighlightCard(
-                title: 'Доступно к выводу',
-                value: '$available сом',
-                subtitle: 'Баланс Яндекс: ${data?.yandexBalance ?? 0} сом',
-                colorA: const Color(0xFFEAB308),
-                colorB: _driverOrange,
-                icon: Icons.wallet_rounded,
-                badge: available > 0 ? 'Готово' : 'Пусто',
-              ),
-              const SizedBox(height: 16),
-              GridView.count(
-                crossAxisCount: 2,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                children: [
-                  MetricTile(
-                    title: 'Выбранная сумма',
-                    value: '$amountToRequest сом',
-                    icon: Icons.tune_rounded,
-                    colorA: _driverBlue,
-                    colorB: _driverCyan,
-                  ),
-                  MetricTile(
-                    title: 'Проверка данных',
-                    value: available > 0 ? 'Активна' : 'Ожидание',
-                    icon: Icons.policy_outlined,
-                    colorA: _driverPurple,
-                    colorB: const Color(0xFFEC4899),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              InfoCard(
-                title: 'Следующий шаг',
-                lines: [
-                  if (available > 0)
-                    'Можно создать заявку на вывод прямо сейчас.'
-                  else if ((data?.yandexBalance ?? 0) > 0)
-                    'Баланс есть, но свободной суммы на вывод пока нет. Проверь платежи и события.'
-                  else
-                    'Сейчас свободного остатка нет. Сначала накопи баланс или проверь новые события.',
-                ],
-                icon: Icons.explore_outlined,
-              ),
-              const SizedBox(height: 16),
-              Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: widget.onOpenPayments,
-                    icon: const Icon(Icons.receipt_long_outlined),
-                    label: const Text('Платежи'),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: widget.onOpenActivity,
-                    icon: const Icon(Icons.notifications_outlined),
-                    label: const Text('Чат'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              Container(
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.94),
-                  borderRadius: BorderRadius.circular(24),
-                  boxShadow: [
-                    BoxShadow(
-                      color: _driverText.withValues(alpha: 0.05),
-                      blurRadius: 24,
-                      offset: const Offset(0, 12),
+          return RefreshIndicator(
+            onRefresh: _refresh,
+            child: ListView(
+              padding: const EdgeInsets.all(20),
+              children: [
+                const _DriverHero(
+                  title: 'Вывод средств',
+                  subtitle: 'Баланс, выбор суммы и история заявок',
+                  icon: Icons.account_balance_wallet_rounded,
+                ),
+                const SizedBox(height: 20),
+                HighlightCard(
+                  title: 'Доступно к выводу',
+                  value: '$available сом',
+                  subtitle: 'Баланс Яндекс: ${data?.yandexBalance ?? 0} сом',
+                  colorA: const Color(0xFFEAB308),
+                  colorB: _driverOrange,
+                  icon: Icons.wallet_rounded,
+                  badge: available > 0 ? 'Готово' : 'Пусто',
+                ),
+                const SizedBox(height: 16),
+                GridView.count(
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  children: [
+                    MetricTile(
+                      title: 'Выбранная сумма',
+                      value: '$amountToRequest сом',
+                      icon: Icons.tune_rounded,
+                      colorA: _driverBlue,
+                      colorB: _driverCyan,
+                    ),
+                    MetricTile(
+                      title: 'Проверка данных',
+                      value: available > 0 ? 'Активна' : 'Ожидание',
+                      icon: Icons.policy_outlined,
+                      colorA: _driverPurple,
+                      colorB: const Color(0xFFEC4899),
                     ),
                   ],
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                const SizedBox(height: 16),
+                InfoCard(
+                  title: 'Следующий шаг',
+                  lines: [
+                    if (available > 0)
+                      'Можно создать заявку на вывод прямо сейчас.'
+                    else if ((data?.yandexBalance ?? 0) > 0)
+                      'Баланс есть, но свободной суммы на вывод пока нет. Проверь платежи и события.'
+                    else
+                      'Сейчас свободного остатка нет. Сначала накопи баланс или проверь новые события.',
+                  ],
+                  icon: Icons.explore_outlined,
+                ),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
                   children: [
-                    const Text(
-                      'Быстрый выбор суммы',
-                      style:
-                          TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                    OutlinedButton.icon(
+                      onPressed: widget.onOpenPayments,
+                      icon: const Icon(Icons.receipt_long_outlined),
+                      label: const Text('Платежи'),
                     ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      'Сумма проверяется по доступному балансу и уже созданным заявкам.',
-                      style: TextStyle(color: _driverMuted, height: 1.5),
+                    OutlinedButton.icon(
+                      onPressed: widget.onOpenActivity,
+                      icon: const Icon(Icons.notifications_outlined),
+                      label: const Text('Чат'),
                     ),
-                    const SizedBox(height: 16),
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      children: quickAmounts
+                  ],
+                ),
+                const SizedBox(height: 20),
+                Container(
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.94),
+                    borderRadius: BorderRadius.circular(24),
+                    boxShadow: [
+                      BoxShadow(
+                        color: _driverText.withValues(alpha: 0.05),
+                        blurRadius: 24,
+                        offset: const Offset(0, 12),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Быстрый выбор суммы',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Сумма проверяется по доступному балансу и уже созданным заявкам.',
+                        style: TextStyle(color: _driverMuted, height: 1.5),
+                      ),
+                      const SizedBox(height: 16),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: quickAmounts
+                            .map(
+                              (value) => DriverAmountChip(
+                                label: value == available
+                                    ? 'Все $value'
+                                    : '$value сом',
+                                selected: amountToRequest == value,
+                                onTap: () => setState(() {
+                                  selectedAmount = value;
+                                  amountController.text = '';
+                                }),
+                              ),
+                            )
+                            .toList(),
+                      ),
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: amountController,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly
+                        ],
+                        decoration: _driverInputDecoration(
+                          'Своя сумма вывода',
+                          Icons.edit_note_rounded,
+                        ).copyWith(
+                          helperText: available > 0
+                              ? 'Максимум доступно $available сом'
+                              : 'Сейчас вывод недоступен',
+                          errorText: hasInvalidCustomAmount
+                              ? 'Введите сумму цифрами'
+                              : null,
+                        ),
+                        onChanged: (_) => setState(() {}),
+                      ),
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: cardNumberController,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly
+                        ],
+                        decoration: _driverInputDecoration(
+                          'Номер карты для вывода',
+                          Icons.credit_card_rounded,
+                        ).copyWith(
+                          helperText: 'Введите карту, куда отправлять вывод',
+                          errorText: cardNumberController.text.isNotEmpty &&
+                                  cardDigits.length < 12
+                              ? 'Проверь номер карты'
+                              : null,
+                        ),
+                        onChanged: (_) => setState(() {}),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: cardHolderController,
+                        textCapitalization: TextCapitalization.words,
+                        decoration: _driverInputDecoration(
+                          'Имя владельца карты',
+                          Icons.person_outline_rounded,
+                        ),
+                        onChanged: (_) => setState(() {}),
+                      ),
+                      const SizedBox(height: 18),
+                      FilledButton(
+                        onPressed: available == 0 ||
+                                isSubmitting ||
+                                hasInvalidCustomAmount ||
+                                amountToRequest <= 0 ||
+                                !canUseCard
+                            ? null
+                            : () async {
+                                setState(() => isSubmitting = true);
+                                try {
+                                  await widget.repository.requestPayout(
+                                    widget.driverId,
+                                    amountToRequest,
+                                    payoutDestination: payoutDestination,
+                                  );
+                                  if (!context.mounted) {
+                                    return;
+                                  }
+                                  setState(_reload);
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Заявка на вывод создана'),
+                                    ),
+                                  );
+                                } finally {
+                                  if (mounted) {
+                                    setState(() => isSubmitting = false);
+                                  }
+                                }
+                              },
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(56),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          backgroundColor: _driverOrange,
+                        ),
+                        child: Text(
+                          isSubmitting
+                              ? 'Отправка...'
+                              : 'Создать заявку на $amountToRequest сом',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+                const SectionTitle('История заявок'),
+                const SizedBox(height: 12),
+                FutureBuilder<List<DriverPayoutItemDto>>(
+                  future: _payoutsFuture,
+                  builder: (context, payoutSnapshot) {
+                    if (payoutSnapshot.hasError) {
+                      return _DriverErrorCard(
+                        title: 'Не удалось загрузить историю заявок',
+                        lines: const [
+                          'Проверь соединение и попробуй обновить экран.',
+                        ],
+                        onRetry: _refresh,
+                      );
+                    }
+
+                    final items = payoutSnapshot.data ?? const [];
+                    if (items.isEmpty) {
+                      return const InfoCard(
+                        title: 'Заявок пока нет',
+                        lines: ['Здесь появятся созданные заявки'],
+                        icon: Icons.outbox_outlined,
+                      );
+                    }
+
+                    return Column(
+                      children: items
                           .map(
-                            (value) => DriverAmountChip(
-                              label: value == available
-                                  ? 'Все $value'
-                                  : '$value сом',
-                              selected: amountToRequest == value,
-                              onTap: () => setState(() {
-                                selectedAmount = value;
-                                amountController.text = '';
-                              }),
+                            (item) => Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: DriverTimelineCard(
+                                title: 'Заявка на вывод',
+                                subtitle:
+                                    '${item.amount} сом • ${_driverPayoutBadge(item.status)}',
+                                badge: _driverPayoutBadge(item.status),
+                                icon: Icons.account_balance_outlined,
+                                accent: _driverPayoutColor(item.status),
+                              ),
                             ),
                           )
                           .toList(),
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: amountController,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      decoration: _driverInputDecoration(
-                        'Своя сумма вывода',
-                        Icons.edit_note_rounded,
-                      ).copyWith(
-                        helperText: available > 0
-                            ? 'Максимум доступно $available сом'
-                            : 'Сейчас вывод недоступен',
-                        errorText: hasInvalidCustomAmount
-                            ? 'Введите сумму цифрами'
-                            : null,
-                      ),
-                      onChanged: (_) => setState(() {}),
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: cardNumberController,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      decoration: _driverInputDecoration(
-                        'Номер карты для вывода',
-                        Icons.credit_card_rounded,
-                      ).copyWith(
-                        helperText: 'Введите карту, куда отправлять вывод',
-                        errorText: cardNumberController.text.isNotEmpty &&
-                                cardDigits.length < 12
-                            ? 'Проверь номер карты'
-                            : null,
-                      ),
-                      onChanged: (_) => setState(() {}),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: cardHolderController,
-                      textCapitalization: TextCapitalization.words,
-                      decoration: _driverInputDecoration(
-                        'Имя владельца карты',
-                        Icons.person_outline_rounded,
-                      ),
-                      onChanged: (_) => setState(() {}),
-                    ),
-                    const SizedBox(height: 18),
-                    FilledButton(
-                      onPressed: available == 0 ||
-                              isSubmitting ||
-                              hasInvalidCustomAmount ||
-                              amountToRequest <= 0 ||
-                              !canUseCard
-                          ? null
-                          : () async {
-                              setState(() => isSubmitting = true);
-                              try {
-                                await widget.repository.requestPayout(
-                                  widget.driverId,
-                                  amountToRequest,
-                                  payoutDestination: payoutDestination,
-                                );
-                                if (!context.mounted) {
-                                  return;
-                                }
-                                setState(_reload);
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Заявка на вывод создана'),
-                                  ),
-                                );
-                              } finally {
-                                if (mounted) {
-                                  setState(() => isSubmitting = false);
-                                }
-                              }
-                            },
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size.fromHeight(56),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(18),
-                        ),
-                        backgroundColor: _driverOrange,
-                      ),
-                      child: Text(
-                        isSubmitting
-                            ? 'Отправка...'
-                            : 'Создать заявку на $amountToRequest сом',
-                      ),
-                    ),
-                  ],
+                    );
+                  },
                 ),
-              ),
-              const SizedBox(height: 20),
-              const SectionTitle('История заявок'),
-              const SizedBox(height: 12),
-              FutureBuilder<List<DriverPayoutItemDto>>(
-                future: _payoutsFuture,
-                builder: (context, payoutSnapshot) {
-                  if (payoutSnapshot.hasError) {
-                    return _DriverErrorCard(
-                      title: 'Не удалось загрузить историю заявок',
-                      lines: const [
-                        'Проверь соединение и попробуй обновить экран.',
-                      ],
-                      onRetry: _refresh,
-                    );
-                  }
-
-                  final items = payoutSnapshot.data ?? const [];
-                  if (items.isEmpty) {
-                    return const InfoCard(
-                      title: 'Заявок пока нет',
-                      lines: ['Здесь появятся созданные заявки'],
-                      icon: Icons.outbox_outlined,
-                    );
-                  }
-
-                  return Column(
-                    children: items
-                        .map(
-                          (item) => Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: DriverTimelineCard(
-                              title: 'Заявка на вывод',
-                              subtitle:
-                                  '${item.amount} сом • ${_driverPayoutBadge(item.status)}',
-                              badge: _driverPayoutBadge(item.status),
-                              icon: Icons.account_balance_outlined,
-                              accent: _driverPayoutColor(item.status),
-                            ),
-                          ),
-                        )
-                        .toList(),
-                  );
-                },
-              ),
-            ],
-          ),
-        );
-      },
+              ],
+            ),
+          );
+        },
+      )),
     );
   }
 }
@@ -4759,7 +4795,7 @@ class InfoCard extends StatelessWidget {
               padding: const EdgeInsets.only(bottom: 6),
               child: Text(
                 line,
-                style: const TextStyle(color: Color(0xFF475569), height: 1.45),
+                style: const TextStyle(color: Color(0xFF475569), fontSize: 14, height: 1.45),
               ),
             ),
           ),

@@ -1,0 +1,105 @@
+name: driver-apk
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Checked driver source commit
+        required: true
+      publish:
+        type: boolean
+        default: false
+concurrency:
+  group: ${{ inputs.publish == true && 'production-deploy' || format('driver-apk-{0}', github.ref) }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.6'
+          cache: true
+      - name: Preserve existing signing identity and check server compatibility
+        env:
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          PROD_SSH_KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
+          PROD_SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+          PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          PROD_SSH_PORT: ${{ secrets.PROD_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh ~/.android
+          printf '%s\n' "$PROD_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$PROD_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          remote="$PROD_SSH_USER@$PROD_SSH_HOST"
+          deployed_sha=$(ssh -p "$PROD_SSH_PORT" "$remote" 'cat /home/client/gopark-current-sha')
+          [[ "$deployed_sha" =~ ^[0-9a-f]{40}$ ]]
+          git diff --exit-code "$deployed_sha" HEAD -- apps/api packages/contracts apps/crm-web package.json pnpm-lock.yaml docker-compose.server.yml
+          echo "DEPLOYED_SHA=$deployed_sha" >> "$GITHUB_ENV"
+          echo "CODE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          scp -P "$PROD_SSH_PORT" "$remote:/home/client/gopark-current/gopark-driver.apk" /tmp/previous-driver.apk
+          key_path=$(ssh -p "$PROD_SSH_PORT" "$remote" 'for path in /home/client/gopark/secrets/debug.keystore /home/client/.android/debug.keystore; do if [ -r "$path" ]; then printf "%s\n" "$path"; break; fi; done')
+          test -n "$key_path"
+          scp -P "$PROD_SSH_PORT" "$remote:$key_path" ~/.android/debug.keystore
+          chmod 600 ~/.android/debug.keystore
+          apksigner=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
+          old_cert=$("$apksigner" verify --print-certs /tmp/previous-driver.apk | sed -n 's/.*certificate SHA-256 digest: //p' | sort -u)
+          key_cert=$(keytool -exportcert -alias androiddebugkey -keystore ~/.android/debug.keystore -storepass android 2>/dev/null | sha256sum | cut -d' ' -f1)
+          test -n "$old_cert"
+          test "$old_cert" = "$key_cert"
+      - name: Validate driver app and build APK
+        working-directory: apps/driver-app
+        run: |
+          flutter pub get
+          flutter analyze --no-pub
+          flutter test --no-pub
+          aapt=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
+          old_code=$("$aapt" dump badging /tmp/previous-driver.apk | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" | head -1)
+          [[ "$old_code" =~ ^[0-9]+$ ]]
+          build_number=$(( $(date +%s) / 60 ))
+          if [ "$build_number" -le "$old_code" ]; then build_number=$((old_code + 1)); fi
+          flutter build apk --release --dart-define=API_BASE_URL=http://185.138.185.36/api --build-number="$build_number"
+      - name: Verify update signature
+        run: |
+          apksigner=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
+          "$apksigner" verify --verbose --print-certs /tmp/previous-driver.apk > /tmp/old-driver-cert
+          "$apksigner" verify --verbose --print-certs apps/driver-app/build/app/outputs/flutter-apk/app-release.apk > /tmp/new-driver-cert
+          old_cert=$(sed -n 's/.*certificate SHA-256 digest: //p' /tmp/old-driver-cert | sort -u)
+          new_cert=$(sed -n 's/.*certificate SHA-256 digest: //p' /tmp/new-driver-cert | sort -u)
+          test -n "$old_cert"
+          test "$old_cert" = "$new_cert"
+          echo 'Driver APK signing certificate matches the installed version.'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gopark-driver-apk
+          path: apps/driver-app/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+      - name: Publish APK downloads with backup and rollback
+        if: inputs.publish == true
+        env:
+          PROD_SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+          PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          PROD_SSH_PORT: ${{ secrets.PROD_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/driver-upload
+          cp apps/driver-app/build/app/outputs/flutter-apk/app-release.apk /tmp/driver-upload/gopark-driver.apk
+          python3 scripts/prepare_driver_download.py /tmp/driver-upload "$CODE_SHA"
+          apk_sha256=$(sha256sum /tmp/driver-upload/gopark-driver.apk | cut -d' ' -f1)
+          zip_sha256=$(sha256sum /tmp/driver-upload/gopark-driver.zip | cut -d' ' -f1)
+          remote="$PROD_SSH_USER@$PROD_SSH_HOST"
+          stage="/tmp/gopark-driver-$GITHUB_RUN_ID"
+          ssh -p "$PROD_SSH_PORT" "$remote" "mkdir -p '$stage'"
+          scp -P "$PROD_SSH_PORT" /tmp/driver-upload/gopark-driver.apk /tmp/driver-upload/gopark-driver.zip /tmp/driver-upload/driver-download.html scripts/publish_driver_apk.sh "$remote:$stage/"
+          ssh -p "$PROD_SSH_PORT" "$remote" "DEPLOYED_SHA='$DEPLOYED_SHA' CODE_SHA='$CODE_SHA' APK_SHA256='$apk_sha256' ZIP_SHA256='$zip_sha256' STAGE='$stage' bash '$stage/publish_driver_apk.sh'"
