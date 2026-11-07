@@ -34,6 +34,14 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        getByName("debug") {
+            System.getenv("GOPARK_DRIVER_KEYSTORE")?.takeIf { it.isNotBlank() }?.let {
+                storeFile = file(it)
+            }
+        }
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.
