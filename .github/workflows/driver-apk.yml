@@ -51,15 +51,22 @@ jobs:
           echo "DEPLOYED_SHA=$deployed_sha" >> "$GITHUB_ENV"
           echo "CODE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
           scp -P "$PROD_SSH_PORT" "$remote:/home/client/gopark-current/gopark-driver.apk" /tmp/previous-driver.apk
-          key_path=$(ssh -p "$PROD_SSH_PORT" "$remote" 'for path in /home/client/gopark/secrets/debug.keystore /home/client/.android/debug.keystore; do if [ -r "$path" ]; then printf "%s\n" "$path"; break; fi; done')
-          test -n "$key_path"
-          scp -P "$PROD_SSH_PORT" "$remote:$key_path" ~/.android/debug.keystore
-          chmod 600 ~/.android/debug.keystore
           apksigner=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
           old_cert=$("$apksigner" verify --print-certs /tmp/previous-driver.apk | sed -n 's/.*certificate SHA-256 digest: //p' | sort -u)
-          key_cert=$(keytool -exportcert -alias androiddebugkey -keystore ~/.android/debug.keystore -storepass android 2>/dev/null | sha256sum | cut -d' ' -f1)
           test -n "$old_cert"
-          test "$old_cert" = "$key_cert"
+          echo "Installed driver certificate: $old_cert"
+          ssh -p "$PROD_SSH_PORT" "$remote" 'find /home/client/gopark/secrets /home/client/.android /home/client/.config/.android /home/client/gopark-releases -type f \( -name "*.keystore" -o -name "*.jks" \) -print 2>/dev/null || true' > /tmp/driver-key-candidates
+          matched=false
+          while IFS= read -r candidate; do
+            scp -q -P "$PROD_SSH_PORT" "$remote:$candidate" ~/.android/debug.keystore
+            chmod 600 ~/.android/debug.keystore
+            if key_cert=$(keytool -exportcert -alias androiddebugkey -keystore ~/.android/debug.keystore -storepass android 2>/dev/null | sha256sum | cut -d' ' -f1); then
+              echo "Candidate public certificate: $key_cert"
+              if [ "$old_cert" = "$key_cert" ]; then matched=true; break; fi
+            fi
+          done < /tmp/driver-key-candidates
+          if [ "$matched" != true ]; then echo '::error::No preserved key matches the installed driver APK; publication stopped.'; exit 1; fi
+          echo 'Compatible driver signing key preserved.'
       - name: Validate driver app and build APK
         working-directory: apps/driver-app
         run: |
