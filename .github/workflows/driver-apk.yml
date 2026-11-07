@@ -1,5 +1,7 @@
 name: driver-apk
 on:
+  push:
+    branches: [codex/driver-payout-release-20261107]
   workflow_dispatch:
     inputs:
       source_ref:
@@ -9,7 +11,7 @@ on:
         type: boolean
         default: false
 concurrency:
-  group: ${{ inputs.publish == true && 'production-deploy' || format('driver-apk-{0}', github.ref) }}
+  group: ${{ (inputs.publish == true || github.event_name == 'push') && 'production-deploy' || format('driver-apk-{0}', github.ref) }}
   cancel-in-progress: false
 jobs:
   build:
@@ -18,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_ref }}
+          ref: ${{ inputs.source_ref || github.sha }}
           fetch-depth: 0
       - uses: actions/setup-java@v4
         with:
@@ -86,7 +88,7 @@ jobs:
           path: apps/driver-app/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
       - name: Publish APK downloads with backup and rollback
-        if: inputs.publish == true
+        if: inputs.publish == true || github.event_name == 'push'
         env:
           PROD_SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
           PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
