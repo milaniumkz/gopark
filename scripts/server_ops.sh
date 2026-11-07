@@ -12,6 +12,9 @@ compose() {
 }
 
 case "$OPERATION" in
+  driver-home-diagnostic)
+    docker exec gopark-api node --input-type=module -e 'const {PrismaClient}=await import("./apps/api/node_modules/@prisma/client/default.js");const {DriverMobileReadService}=await import("./apps/api/dist/apps/api/src/modules/mobile-read/driver-mobile-read.service.js");const p=new PrismaClient();try{const drivers=await p.driver.findMany({select:{id:true,userId:true}});const service=new DriverMobileReadService();let ok=0;const errors=[];for(const d of drivers){try{const snapshot=await service.getDriverHomeSnapshot(d.id,d.userId);if(!Number.isFinite(snapshot.finance.yandexBalance))throw Error("Non-numeric balance");ok++;}catch(e){errors.push({driverId:d.id,type:e.constructor.name,message:e.message});}}console.log(JSON.stringify({driversChecked:drivers.length,successfulSummaries:ok,errors}));}finally{await p.$disconnect();process.exit(0)}'
+    ;;
   verify-owner-reset)
     docker exec gopark-api node -e 'fetch("http://127.0.0.1:3000/api/health").then(async r=>{if(!r.ok)throw Error("API unhealthy");console.log(await r.text())}).catch(e=>{console.error(e.message);process.exit(1)})'
     docker exec gopark-crm-web nginx -t
