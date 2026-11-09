@@ -8,6 +8,7 @@ export async function readPrincipalSummaries(
   inputs: Array<{contractId: string; driverId?: string}>,
   asOfDate: string,
   deferredShiftDays: 0 | 1,
+  period?: {startDate: string; endDate: string},
 ): Promise<Map<string, ObligationDebtSnapshot & {hasDeferredPayment: boolean}>> {
   if (!inputs.length) return new Map();
   const scope = JSON.stringify([...new Map(inputs.map(i => [`${i.contractId}:${i.driverId ?? ""}`, {contract_id: i.contractId, driver_id: i.driverId ?? null}])).values()]);
@@ -32,7 +33,10 @@ export async function readPrincipalSummaries(
       MIN(effective_date) AS next_date,
       (array_agg(remaining ORDER BY effective_date,original_date,id))[1] AS next_amount,
       bool_or(deferred) AS deferred
-    FROM amounts WHERE remaining>0 GROUP BY contract_id`;
+    FROM amounts WHERE remaining>0
+      AND (${period?.startDate ?? null}::date IS NULL OR effective_date >= ${period?.startDate ?? null}::date)
+      AND (${period?.endDate ?? null}::date IS NULL OR effective_date <= ${period?.endDate ?? null}::date)
+    GROUP BY contract_id`;
   return new Map(rows.map((r: any) => [r.contract_id, {
     totalDebt: decimalToNumber(r.total), overdueDebt: decimalToNumber(r.overdue),
     overdueSinceDate: r.overdue_from ? toDateOnly(r.overdue_from) : null,

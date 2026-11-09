@@ -11,7 +11,7 @@ export interface ObligationDebtSnapshot {
 
 export interface ObligationRepository {
   listByDriver(driverId: string): Promise<ObligationListItem[]>;
-  getBasePolicies?(inputs: Array<{id: string; activeContractId?: string | null}>, asOfDate: string): Promise<Record<string, ObligationDebtSnapshot>>;
+  getBasePolicies?(inputs: Array<{id: string; activeContractId?: string | null}>, asOfDate: string, period?: {startDate: string; endDate: string}): Promise<Record<string, ObligationDebtSnapshot>>;
   listActiveByDrivers?(driverIds: string[]): Promise<ObligationListItem[]>;
   getDebtSnapshotsByDrivers(driverIds: string[], asOfDate?: string): Promise<Record<string, ObligationDebtSnapshot>>;
   getDebtSnapshotsByCompany(companyName: string, asOfDate?: string): Promise<Record<string, ObligationDebtSnapshot>>;

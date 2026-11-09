@@ -48,8 +48,13 @@ test("300-driver manager reads stay scoped with a three-year daily schedule", {s
     }
 
     const driversStarted=performance.now();const list=await service.getDrivers(senior);const driversMs=performance.now()-driversStarted;assert.equal(list.length,300);
+    const periodStarted=performance.now();const periodList=await service.getDrivers(senior,"2026-11-06","2026-11-08");const periodMs=performance.now()-periodStarted;
+    for (const d of selected) {
+      const rows=(await policy.listEffectiveOpenObligations(d.id,credits[d.id]??0)).filter(o=>o.effectiveDueDate>="2026-11-06" && o.effectiveDueDate<="2026-11-08");
+      assert.equal(periodList.find(item=>item.id===d.id)?.duePeriodAmount, rows.reduce((sum,o)=>sum+o.remainingAmount,0));
+    }
     const summaryStarted=performance.now();const summary=await service.getSummary(senior);const summaryMs=performance.now()-summaryStarted;assert.equal(summary.assignedDrivers,300);assert.equal(summary.activeCars,300);
-    console.log(JSON.stringify({syntheticDrivers:300,scheduleRows:324000,regular10CarsMs:Math.round(ownMs),senior300CarsMs:Math.round(allMs),senior300DriversMs:Math.round(driversMs),seniorSummaryMs:Math.round(summaryMs)}));
+    console.log(JSON.stringify({syntheticDrivers:300,scheduleRows:324000,regular10CarsMs:Math.round(ownMs),senior300CarsMs:Math.round(allMs),senior300DriversMs:Math.round(driversMs),seniorSummaryMs:Math.round(summaryMs),senior300DriversPeriodMs:Math.round(periodMs)}));
   } finally {
     await p.driverStatusRequest.deleteMany({where:{driverId:{in:drivers.map(d=>d.id)}}});await p.driverCreditBalance.deleteMany({where:{driverId:{in:drivers.map(d=>d.id)}}});
     await p.obligation.deleteMany({where:{driverId:{in:drivers.map(d=>d.id)}}});await p.carAssignment.deleteMany({where:{driverId:{in:drivers.map(d=>d.id)}}});await p.contract.deleteMany({where:{driverId:{in:drivers.map(d=>d.id)}}});await p.car.deleteMany({where:{id:{in:cars.map(c=>c.id)}}});await p.driver.deleteMany({where:{id:{in:drivers.map(d=>d.id)}}});await p.manager.deleteMany({where:{id:{in:managers}}});await p.user.deleteMany({where:{id:{in:users}}});

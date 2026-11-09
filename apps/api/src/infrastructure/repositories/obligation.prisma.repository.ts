@@ -30,10 +30,10 @@ function getOpenInstallmentAmount(metadata: unknown, amount: number, paidAmount:
 export class ObligationPrismaRepository implements ObligationRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getBasePolicies(inputs: Array<{id: string; activeContractId?: string | null}>, asOfDate: string): Promise<Record<string, import("../../common/repositories/obligation.repository.js").ObligationDebtSnapshot>> {
+  async getBasePolicies(inputs: Array<{id: string; activeContractId?: string | null}>, asOfDate: string, period?: {startDate: string; endDate: string}): Promise<Record<string, import("../../common/repositories/obligation.repository.js").ObligationDebtSnapshot>> {
     const prisma = this.prisma.client;
     if (!prisma) return this.getDebtSnapshotsByDrivers(inputs.map(d => d.id), asOfDate);
-    const summaries = await readPrincipalSummaries(prisma, inputs.filter(d => !!d.activeContractId).map(d => ({contractId: d.activeContractId!, driverId: d.id})), asOfDate, 1);
+    const summaries = await readPrincipalSummaries(prisma, inputs.filter(d => !!d.activeContractId).map(d => ({contractId: d.activeContractId!, driverId: d.id})), asOfDate, 1, period);
     return Object.fromEntries(inputs.map(d => [d.id, summaries.get(d.activeContractId ?? "") ?? {totalDebt:0,overdueDebt:0,overdueSinceDate:null,overdueUntilDate:null,nextPaymentAmount:0,nextPaymentDate:null}]));
   }
 

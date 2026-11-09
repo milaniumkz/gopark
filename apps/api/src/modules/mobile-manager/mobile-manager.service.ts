@@ -153,30 +153,11 @@ export class MobileManagerService {
     const duePeriodAmounts = new Map<string, number>();
     const overduePeriodAmounts = new Map<string, number>();
     if (duePeriod) {
-      await Promise.all(
-        drivers.map(async (driver) => {
-          const obligations =
-            await this.statusRequestPolicyService.listEffectiveOpenObligations(
-              driver.id,
-              financeSnapshots[driver.id]?.creditBalance ?? 0,
-            );
-          const inPeriod = obligations.filter(
-            (item) =>
-              item.effectiveDueDate >= duePeriod.startDate &&
-              item.effectiveDueDate <= duePeriod.endDate,
-          );
-          duePeriodAmounts.set(
-            driver.id,
-            inPeriod.reduce((sum, item) => sum + item.remainingAmount, 0),
-          );
-          overduePeriodAmounts.set(
-            driver.id,
-            inPeriod
-              .filter((item) => item.effectiveDueDate < this.today())
-              .reduce((sum, item) => sum + item.remainingAmount, 0),
-          );
-        }),
-      );
+      const periodPolicies = await this.statusRequestPolicyService.getEffectiveDebtPolicies(drivers, this.today(), Object.fromEntries(drivers.map(d => [d.id, financeSnapshots[d.id]?.creditBalance ?? 0])), duePeriod);
+      for (const driver of drivers) {
+        duePeriodAmounts.set(driver.id, periodPolicies[driver.id]?.currentDebt ?? 0);
+        overduePeriodAmounts.set(driver.id, periodPolicies[driver.id]?.overdueDebt ?? 0);
+      }
     }
     const managerNameById = new Map<string, string>();
     for (const user of users) {

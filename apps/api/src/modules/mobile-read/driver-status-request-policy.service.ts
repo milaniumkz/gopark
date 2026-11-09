@@ -51,7 +51,7 @@ export class DriverStatusRequestPolicyService {
     return this.summarizeDebt(openObligations, asOfDate);
   }
 
-  async getEffectiveDebtPolicies(drivers: Array<{id: string; activeContractId?: string | null}>, asOfDate: string, credits: Record<string, number>) {
+  async getEffectiveDebtPolicies(drivers: Array<{id: string; activeContractId?: string | null}>, asOfDate: string, credits: Record<string, number>, period?: {startDate: string; endDate: string}) {
     const ids = drivers.map(d => d.id);
     const requests = await this.statusRequestRepository.listByDrivers(ids);
     const complexIds = new Set(requests.filter(r => r.status === "approved").map(r => r.driverId));
@@ -60,7 +60,7 @@ export class DriverStatusRequestPolicyService {
     const detailedIds = ids.filter(id => !simpleIds.has(id));
     const [obligations, base] = await Promise.all([
       this.obligationRepository.listActiveByDrivers ? this.obligationRepository.listActiveByDrivers(detailedIds) : Promise.all(detailedIds.map(id => this.obligationRepository.listByDriver(id))).then(rows => rows.flat()),
-      simple.length ? this.obligationRepository.getBasePolicies!(simple, asOfDate) : Promise.resolve({} as Record<string, import("../../common/repositories/obligation.repository.js").ObligationDebtSnapshot>),
+      simple.length ? this.obligationRepository.getBasePolicies!(simple, asOfDate, period) : Promise.resolve({} as Record<string, import("../../common/repositories/obligation.repository.js").ObligationDebtSnapshot>),
     ]);
     const byDriver = new Map<string, ObligationListItem[]>();
     const periods = new Map<string, typeof requests>();
@@ -73,7 +73,7 @@ export class DriverStatusRequestPolicyService {
       }
       const rows = (byDriver.get(driver.id) ?? []).filter(item => !!driver.activeContractId && item.contractId === driver.activeContractId && item.type === "installment");
       const effective = this.buildEffectiveObligations(rows, this.toApprovedPeriods(periods.get(driver.id) ?? []), credits[driver.id] ?? 0, {includePaid: false});
-      return [driver.id, this.summarizeDebt(effective, asOfDate)];
+      return [driver.id, this.summarizeDebt(period ? effective.filter(o => o.effectiveDueDate >= period.startDate && o.effectiveDueDate <= period.endDate) : effective, asOfDate)];
     }));
   }
 

@@ -1,3 +1,4 @@
+import { DriverStatusRequestPolicyService } from "../mobile-read/driver-status-request-policy.service.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { MobileManagerService } from "./mobile-manager.service.js";
@@ -186,6 +187,14 @@ test("selected debt period excludes today's/future installments from overdue, wh
     "2026-10-07": 2300,
     "2026-10-08": 2300,
   };
+  const policy = new DriverStatusRequestPolicyService();
+  Object.assign(policy, {
+    statusRequestRepository: { listByDrivers: async () => [] },
+    obligationRepository: { listActiveByDrivers: async (ids: string[]) => {
+      assert.deepEqual(ids, ["driver"]);
+      return Object.entries(amounts).map(([dueDate, amount], index) => ({id:String(index), driverId:"driver", contractId:"contract", type:"installment", dueDate, amount, paidAmount:0}));
+    } },
+  });
   Object.assign(service, {
     today: () => "2026-10-07",
     mobileAccessService: { getScopedDrivers: async () => [driver] },
@@ -194,19 +203,7 @@ test("selected debt period excludes today's/future installments from overdue, wh
       getFinanceSnapshots: async () => ({ driver: { overdueDebt: 9000 } }),
     },
     getHistoricalFinanceSnapshots: async () => new Map(),
-    statusRequestPolicyService: {
-      getEffectiveCurrentStatuses: async () => ({ driver: "active" }),
-      listEffectiveOpenObligations: async (id: string, credit: number) => {
-        assert.equal(id, "driver");
-        assert.equal(credit, 0);
-        return Object.entries(amounts).map(
-          ([effectiveDueDate, remainingAmount]) => ({
-            effectiveDueDate,
-            remainingAmount,
-          }),
-        );
-      },
-    },
+    statusRequestPolicyService: policy,
     obligationRepository: {
       getOpenDueByDriverInPeriod: async (
         id: string,
