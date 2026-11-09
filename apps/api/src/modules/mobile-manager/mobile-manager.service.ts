@@ -99,6 +99,7 @@ export class MobileManagerService {
       await this.driverMobileReadService.getManagerDriversSummary(
         scopedDrivers.map((driver) => driver.id),
         this.today(),
+        scopedDrivers,
       );
 
     return {
@@ -134,6 +135,7 @@ export class MobileManagerService {
       ),
       this.driverMobileReadService.getFinanceSnapshots(
         drivers.map((driver) => driver.id),
+        drivers,
       ),
       currentUser?.companyName
         ? this.userRepository.listAdminByCompany(currentUser.companyName)
@@ -349,26 +351,20 @@ export class MobileManagerService {
   async getVehicles(
     currentUser: RequestUser | null,
   ): Promise<VehicleListItem[]> {
-    const [cars, drivers, users, incidents] = await Promise.all([
-      this.getCompanyScopedCars(currentUser),
+    const [drivers, managerIds] = await Promise.all([
       this.mobileAccessService.getScopedDrivers(currentUser),
-      currentUser?.companyName
-        ? this.userRepository.listAdminByCompany(currentUser.companyName)
-        : this.userRepository.listAdmin(),
-      currentUser?.companyName
-        ? this.incidentRepository.listByCompany(currentUser.companyName)
-        : this.incidentRepository.list(),
+      currentUser?.role === "manager" ? this.userRepository.getManagerScopeIds(currentUser.id, currentUser.companyName ?? null) : Promise.resolve(new Set<string>()),
+    ]);
+    const [cars, users, incidents] = await Promise.all([
+      !this.canSeeAllCompanyVehicles(currentUser) && this.carRepository.listByManagerScope
+        ? this.carRepository.listByManagerScope([...managerIds], drivers.map(d => d.id), currentUser?.companyName)
+        : this.getCompanyScopedCars(currentUser),
+      currentUser?.companyName ? this.userRepository.listAdminByCompany(currentUser.companyName) : this.userRepository.listAdmin(),
+      currentUser?.companyName ? this.incidentRepository.listByCompany(currentUser.companyName) : this.incidentRepository.list(),
     ]);
     const scopedDriverIds = new Set(drivers.map((driver) => driver.id));
     const driverById = new Map(drivers.map((driver) => [driver.id, driver]));
     const managerNameById = this.getManagerNameMap(users);
-    const managerIds =
-      currentUser?.role === "manager"
-        ? await this.userRepository.getManagerScopeIds(
-            currentUser.id,
-            currentUser.companyName ?? null,
-          )
-        : new Set<string>();
     const visibleCars = this.canSeeAllCompanyVehicles(currentUser)
       ? cars
       : cars.filter((car) => {
@@ -380,6 +376,10 @@ export class MobileManagerService {
           return ownerDriverId ? scopedDriverIds.has(ownerDriverId) : false;
         });
 
+    const activeIncidentByCar = new Map<string, (typeof incidents)[number]>();
+    for (const incident of incidents) {
+      if (incident.carId && !closedIncident(incident.status) && !activeIncidentByCar.has(incident.carId)) activeIncidentByCar.set(incident.carId, incident);
+    }
     return visibleCars.map((car) => {
       const ownerDriverId =
         car.assignedDriverId ?? car.lastAssignedDriverId ?? null;
@@ -387,11 +387,11 @@ export class MobileManagerService {
       return {
         ...car,
         incidentComment:
-          incidents.find((i) => i.carId === car.id && !closedIncident(i.status))
+          activeIncidentByCar.get(car.id)
             ?.serviceDetails?.reason ??
-          incidents.find((i) => i.carId === car.id && !closedIncident(i.status))
+          activeIncidentByCar.get(car.id)
             ?.repairNote ??
-          incidents.find((i) => i.carId === car.id && !closedIncident(i.status))
+          activeIncidentByCar.get(car.id)
             ?.description ??
           null,
         managerId: car.managerId ?? driver?.managerId ?? null,

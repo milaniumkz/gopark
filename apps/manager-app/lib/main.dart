@@ -102,6 +102,11 @@ class _ManagerShellState extends State<ManagerShell>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    repository.api.onSessionRefreshed = (refreshed) async {
+      await writeStorageValue(_managerSessionStorageKey, _encodeManagerStoredSession(refreshed));
+      if (repository.currentSession == null) { await removeStorageValue(_managerSessionStorageKey); return; }
+      if (mounted && repository.currentSession?.refreshToken == refreshed.refreshToken) setState(() => session = refreshed);
+    };
     unawaited(_restoreStoredSession());
   }
 
@@ -365,6 +370,10 @@ class _ManagerShellState extends State<ManagerShell>
       if (!mounted) {
         return;
       }
+      if (repository.currentSession?.refreshToken != activeSession.refreshToken) {
+        if (repository.currentSession == null) await removeStorageValue(_managerSessionStorageKey);
+        return;
+      }
       setState(() {
         session = activeSession;
         index = 0;
@@ -378,16 +387,7 @@ class _ManagerShellState extends State<ManagerShell>
   Future<void> _refreshStoredSession() async {
     try {
       final refreshedSession = await repository.refreshSession();
-      await writeStorageValue(
-        _managerSessionStorageKey,
-        _encodeManagerStoredSession(refreshedSession),
-      );
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        session = refreshedSession;
-      });
+      if (!mounted || repository.currentSession?.refreshToken != refreshedSession.refreshToken) return;
       unawaited(_registerPushToken());
     } catch (_) {
       if (!mounted) {
@@ -646,6 +646,7 @@ class _ManagerDashboardPageState extends State<ManagerDashboardPage> {
         _vehiclesFuture ??= repository.loadVehicles();
         return RefreshIndicator(
             onRefresh: () async {
+              repository.invalidate();
               setState(_reload);
               await _summaryFuture;
             },
@@ -1333,8 +1334,12 @@ class ManagerVehiclesPage extends StatefulWidget {
     required this.repository,
     required this.initialFilter,
     required this.onFilterChanged,
+    this.selectedManagerId,
+    this.selectedManagerName,
   });
 
+  final String? selectedManagerId;
+  final String? selectedManagerName;
   final ManagerRepository repository;
   final ManagerVehicleFilter initialFilter;
   final ValueChanged<ManagerVehicleFilter> onFilterChanged;
@@ -1346,6 +1351,11 @@ class ManagerVehiclesPage extends StatefulWidget {
 class _ManagerVehiclesPageState extends State<ManagerVehiclesPage> {
   final _searchController = TextEditingController();
   String _query = '';
+  late ManagerVehicleFilter _filter;
+  @override
+  void initState() { super.initState(); _filter = widget.initialFilter; }
+  @override
+  void didUpdateWidget(covariant ManagerVehiclesPage oldWidget) { super.didUpdateWidget(oldWidget); if (oldWidget.initialFilter != widget.initialFilter) _filter = widget.initialFilter; }
 
   @override
   void dispose() {
@@ -1360,8 +1370,8 @@ class _ManagerVehiclesPageState extends State<ManagerVehiclesPage> {
       builder: (context, snapshot) {
         final vehicles = _searchManagerVehicles(
           _filterManagerVehicles(
-            snapshot.data ?? const [],
-            widget.initialFilter,
+            (snapshot.data ?? const <ManagerVehicleDto>[]).where((car) => widget.selectedManagerId == null || car.managerId == widget.selectedManagerId).toList(),
+            _filter,
           ),
           _query,
         );
@@ -1369,9 +1379,9 @@ class _ManagerVehiclesPageState extends State<ManagerVehiclesPage> {
         return ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            const _ManagerHero(
-              title: 'Автомобили',
-              subtitle: 'Все машины компании',
+            _ManagerHero(
+              title: widget.selectedManagerName == null ? 'Автомобили' : 'Автомобили бригадира',
+              subtitle: widget.selectedManagerName ?? 'Все машины компании',
               icon: Icons.directions_car_rounded,
             ),
             const SizedBox(height: 6),
@@ -1391,8 +1401,8 @@ class _ManagerVehiclesPageState extends State<ManagerVehiclesPage> {
                   .map(
                     (filter) => _ManagerFilterChip(
                       label: _managerVehicleFilterLabel(filter),
-                      selected: widget.initialFilter == filter,
-                      onTap: () => widget.onFilterChanged(filter),
+                      selected: _filter == filter,
+                      onTap: () { setState(() => _filter = filter); widget.onFilterChanged(filter); },
                     ),
                   )
                   .toList(),
@@ -1426,12 +1436,14 @@ class _ManagerVehiclesPageState extends State<ManagerVehiclesPage> {
     );
   }
 
-  Future<void> _openManagerVehicleCard(
-    BuildContext context,
-    String vehicleId,
-  ) async {
-    final detail = await widget.repository.loadVehicleDetail(vehicleId);
-    final incidents = await widget.repository.loadIncidents();
+  Future<void> _openManagerVehicleCard(BuildContext context, String vehicleId) => _showManagerVehicleCard(context, widget.repository, vehicleId, onChanged: () { if (mounted) setState(() {}); });
+
+}
+
+Future<void> _showManagerVehicleCard(BuildContext context, ManagerRepository repository, String vehicleId, {VoidCallback? onChanged}) async {
+  try {
+    final detail = await repository.loadVehicleDetail(vehicleId);
+    final incidents = await repository.loadIncidents();
     if (!context.mounted || detail == null) {
       return;
     }
@@ -1442,7 +1454,7 @@ class _ManagerVehiclesPageState extends State<ManagerVehiclesPage> {
               !['resolved', 'closed', 'archived'].contains(item.status),
         )
         .toList();
-    showModalBottomSheet<void>(
+    await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -1476,16 +1488,11 @@ class _ManagerVehiclesPageState extends State<ManagerVehiclesPage> {
               const SizedBox(height: 6),
               if (!['sold', 'written_off'].contains(detail.status))
                 ManagerVehicleIncidentActions(
-                    repository: widget.repository,
+                    repository: repository,
                     vehicleId: detail.id,
                     onSaved: () {
                       Navigator.pop(context);
-                      if (mounted) {
-                        setState(() {});
-                        ScaffoldMessenger.of(this.context).showSnackBar(
-                            const SnackBar(
-                                content: Text('Данные автомобиля сохранены')));
-                      }
+                      onChanged?.call();
                     }),
               const SizedBox(height: 12),
               ManagerInfoCard(
@@ -1518,6 +1525,8 @@ class _ManagerVehiclesPageState extends State<ManagerVehiclesPage> {
         ),
       ),
     );
+  } catch (error) {
+    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Не удалось открыть автомобиль: ${_managerUserError(error)}')));
   }
 }
 
@@ -2017,6 +2026,23 @@ class _ManagerDriversPageState extends State<ManagerDriversPage> {
               icon: Icons.groups_rounded,
             ),
             const SizedBox(height: 6),
+            if (widget.selectedManagerId != null)
+              FutureBuilder<List<ManagerVehicleDto>>(
+                future: widget.repository.loadVehicles(),
+                builder: (context, cars) {
+                  if (cars.hasError) return _ManagerLoadError(error: cars.error, onRetry: () => setState(() {}));
+                  if (!cars.hasData) return const LinearProgressIndicator();
+                  final ids = scopedItems.map((d) => d.id).toSet();
+                  final owned = cars.data!.where((car) => car.managerId == widget.selectedManagerId || (car.managerId == null && ids.contains(car.assignedDriverId))).toList();
+                  return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    _SectionTitle('Автомобили бригадира (${owned.length})'),
+                    if (owned.isEmpty) const Text('Закреплённых автомобилей нет'),
+                    if (owned.length > 5) TextButton(onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => Scaffold(appBar: AppBar(title: Text(widget.selectedManagerName ?? 'Бригадир')), body: ManagerVehiclesPage(repository: widget.repository, initialFilter: ManagerVehicleFilter.all, selectedManagerId: widget.selectedManagerId, selectedManagerName: widget.selectedManagerName, onFilterChanged: (_) {})))), child: Text('Все автомобили (${owned.length})')),
+
+                    ...owned.take(5).map((car) => Padding(padding: const EdgeInsets.only(bottom: 6), child: _ManagerVehicleCard(vehicle: car, onTap: () => _showManagerVehicleCard(context, widget.repository, car.id, onChanged: () { if (mounted) setState(() {}); })))),
+                  ]);
+                },
+              ),
             _ManagerMetricGrid(
               crossAxisCount: 2,
               crossAxisSpacing: 6,
@@ -2178,8 +2204,8 @@ class _ManagerDriversPageState extends State<ManagerDriversPage> {
               (item) => Padding(
                 padding: const EdgeInsets.only(bottom: 6),
                 child: GestureDetector(
-                  onTap: () {
-                    Navigator.of(context).push(
+                  onTap: () async {
+                    await Navigator.of(context).push(
                       MaterialPageRoute<void>(
                         builder: (_) => ManagerDriverDetailPage(
                           repository: widget.repository,
@@ -2187,6 +2213,7 @@ class _ManagerDriversPageState extends State<ManagerDriversPage> {
                         ),
                       ),
                     );
+                    if (mounted) setState(() {});
                   },
                   child: ManagerDriverCard(
                     driver: item,

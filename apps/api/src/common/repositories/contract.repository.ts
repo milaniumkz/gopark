@@ -5,6 +5,7 @@ import type { UpdateContractDto } from "../../modules/contracts/dto/update-contr
 export interface ContractRepository {
   list(): Promise<ContractListItem[]>;
   listByCompany(companyName: string): Promise<ContractListItem[]>;
+  getNumbersByIds?(ids: string[]): Promise<Record<string, string>>;
   getById(contractId: string): Promise<ContractDetail | null>;
   getActiveByDriver(driverId: string): Promise<ContractDetail | null>;
   getMaxIssuedAmountByCar(carId: string): Promise<number>;

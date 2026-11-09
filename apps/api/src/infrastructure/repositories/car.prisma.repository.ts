@@ -1,3 +1,4 @@
+import { readPrincipalSummaries } from "./principal-summary.js";
 import { openPrincipalAmount as getOpenObligationAmount } from "../../common/contracts/principal-debt.js";
 import type { VehicleDetail, VehicleListItem } from "@gopark/contracts";
 import type { CreateCarDto } from "../../modules/cars/dto/create-car.dto.js";
@@ -79,11 +80,19 @@ export class CarPrismaRepository implements CarRepository {
     return this.listInternal(companyName);
   }
 
-  private async listInternal(companyName?: string): Promise<VehicleListItem[]> {
+  async listByManagerScope(managerIds: string[], driverIds: string[], companyName?: string | null): Promise<VehicleListItem[]> {
+    if (!managerIds.length && !driverIds.length) return [];
+    return this.listInternal(companyName ?? undefined, { OR: [
+      { managerId: { in: managerIds } },
+      { managerId: null, assignments: { some: { driverId: { in: driverIds } } } },
+    ] });
+  }
+
+  private async listInternal(companyName?: string, managerScope?: Record<string, unknown>): Promise<VehicleListItem[]> {
     const prisma = this.prisma.client;
     if (prisma) {
       const cars = await prisma.car.findMany({
-        where: companyName ? { companyName } : undefined,
+        where: managerScope ? { AND: [companyName ? { companyName } : {}, managerScope] } : companyName ? { companyName } : undefined,
         orderBy: { createdAt: "asc" },
         select: {
           id: true,
@@ -127,39 +136,16 @@ export class CarPrismaRepository implements CarRepository {
             take: 1,
             select: {
               id: true,
-              obligations: {
-                select: {
-                  type: true,
-                  amount: true,
-                  paidAmount: true,
-                  dueDate: true,
-                  deferredUntil: true,
-                  metadata: true,
-                },
-              },
+
             },
           },
         },
       });
 
+      const summaries = await readPrincipalSummaries(prisma, cars.flatMap((c: any) => c.contracts.map((contract: any) => ({contractId: contract.id}))), new Date().toISOString().slice(0,10), 0);
       return cars.map((car: any) => {
         const contract = car.contracts[0] ?? null;
-        const openObligations = (contract?.obligations ?? [])
-          .map((obligation: any) => {
-            const amount = decimalToNumber(obligation.amount);
-            const paidAmount = decimalToNumber(obligation.paidAmount);
-            const dueDateSource = obligation.deferredUntil ?? obligation.dueDate;
-            const dueDate = dueDateSource ? new Date(dueDateSource).toISOString().slice(0, 10) : null;
-
-            return {
-              remainingAmount: getOpenObligationAmount(obligation.type, obligation.metadata, amount, paidAmount),
-              dueDate,
-              hasDeferredPayment: !!obligation.deferredUntil,
-            };
-          })
-          .filter((obligation: { remainingAmount: number; dueDate: string | null }) => obligation.remainingAmount > 0 && obligation.dueDate)
-          .sort((left: { dueDate: string | null }, right: { dueDate: string | null }) => (left.dueDate ?? "").localeCompare(right.dueDate ?? ""));
-        const nextOpen = openObligations[0] ?? null;
+        const summary = summaries.get(contract?.id ?? "");
 
         return {
           id: car.id,
@@ -188,10 +174,10 @@ export class CarPrismaRepository implements CarRepository {
             repairCost: decimalToNumber(car.repairCost ?? 0) || null,
           }),
           activeContractId: contract?.id ?? null,
-          currentDebt: openObligations.reduce((sum: number, obligation: { remainingAmount: number }) => sum + obligation.remainingAmount, 0),
-          nextDueAmount: nextOpen?.remainingAmount ?? 0,
-          nextDueDate: nextOpen?.dueDate ?? null,
-          hasDeferredPayment: openObligations.some((obligation: { hasDeferredPayment: boolean }) => obligation.hasDeferredPayment),
+          currentDebt: summary?.totalDebt ?? 0,
+          nextDueAmount: summary?.nextPaymentAmount ?? 0,
+          nextDueDate: summary?.nextPaymentDate ?? null,
+          hasDeferredPayment: summary?.hasDeferredPayment ?? false,
           statusSinceDate: (car.assignments.find((item: any) => !item.endedAt)?.startedAt ?? car.assignments[0]?.endedAt ?? car.updatedAt ?? car.createdAt).toISOString(),
         };
       });
@@ -321,6 +307,16 @@ export class CarPrismaRepository implements CarRepository {
       financedAmount: contract?.financedAmount ?? null,
       installmentAmount: contract?.installmentAmount ?? null,
     };
+  }
+
+  async getAssignmentSummaries(driverIds: string[]): Promise<Record<string, {vehicle: string | null; vehicleStatus: string | null}>> {
+    if (!driverIds.length) return {};
+    const prisma = this.prisma.client;
+    if (!prisma) return Object.fromEntries(seedCars.filter(c => c.assignedDriverId && driverIds.includes(c.assignedDriverId)).map(c => [c.assignedDriverId!, {vehicle: c.plateNumber, vehicleStatus: c.status}]));
+    const assignments = await prisma.carAssignment.findMany({where: {driverId: {in: driverIds}, endedAt: null}, orderBy: {startedAt: "desc"}, select: {driverId: true, car: {select: {plateNumber: true, status: true}}}});
+    const result: Record<string, {vehicle: string | null; vehicleStatus: string | null}> = {};
+    for (const item of assignments) if (!result[item.driverId]) result[item.driverId] = {vehicle: item.car.plateNumber, vehicleStatus: item.car.status};
+    return result;
   }
 
   async getAssignedByDriver(driverId: string): Promise<VehicleDetail | null> {

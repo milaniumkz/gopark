@@ -316,6 +316,12 @@ export class ContractPrismaRepository implements ContractRepository {
     return seedContracts.filter((item) => driverIds.has(item.driverId));
   }
 
+  async getNumbersByIds(ids: string[]): Promise<Record<string, string>> {
+    if (!ids.length) return {};
+    const contracts = this.prisma.client ? await this.prisma.client.contract.findMany({where: {id: {in: ids}}, select: {id: true, contractNumber: true}}) : seedContracts.filter(c => ids.includes(c.id));
+    return Object.fromEntries(contracts.map((c: {id: string; contractNumber: string}) => [c.id, c.contractNumber]));
+  }
+
   async getById(contractId: string): Promise<ContractDetail | null> {
     const prisma = this.prisma.client;
     if (prisma) {

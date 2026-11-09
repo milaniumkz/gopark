@@ -910,8 +910,12 @@ class ManagerApiClient {
   final String baseUrl;
   final http.Client? _httpClient;
   ManagerAuthSessionDto? _session;
+  Future<ManagerAuthSessionDto>? _refreshFuture;
+  void Function()? onDataChanged;
+  Future<void> Function(ManagerAuthSessionDto)? onSessionRefreshed;
 
-  http.Client get client => _httpClient ?? http.Client();
+  late final http.Client _client = _httpClient ?? http.Client();
+  http.Client get client => _client;
 
   Future<ManagerAuthSessionDto> login(String login, String password) async {
     final response = await client.post(
@@ -925,7 +929,9 @@ class ManagerApiClient {
     return session;
   }
 
-  Future<ManagerAuthSessionDto> refresh() async {
+  Future<ManagerAuthSessionDto> refresh() => _refreshFuture ??= _refreshSession().whenComplete(() => _refreshFuture = null);
+
+  Future<ManagerAuthSessionDto> _refreshSession() async {
     final session = _session;
     if (session == null) {
       throw Exception('Manager session is not initialized');
@@ -935,11 +941,16 @@ class ManagerApiClient {
       Uri.parse('$baseUrl/auth/refresh'),
       headers: const {'content-type': 'application/json'},
       body: jsonEncode({'refreshToken': session.refreshToken}),
-    );
+    ).timeout(const Duration(seconds: 15));
 
     final refreshedSession =
         ManagerAuthSessionDto.fromJson(_decodeObject(response));
+    if (_session?.refreshToken != session.refreshToken) throw Exception('Сессия изменилась. Войдите снова.');
+    if (refreshedSession.requestUserRole != 'manager') throw Exception('Требуется аккаунт бригадира.');
     _session = refreshedSession;
+    onDataChanged?.call();
+    await onSessionRefreshed?.call(refreshedSession);
+    if (_session?.refreshToken != refreshedSession.refreshToken) throw Exception('Сессия изменилась. Войдите снова.');
     return refreshedSession;
   }
 
@@ -1014,6 +1025,7 @@ class ManagerApiClient {
         headers: {...authHeaders, ...headers},
         body: body,
       ),
+      mutation: true,
     );
   }
 
@@ -1028,19 +1040,23 @@ class ManagerApiClient {
         headers: {...authHeaders, ...headers},
         body: body,
       ),
+      mutation: true,
     );
   }
 
   Future<http.Response> _sendAuthorized(
-    Future<http.Response> Function(Map<String, String> headers) send,
-  ) async {
-    var response = await send(_headers);
-    if (response.statusCode != 401) {
-      return response;
-    }
+    Future<http.Response> Function(Map<String, String> headers) send, {
+    bool mutation = false,
+  }) => _sendAuthorizedOnce(send, mutation).timeout(const Duration(seconds: 25), onTimeout: () => throw TimeoutException('Сервер не ответил. Повторите загрузку.'));
 
-    await refresh();
-    response = await send(_headers);
+  Future<http.Response> _sendAuthorizedOnce(Future<http.Response> Function(Map<String, String>) send, bool mutation) async {
+    final token = _session?.accessToken;
+    var response = await send(_headers);
+    if (response.statusCode == 401) {
+      if (_session?.accessToken == token) await refresh();
+      response = await send(_headers);
+    }
+    if (mutation && response.statusCode >= 200 && response.statusCode < 300) onDataChanged?.call();
     return response;
   }
 

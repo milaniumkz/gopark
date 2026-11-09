@@ -48,6 +48,36 @@ export class DriverStatusRequestPolicyService {
     creditBalance = 0,
   ): Promise<DriverEffectiveDebtPolicySnapshot> {
     const openObligations = await this.listEffectiveOpenObligations(driverId, creditBalance);
+    return this.summarizeDebt(openObligations, asOfDate);
+  }
+
+  async getEffectiveDebtPolicies(drivers: Array<{id: string; activeContractId?: string | null}>, asOfDate: string, credits: Record<string, number>) {
+    const ids = drivers.map(d => d.id);
+    const requests = await this.statusRequestRepository.listByDrivers(ids);
+    const complexIds = new Set(requests.filter(r => r.status === "approved").map(r => r.driverId));
+    const simple = this.obligationRepository.getBasePolicies ? drivers.filter(d => !complexIds.has(d.id) && !(credits[d.id] > 0)) : [];
+    const simpleIds = new Set(simple.map(d => d.id));
+    const detailedIds = ids.filter(id => !simpleIds.has(id));
+    const [obligations, base] = await Promise.all([
+      this.obligationRepository.listActiveByDrivers ? this.obligationRepository.listActiveByDrivers(detailedIds) : Promise.all(detailedIds.map(id => this.obligationRepository.listByDriver(id))).then(rows => rows.flat()),
+      simple.length ? this.obligationRepository.getBasePolicies!(simple, asOfDate) : Promise.resolve({} as Record<string, import("../../common/repositories/obligation.repository.js").ObligationDebtSnapshot>),
+    ]);
+    const byDriver = new Map<string, ObligationListItem[]>();
+    const periods = new Map<string, typeof requests>();
+    for (const item of obligations) { const rows = byDriver.get(item.driverId) ?? []; rows.push(item); byDriver.set(item.driverId, rows); }
+    for (const item of requests) if (item.driverId && item.status === "approved") { const rows = periods.get(item.driverId) ?? []; rows.push(item); periods.set(item.driverId, rows); }
+    return Object.fromEntries(drivers.map(driver => {
+      if (simpleIds.has(driver.id)) {
+        const value = base[driver.id];
+        return [driver.id, {currentDebt: value?.totalDebt ?? 0,overdueDebt:value?.overdueDebt ?? 0,overdueSinceDate:value?.overdueSinceDate ?? null,overdueUntilDate:value?.overdueUntilDate ?? null,nextPaymentAmount:value?.nextPaymentAmount ?? 0,nextPaymentDate:value?.nextPaymentDate ?? null}];
+      }
+      const rows = (byDriver.get(driver.id) ?? []).filter(item => !!driver.activeContractId && item.contractId === driver.activeContractId && item.type === "installment");
+      const effective = this.buildEffectiveObligations(rows, this.toApprovedPeriods(periods.get(driver.id) ?? []), credits[driver.id] ?? 0, {includePaid: false});
+      return [driver.id, this.summarizeDebt(effective, asOfDate)];
+    }));
+  }
+
+  private summarizeDebt(openObligations: DriverEffectiveObligationSnapshot[], asOfDate: string): DriverEffectiveDebtPolicySnapshot {
     const next = openObligations.find((item) => item.remainingAmount > 0) ?? null;
     const overdueObligations = openObligations.filter((item) => item.remainingAmount > 0 && item.effectiveDueDate < asOfDate);
     const overdueDebt = overdueObligations.reduce((sum, item) => sum + item.remainingAmount, 0);

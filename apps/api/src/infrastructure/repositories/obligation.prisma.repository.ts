@@ -1,3 +1,4 @@
+import { readPrincipalSummaries } from "./principal-summary.js";
 import type { ObligationListItem } from "@gopark/contracts";
 import type { ObligationRepository } from "../../common/repositories/index.js";
 import { PrismaService } from "../prisma/prisma.service.js";
@@ -29,11 +30,23 @@ function getOpenInstallmentAmount(metadata: unknown, amount: number, paidAmount:
 export class ObligationPrismaRepository implements ObligationRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async listByDriver(driverId: string): Promise<ObligationListItem[]> {
+  async getBasePolicies(inputs: Array<{id: string; activeContractId?: string | null}>, asOfDate: string): Promise<Record<string, import("../../common/repositories/obligation.repository.js").ObligationDebtSnapshot>> {
+    const prisma = this.prisma.client;
+    if (!prisma) return this.getDebtSnapshotsByDrivers(inputs.map(d => d.id), asOfDate);
+    const summaries = await readPrincipalSummaries(prisma, inputs.filter(d => !!d.activeContractId).map(d => ({contractId: d.activeContractId!, driverId: d.id})), asOfDate, 1);
+    return Object.fromEntries(inputs.map(d => [d.id, summaries.get(d.activeContractId ?? "") ?? {totalDebt:0,overdueDebt:0,overdueSinceDate:null,overdueUntilDate:null,nextPaymentAmount:0,nextPaymentDate:null}]));
+  }
+
+  async listByDriver(driverId: string): Promise<ObligationListItem[]> { return this.listFiltered([driverId], false); }
+
+  async listActiveByDrivers(driverIds: string[]): Promise<ObligationListItem[]> { return this.listFiltered(driverIds, true); }
+
+  private async listFiltered(driverIds: string[], activeOnly: boolean): Promise<ObligationListItem[]> {
+    if (!driverIds.length) return [];
     const prisma = this.prisma.client;
     if (prisma) {
       const obligations = await prisma.obligation.findMany({
-        where: { driverId },
+        where: { driverId: { in: driverIds }, ...(activeOnly ? { contract: { status: "active" }, type: "installment" } : {}) },
         orderBy: { dueDate: "asc" },
         select: {
           id: true,
@@ -67,7 +80,7 @@ export class ObligationPrismaRepository implements ObligationRepository {
       });
     }
 
-    return seedObligations.filter((item) => item.driverId === driverId);
+    return seedObligations.filter((item) => driverIds.includes(item.driverId));
   }
 
   async getDebtSnapshotsByDrivers(driverIds: string[], asOfDate?: string) {
