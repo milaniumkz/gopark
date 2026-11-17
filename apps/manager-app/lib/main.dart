@@ -3892,7 +3892,8 @@ class _ManagerChatPageState extends State<ManagerChatPage> {
     super.initState();
     _reload();
     _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (mounted) {
+      if (mounted && ModalRoute.of(context)?.isCurrent != false &&
+          WidgetsBinding.instance.lifecycleState != AppLifecycleState.paused) {
         setState(_reload);
       }
     });
@@ -4156,13 +4157,17 @@ class ManagerChatThreadPage extends StatefulWidget {
   State<ManagerChatThreadPage> createState() => _ManagerChatThreadPageState();
 }
 
-class _ManagerChatThreadPageState extends State<ManagerChatThreadPage> {
+class _ManagerChatThreadPageState extends State<ManagerChatThreadPage>
+    with WidgetsBindingObserver {
   ManagerChatThreadDetailDto? _threadDetail;
   Object? _threadError;
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
   String? _threadId;
   bool _isSending = false;
+  String? _pendingText;
+  bool _isRefreshing = false;
+  int _readVersion = 0;
   bool _isThreadLoading = false;
   bool _stickToBottom = true;
   String? _lastMessageSignature;
@@ -4171,23 +4176,32 @@ class _ManagerChatThreadPageState extends State<ManagerChatThreadPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _threadId = widget.threadId;
     final threadId = _threadId;
     if (threadId != null) {
       unawaited(_loadThread(threadId, forceScroll: true));
     }
     _scrollController.addListener(_rememberScrollPosition);
-    _refreshTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+    _refreshTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       _refreshThread();
     });
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _refreshTimer?.cancel();
     _scrollController.dispose();
     _messageController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_refreshThread());
+    }
   }
 
   void _rememberScrollPosition() {
@@ -4262,6 +4276,7 @@ class _ManagerChatThreadPageState extends State<ManagerChatThreadPage> {
     bool forceScroll = false,
     bool showLoader = true,
   }) async {
+    final version = ++_readVersion;
     if (showLoader) {
       setState(() {
         _isThreadLoading = true;
@@ -4270,7 +4285,7 @@ class _ManagerChatThreadPageState extends State<ManagerChatThreadPage> {
     }
     try {
       final detail = await widget.repository.loadChat(threadId);
-      if (!mounted || _threadId != threadId) {
+      if (!mounted || _threadId != threadId || version != _readVersion) {
         return;
       }
       setState(() {
@@ -4280,7 +4295,7 @@ class _ManagerChatThreadPageState extends State<ManagerChatThreadPage> {
       });
       _scrollToBottomIfNeeded(detail, force: forceScroll);
     } catch (error) {
-      if (!mounted || _threadId != threadId) {
+      if (!mounted || _threadId != threadId || version != _readVersion) {
         return;
       }
       setState(() {
@@ -4292,14 +4307,22 @@ class _ManagerChatThreadPageState extends State<ManagerChatThreadPage> {
 
   Future<void> _refreshThread() async {
     final threadId = _threadId;
-    if (threadId == null || _isSending) {
+    if (!mounted ||
+        threadId == null ||
+        _isSending ||
+        _isRefreshing ||
+        _isThreadLoading ||
+        ModalRoute.of(context)?.isCurrent == false ||
+        WidgetsBinding.instance.lifecycleState == AppLifecycleState.paused) {
       return;
     }
 
+    _isRefreshing = true;
+    final version = ++_readVersion;
     try {
       final keepBottom = _stickToBottom || _isNearBottom();
       final updated = await widget.repository.loadChat(threadId);
-      if (!mounted || _threadId != threadId) {
+      if (!mounted || _threadId != threadId || version != _readVersion) {
         return;
       }
       setState(() {
@@ -4314,6 +4337,8 @@ class _ManagerChatThreadPageState extends State<ManagerChatThreadPage> {
       }
     } catch (_) {
       // Следующий опрос попробует обновить чат ещё раз.
+    } finally {
+      _isRefreshing = false;
     }
   }
 
@@ -4332,7 +4357,12 @@ class _ManagerChatThreadPageState extends State<ManagerChatThreadPage> {
       return;
     }
 
-    setState(() => _isSending = true);
+    ++_readVersion; // Ignore a poll started before this send.
+    setState(() {
+      _isSending = true;
+      _pendingText = text;
+    });
+    _scheduleScrollToBottom();
     try {
       final updated = threadId == null
           ? await widget.repository.startDriverChat(driverId!, text)
@@ -4340,7 +4370,9 @@ class _ManagerChatThreadPageState extends State<ManagerChatThreadPage> {
       if (!mounted) {
         return;
       }
-      _messageController.clear();
+      if (_messageController.text.trim() == text) {
+        _messageController.clear();
+      }
       setState(() {
         _threadId = updated.id;
         _threadDetail = updated;
@@ -4357,7 +4389,11 @@ class _ManagerChatThreadPageState extends State<ManagerChatThreadPage> {
       );
     } finally {
       if (mounted) {
-        setState(() => _isSending = false);
+        setState(() {
+          _isSending = false;
+          _pendingText = null;
+          _isThreadLoading = false;
+        });
       }
     }
   }
@@ -4374,7 +4410,25 @@ class _ManagerChatThreadPageState extends State<ManagerChatThreadPage> {
               child: ListView(
                 controller: _scrollController,
                 padding: const EdgeInsets.all(16),
-                children: [_buildThreadBody()],
+                children: [
+                  _buildThreadBody(),
+                  if (_pendingText != null)
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(_pendingText!),
+                              const Text('Отправляется…'),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
             Padding(
