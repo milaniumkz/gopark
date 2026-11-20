@@ -23,12 +23,12 @@ if [ -d "$TLS" ]; then tar -czf "$BACKUP/https.tgz" -C /home/client gopark-https
 
 # Install the official PyPI client without modifying the host Python installation.
 PYTHON_VERSION=$(python3 -c 'import sys;print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-if ! PYTHONPATH="$TLS/packages" python3 -m certbot --version > /dev/null 2>&1; then
+if ! PYTHONPATH="$TLS/packages" python3 "$TLS/packages/bin/certbot" --version > /dev/null 2>&1; then
   docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -v "$TLS/packages:/packages" "python:$PYTHON_VERSION-slim-bookworm" \
     python -m pip install --no-cache-dir --target /packages 'certbot>=5.4,<7'
 fi
-PYTHONPATH="$TLS/packages" python3 -m certbot --version
+PYTHONPATH="$TLS/packages" python3 "$TLS/packages/bin/certbot" --version
 
 cat > "$TLS/auth.sh" <<'HOOK'
 #!/usr/bin/env bash
@@ -49,7 +49,7 @@ docker exec gopark-crm-web rm -f "/usr/share/nginx/html/.well-known/acme-challen
 HOOK
 chmod 700 "$TLS/auth.sh" "$TLS/cleanup.sh"
 
-PYTHONPATH="$TLS/packages" python3 -m certbot certonly \
+PYTHONPATH="$TLS/packages" python3 "$TLS/packages/bin/certbot" certonly \
   --manual --preferred-challenges http \
   --manual-auth-hook "$TLS/auth.sh" --manual-cleanup-hook "$TLS/cleanup.sh" \
   --preferred-profile shortlived --ip-address "$IP" --cert-name gopark-ip \
@@ -90,7 +90,7 @@ cat > "$TLS/renew.sh" <<'RENEW'
 #!/usr/bin/env bash
 set -euo pipefail
 export PYTHONPATH=/home/client/gopark-https/packages
-python3 -m certbot renew --non-interactive \
+python3 /home/client/gopark-https/packages/bin/certbot renew --non-interactive \
   --config-dir /home/client/gopark-https/letsencrypt \
   --work-dir /home/client/gopark-https/work --logs-dir /home/client/gopark-https/logs \
   --deploy-hook 'docker exec gopark-https nginx -t && docker exec gopark-https nginx -s reload'
