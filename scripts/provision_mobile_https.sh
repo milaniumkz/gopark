@@ -99,4 +99,8 @@ chmod 700 "$TLS/renew.sh"
 command -v crontab > /dev/null
 { crontab -l 2>/dev/null | sed '\|/home/client/gopark-https/renew.sh|d' || true; \
   echo '17 */6 * * * bash /home/client/gopark-https/renew.sh >> /home/client/gopark-https/renew.log 2>&1'; } | crontab -
-echo 'HTTPS verified. Automatic certificate renewal runs every six hours.'
+PYTHONPATH="$TLS/packages" python3 "$TLS/packages/bin/certbot" renew --dry-run \
+  --config-dir "$CERTS" --work-dir "$TLS/work" --logs-dir "$TLS/logs" \
+  --run-deploy-hooks \
+  --deploy-hook 'docker exec gopark-https nginx -t && docker exec gopark-https nginx -s reload'
+echo 'HTTPS and renewal dry run verified. Automatic certificate renewal runs every six hours.'
