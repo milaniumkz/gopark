@@ -2,8 +2,8 @@
 set -euo pipefail
 umask 077
 BASE=/home/client/gopark
-TLS="$BASE/https"
-CERTS="$BASE/secrets/letsencrypt"
+TLS=/home/client/gopark-https
+CERTS="$TLS/letsencrypt"
 IP=185.138.185.36
 exec 9>/tmp/gopark-production-deploy.lock
 flock -n 9 || { echo 'Another production deploy is running'; exit 1; }
@@ -19,7 +19,7 @@ test -s "$BACKUP/database.sql.gz"
 tar -czf "$BACKUP/configuration.tgz" -C "$BASE" .env secrets
 tar -tzf "$BACKUP/configuration.tgz" > /dev/null
 docker inspect gopark-crm-web > "$BACKUP/crm-container.json"
-if [ -d "$TLS" ]; then tar -czf "$BACKUP/https.tgz" -C "$BASE" https; fi
+if [ -d "$TLS" ]; then tar -czf "$BACKUP/https.tgz" -C /home/client gopark-https; fi
 
 # Install the official PyPI client without modifying the host Python installation.
 PYTHON_VERSION=$(python3 -c 'import sys;print(f"{sys.version_info.major}.{sys.version_info.minor}")')
@@ -89,14 +89,14 @@ curl -fsS "https://$IP/privacy.html" > /dev/null
 cat > "$TLS/renew.sh" <<'RENEW'
 #!/usr/bin/env bash
 set -euo pipefail
-export PYTHONPATH=/home/client/gopark/https/packages
+export PYTHONPATH=/home/client/gopark-https/packages
 python3 -m certbot renew --non-interactive \
-  --config-dir /home/client/gopark/secrets/letsencrypt \
-  --work-dir /home/client/gopark/https/work --logs-dir /home/client/gopark/https/logs \
+  --config-dir /home/client/gopark-https/letsencrypt \
+  --work-dir /home/client/gopark-https/work --logs-dir /home/client/gopark-https/logs \
   --deploy-hook 'docker exec gopark-https nginx -t && docker exec gopark-https nginx -s reload'
 RENEW
 chmod 700 "$TLS/renew.sh"
 command -v crontab > /dev/null
-{ crontab -l 2>/dev/null | sed '\|/home/client/gopark/https/renew.sh|d' || true; \
-  echo '17 */6 * * * bash /home/client/gopark/https/renew.sh >> /home/client/gopark/https/renew.log 2>&1'; } | crontab -
+{ crontab -l 2>/dev/null | sed '\|/home/client/gopark-https/renew.sh|d' || true; \
+  echo '17 */6 * * * bash /home/client/gopark-https/renew.sh >> /home/client/gopark-https/renew.log 2>&1'; } | crontab -
 echo 'HTTPS verified. Automatic certificate renewal runs every six hours.'
