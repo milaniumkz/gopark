@@ -2,6 +2,12 @@ name: mobile-store-bundles
 
 on:
   workflow_dispatch:
+  push:
+    branches: ['Project/mobile-store-release']
+    paths:
+      - 'apps/driver-app/**'
+      - 'apps/manager-app/**'
+      - '.github/workflows/mobile-store-bundles.yml'
 
 jobs:
   android:
