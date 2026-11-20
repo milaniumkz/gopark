@@ -1439,7 +1439,7 @@ String _resolveBaseUrl() {
     }
   }
 
-  return 'http://185.138.185.36/api';
+  return 'https://185.138.185.36/api';
 }
 
 List<Map<String, dynamic>> _asJsonList(Object? value) {
