@@ -50,6 +50,7 @@ build/
 **/*.p12
 **/*.jks
 **/*.keystore
+**/android/key.properties
 **/*service*account*.json
 *liberty-live.json
 secrets/
@@ -75,6 +76,9 @@ apk/
 *.webp
 !apps/**/assets/**
 !apps/manager-app/android/app/src/main/res/mipmap/ic_launcher.png
+!apps/*/android/app/src/main/res/mipmap-*/ic_launcher.png
+!apps/*/ios/Runner/Assets.xcassets/AppIcon.appiconset/*.png
+!apps/*/ios/Runner/Assets.xcassets/LaunchImage.imageset/*.png
 !apps/**/public/**
 !apps/**/web/**
 !docs/design/parkpro-audit/**

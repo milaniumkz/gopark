@@ -9,6 +9,7 @@ import 'api.dart';
 import 'platform_storage.dart';
 import 'push_notifications.dart';
 import 'repository.dart';
+import 'support_links.dart';
 
 const _managerBg = Color(0xFFF4F7FB);
 const _managerSurface = Color(0xFFFFFFFF);
@@ -77,11 +78,13 @@ class GoParkManagerApp extends StatelessWidget {
               displayColor: _managerText,
             ),
         navigationBarTheme: NavigationBarThemeData(
-          height: 50,
+          height: 64,
           backgroundColor: Colors.white.withValues(alpha: 0.94),
           indicatorColor: _managerBlue.withValues(alpha: 0.14),
           labelTextStyle: WidgetStateProperty.resolveWith(
             (states) => TextStyle(
+              fontSize: 11,
+              height: 1.1,
               fontWeight: FontWeight.w700,
               color: states.contains(WidgetState.selected)
                   ? _managerBlue
@@ -275,7 +278,7 @@ class _ManagerShellState extends State<ManagerShell>
           child: SafeArea(child: pages[index]),
         ),
         bottomNavigationBar: NavigationBar(
-          height: 54,
+          height: 64,
           selectedIndex: selectedNavIndex,
           onDestinationSelected: (value) => setState(() {
             index = value <= 3
@@ -5471,7 +5474,7 @@ class _ManagerLoginPageState extends State<ManagerLoginPage> {
         ),
         child: SafeArea(
           child: Center(
-            child: Padding(
+            child: SingleChildScrollView(
               padding: const EdgeInsets.all(8),
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 320),
@@ -5527,18 +5530,12 @@ class _ManagerLoginPageState extends State<ManagerLoginPage> {
                       const SizedBox(height: 6),
                       TextField(
                         controller: loginController,
-                        keyboardType: TextInputType.phone,
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(
-                            RegExp(r'[0-9+\s()-]'),
-                          ),
-                        ],
+                        keyboardType: TextInputType.emailAddress,
                         decoration: _managerInputDecoration(
                           'Логин',
                           Icons.alternate_email_rounded,
                         ).copyWith(
-                          prefixText: '+996 ',
-                          helperText: 'Введите номер без кода страны',
+                          helperText: 'Телефон с кодом страны или email',
                         ),
                       ),
                       const SizedBox(height: 6),
@@ -5575,6 +5572,7 @@ class _ManagerLoginPageState extends State<ManagerLoginPage> {
                                 ),
                         child: Text(widget.isSubmitting ? 'Вход...' : 'Войти'),
                       ),
+                      const SupportLinks(),
                     ],
                   ),
                 ),

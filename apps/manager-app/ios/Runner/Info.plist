@@ -26,6 +26,12 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>NSCameraUsageDescription</key>
+	<string>Камера нужна для прикрепления фотографий к рабочим сообщениям и обращениям GoPark.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Доступ к выбранным фотографиям нужен для отправки изображений в GoPark.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -1,0 +1,87 @@
+name: publish-mobile-store-pages
+
+on:
+  push:
+    branches: ['Project/mobile-store-release']
+    paths:
+      - 'apps/crm-web/public/privacy.html'
+      - 'apps/crm-web/public/support.html'
+      - '.github/workflows/mobile-store-pages.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure SSH
+        env:
+          PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Upload public pages
+        env:
+          SSH_PORT: ${{ secrets.PROD_SSH_PORT }}
+          SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+        run: |
+          scp -i ~/.ssh/id_ed25519 -P "$SSH_PORT" apps/crm-web/public/privacy.html "$SSH_USER@$SSH_HOST:/tmp/gopark-privacy-$GITHUB_SHA.html"
+          scp -i ~/.ssh/id_ed25519 -P "$SSH_PORT" apps/crm-web/public/support.html "$SSH_USER@$SSH_HOST:/tmp/gopark-support-$GITHUB_SHA.html"
+      - name: Inspect HTTPS prerequisites
+        env:
+          SSH_PORT: ${{ secrets.PROD_SSH_PORT }}
+          SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE'
+          id
+          command -v nginx certbot docker python3 || true
+          docker ps --format '{{.Names}} {{.Ports}}'
+          sudo -n nginx -T 2>/dev/null | awk '$1 == "server_name" || $1 == "listen" || $1 == "ssl_certificate" {print}' || true
+          sudo -n true && echo 'Passwordless sudo available' || true
+          REMOTE
+      - name: Back up and publish pages
+        env:
+          SSH_PORT: ${{ secrets.PROD_SSH_PORT }}
+          SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "SHA='$GITHUB_SHA' bash -s" <<'REMOTE'
+          set -euo pipefail
+          exec 9>/tmp/gopark-production-deploy.lock
+          flock -n 9 || { echo 'Another production deploy is running'; exit 1; }
+          BASE=/home/client
+          CONFIG="$BASE/gopark"
+          CURRENT=$(readlink -f "$BASE/gopark-current" 2>/dev/null || true)
+          if [ ! -d "$CURRENT" ]; then CURRENT="$CONFIG"; fi
+          BACKUP="$BASE/backups/gopark-store-pages-$SHA-$(date -u +%Y%m%dT%H%M%SZ)"
+          mkdir -p "$BACKUP"
+          chmod 700 "$BACKUP"
+          docker exec gopark-postgres pg_dump -U gopark gopark | gzip > "$BACKUP/database.sql.gz"
+          gzip -t "$BACKUP/database.sql.gz"
+          test -s "$BACKUP/database.sql.gz"
+          tar -czf "$BACKUP/configuration.tgz" -C "$CONFIG" .env secrets
+          tar -tzf "$BACKUP/configuration.tgz" > /dev/null
+          docker cp gopark-crm-web:/usr/share/nginx/html "$BACKUP/html"
+          for page in privacy support; do
+            SOURCE="/tmp/gopark-$page-$SHA.html"
+            test -s "$SOURCE"
+            for release in "$CONFIG" "$CURRENT"; do
+              mkdir -p "$release/apps/crm-web/public"
+              install -m 644 "$SOURCE" "$release/apps/crm-web/public/$page.html"
+            done
+            docker cp "$SOURCE" "gopark-crm-web:/usr/share/nginx/html/$page.html"
+            curl --fail --silent --show-error "http://127.0.0.1:3000/$page.html" > "$BACKUP/served-$page.html"
+            cmp "$SOURCE" "$BACKUP/served-$page.html"
+          done
+          echo 'Verified backup and both public pages. Application services were not restarted.'
+          REMOTE

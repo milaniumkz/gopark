@@ -1,0 +1,66 @@
+name: mobile-store-bundles
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['Project/mobile-store-release']
+    paths:
+      - 'apps/driver-app/**'
+      - 'apps/manager-app/**'
+      - '.github/workflows/mobile-store-bundles.yml'
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    environment: production
+    strategy:
+      matrix:
+        include:
+          - role: driver
+            flutter: '3.44.1'
+            key_secret: GOPARK_DRIVER_UPLOAD_KEYSTORE_BASE64
+            password_secret: GOPARK_DRIVER_UPLOAD_KEYSTORE_PASSWORD
+          - role: manager
+            flutter: '3.47.6'
+            key_secret: GOPARK_MANAGER_UPLOAD_KEYSTORE_BASE64
+            password_secret: GOPARK_MANAGER_UPLOAD_KEYSTORE_PASSWORD
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ matrix.flutter }}
+          cache: true
+      - name: Configure private upload signing
+        working-directory: apps/${{ matrix.role }}-app
+        env:
+          KEYSTORE_BASE64: ${{ secrets[matrix.key_secret] }}
+          KEYSTORE_PASSWORD: ${{ secrets[matrix.password_secret] }}
+        run: |
+          test -n "$KEYSTORE_BASE64" && test -n "$KEYSTORE_PASSWORD"
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/gopark-upload.jks"
+          printf 'storeFile=%s\nstorePassword=%s\nkeyPassword=%s\nkeyAlias=gopark-upload\n' "$RUNNER_TEMP/gopark-upload.jks" "$KEYSTORE_PASSWORD" "$KEYSTORE_PASSWORD" > android/key.properties
+      - name: Verify and build store bundle
+        working-directory: apps/${{ matrix.role }}-app
+        run: |
+          flutter pub get --enforce-lockfile
+          git diff --exit-code -- pubspec.lock pubspec.yaml
+          git restore -- analysis_options.yaml
+          dart analyze
+          flutter test --no-pub
+          flutter build appbundle --release --no-pub --dart-define=API_BASE_URL=https://185.138.185.36/api
+          jarsigner -verify build/app/outputs/bundle/release/app-release.aab
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gopark-${{ matrix.role }}-store-bundle
+          path: apps/${{ matrix.role }}-app/build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 14
+      - name: Remove signing material
+        if: always()
+        working-directory: apps/${{ matrix.role }}-app
+        run: rm -f android/key.properties "$RUNNER_TEMP/gopark-upload.jks"
