@@ -1,0 +1,57 @@
+name: create-mobile-review-accounts
+on:
+  push:
+    branches: ['Project/mobile-store-release']
+    paths:
+      - 'scripts/create_mobile_review_accounts.mjs'
+      - '.github/workflows/mobile-review-accounts.yml'
+  workflow_dispatch:
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+jobs:
+  create:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare SSH and private review credentials
+        env:
+          PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
+          MANAGER_PASSWORD: ${{ secrets.GOPARK_REVIEW_MANAGER_PASSWORD }}
+          DRIVER_PASSWORD: ${{ secrets.GOPARK_REVIEW_DRIVER_PASSWORD }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          node --input-type=module -e 'import fs from "node:fs"; fs.writeFileSync("/tmp/gopark-review-credentials.json", JSON.stringify({managerPassword:process.env.MANAGER_PASSWORD,driverPassword:process.env.DRIVER_PASSWORD}), {mode:0o600});'
+      - name: Back up database and create isolated accounts
+        env:
+          SSH_PORT: ${{ secrets.PROD_SSH_PORT }}
+          SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+        run: |
+          scp -i ~/.ssh/id_ed25519 -P "$SSH_PORT" scripts/create_mobile_review_accounts.mjs "$SSH_USER@$SSH_HOST:/tmp/gopark-review-$GITHUB_SHA.mjs"
+          scp -i ~/.ssh/id_ed25519 -P "$SSH_PORT" /tmp/gopark-review-credentials.json "$SSH_USER@$SSH_HOST:/tmp/gopark-review-$GITHUB_SHA.json"
+          ssh -i ~/.ssh/id_ed25519 -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "SHA='$GITHUB_SHA' bash -s" <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          exec 9>/tmp/gopark-production-deploy.lock
+          flock -n 9
+          trap 'rm -f "/tmp/gopark-review-$SHA.json"; docker exec gopark-api rm -f "/tmp/gopark-review-$SHA.json"' EXIT
+          BACKUP="/home/client/backups/gopark-review-$SHA-$(date -u +%Y%m%dT%H%M%SZ)"
+          mkdir -p "$BACKUP"
+          docker exec gopark-postgres pg_dump -U gopark gopark | gzip > "$BACKUP/database.sql.gz"
+          gzip -t "$BACKUP/database.sql.gz"
+          test -s "$BACKUP/database.sql.gz"
+          tar -czf "$BACKUP/configuration.tgz" -C /home/client/gopark .env secrets
+          tar -tzf "$BACKUP/configuration.tgz" > /dev/null
+          docker cp "/tmp/gopark-review-$SHA.mjs" "gopark-api:/tmp/gopark-review-$SHA.mjs"
+          docker cp "/tmp/gopark-review-$SHA.json" "gopark-api:/tmp/gopark-review-$SHA.json"
+          docker exec gopark-api node "/tmp/gopark-review-$SHA.mjs" "/tmp/gopark-review-$SHA.json"
+          REMOTE
+      - name: Remove runner credential file
+        if: always()
+        run: rm -f /tmp/gopark-review-credentials.json
