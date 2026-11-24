@@ -49,6 +49,11 @@ android {
     }
 
     signingConfigs {
+        getByName("debug") {
+            System.getenv("GOPARK_MANAGER_KEYSTORE")?.takeIf { it.isNotBlank() }?.let {
+                storeFile = file(it)
+            }
+        }
         if (hasReleaseSigning) {
             create("release") {
                 storeFile = file(releaseSigning.getProperty("storeFile"))

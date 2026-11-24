@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import type {
   ChatMessageItem,
   ChatThreadDetail,
@@ -39,6 +39,7 @@ type ChatMessageRecord = {
 
 @Injectable()
 export class ChatsService {
+  private readonly logger = new Logger(ChatsService.name);
   private readonly memoryThreads = new Map<string, ChatThreadRecord>();
   private readonly memoryMessages: ChatMessageRecord[] = [];
   private readonly userRepository: UserRepository = makeUserRepository();
@@ -92,7 +93,7 @@ export class ChatsService {
         const message = this.makeMemoryMessage(existing.id, text, sender);
         this.memoryMessages.push(message);
         existing.updatedAt = message.createdAt;
-        await this.createChatNotification(existing, currentUser).catch(() => undefined);
+        this.notifyChatInBackground(existing, currentUser);
         return this.toThreadDetail(existing, this.getMemoryMessages(existing.id));
       }
 
@@ -109,7 +110,7 @@ export class ChatsService {
       const message = this.makeMemoryMessage(thread.id, text, sender);
       this.memoryThreads.set(thread.id, thread);
       this.memoryMessages.push(message);
-      await this.createChatNotification(thread, currentUser).catch(() => undefined);
+      this.notifyChatInBackground(thread, currentUser);
       return this.toThreadDetail(thread, [message]);
     }
 
@@ -138,7 +139,7 @@ export class ChatsService {
           updatedAt: new Date(),
         },
       });
-      await this.createChatNotification(existing, currentUser).catch(() => undefined);
+      this.notifyChatInBackground(existing, currentUser);
       return this.get(existing.id, currentUser);
     }
 
@@ -160,7 +161,7 @@ export class ChatsService {
       include: this.threadInclude(),
     });
 
-    await this.createChatNotification(created, currentUser).catch(() => undefined);
+    this.notifyChatInBackground(created, currentUser);
     return this.toThreadDetail(created, created.messages ?? []);
   }
 
@@ -186,7 +187,7 @@ export class ChatsService {
       if (memoryThread) {
         memoryThread.updatedAt = message.createdAt;
       }
-      await this.createChatNotification(thread, currentUser).catch(() => undefined);
+      this.notifyChatInBackground(thread, currentUser);
       return this.get(threadId, currentUser);
     }
 
@@ -204,8 +205,15 @@ export class ChatsService {
       data: { updatedAt: new Date() },
     });
 
-    await this.createChatNotification(thread, currentUser).catch(() => undefined);
+    this.notifyChatInBackground(thread, currentUser);
     return this.get(threadId, currentUser);
+  }
+
+  // Message persistence is the acknowledgement. Push delivery must not delay it.
+  private notifyChatInBackground(thread: ChatThreadRecord, currentUser: RequestUser): void {
+    void this.createChatNotification(thread, currentUser).catch(() => {
+      this.logger.warn("Chat notification delivery failed");
+    });
   }
 
   private async createChatNotification(thread: ChatThreadRecord, currentUser: RequestUser): Promise<void> {

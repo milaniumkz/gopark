@@ -7,6 +7,15 @@ on:
         description: status, incident-schema, logs, restart, redeploy, rollback
         required: true
         default: status
+      contract_number:
+        description: Explicit contract number for a requested schedule repair
+        required: false
+      workshop:
+        description: Workshop for an explicitly requested vehicle handoff (main, body, both)
+        required: false
+      vehicle_plate:
+        description: Vehicle plate for diagnostics or an explicitly requested handoff
+        required: false
       rollback_sha:
         description: Required only for rollback
         required: false
@@ -17,9 +26,14 @@ concurrency:
 
 jobs:
   ops:
+    if: inputs.operation != 'connectivity-mac'
     runs-on: ubuntu-latest
     environment: production
     steps:
+      - uses: actions/checkout@v4
+      - name: Verify reset in isolated PostgreSQL
+        if: inputs.operation == 'reset-keep-owner'
+        run: bash scripts/test_reset_keep_owner.sh
       - name: Configure SSH
         run: |
           mkdir -p ~/.ssh
@@ -30,91 +44,50 @@ jobs:
         env:
           OPERATION: ${{ github.event.inputs.operation }}
           ROLLBACK_SHA: ${{ github.event.inputs.rollback_sha }}
+          VEHICLE_PLATE: ${{ github.event.inputs.vehicle_plate }}
+          WORKSHOP: ${{ github.event.inputs.workshop }}
+          CONTRACT_NUMBER: ${{ github.event.inputs.contract_number }}
         run: |
-          ssh -i ~/.ssh/id_ed25519 -p "${{ secrets.PROD_SSH_PORT }}" "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}" "OPERATION='$OPERATION' ROLLBACK_SHA='$ROLLBACK_SHA' bash -s" <<'REMOTE'
-          set -euo pipefail
-          BASE="/home/client"
-          CONFIG_DIR="$BASE/gopark"
-          CURRENT="${BASE}/gopark-current"
-          if [ -L "$CURRENT" ]; then APP_DIR="$(readlink -f "$CURRENT")"; else APP_DIR="$CONFIG_DIR"; fi
-          cd "$APP_DIR"
-          compose() {
-            local args=(-p gopark --env-file "$CONFIG_DIR/.env" -f docker-compose.server.yml)
-            if [ -f release-images.yml ]; then args+=(-f release-images.yml); fi
-            docker compose "${args[@]}" "$@"
-          }
+          [[ -z "$CONTRACT_NUMBER" || "$CONTRACT_NUMBER" =~ ^[0-9]{1,12}$ ]]
+          [[ "$OPERATION" =~ ^[a-z-]+$ ]]
+          [[ -z "$ROLLBACK_SHA" || "$ROLLBACK_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$VEHICLE_PLATE" =~ ^[a-zA-Z0-9[:space:]-]{0,32}$ ]]
+          [[ -z "$WORKSHOP" || "$WORKSHOP" =~ ^(main|body|both)$ ]]
+          RESET_SQL_PATH="/tmp/gopark-owner-reset-$GITHUB_RUN_ID.sql"
+          if [ "$OPERATION" = reset-keep-owner ]; then
+            scp -i ~/.ssh/id_ed25519 -P "${{ secrets.PROD_SSH_PORT }}" scripts/reset_database_keep_owner.sql "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}:$RESET_SQL_PATH"
+          fi
+          if [ "$OPERATION" = repair-contract-schedule ]; then
+            scp -i ~/.ssh/id_ed25519 -P "${{ secrets.PROD_SSH_PORT }}" scripts/repair_contract_schedule.mjs "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}:/tmp/gopark-repair-contract-$GITHUB_RUN_ID.mjs"
+          fi
+          OPS_SCRIPT_PATH="/tmp/gopark-server-ops-$GITHUB_RUN_ID.sh"
+          scp -i ~/.ssh/id_ed25519 -P "${{ secrets.PROD_SSH_PORT }}" scripts/server_ops.sh "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}:$OPS_SCRIPT_PATH"
+          ssh -i ~/.ssh/id_ed25519 -p "${{ secrets.PROD_SSH_PORT }}" "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}" "OPERATION='$OPERATION' CONTRACT_NUMBER='$CONTRACT_NUMBER' REPAIR_SCRIPT_PATH='/tmp/gopark-repair-contract-$GITHUB_RUN_ID.mjs' ROLLBACK_SHA='$ROLLBACK_SHA' VEHICLE_PLATE='$VEHICLE_PLATE' WORKSHOP='$WORKSHOP' RESET_SQL_PATH='$RESET_SQL_PATH' bash '$OPS_SCRIPT_PATH'"
 
-          case "$OPERATION" in
-            manager-vehicles)
-              docker exec gopark-api node --input-type=module -e 'const {PrismaClient}=await import("./apps/api/node_modules/@prisma/client/default.js");const p=new PrismaClient();try{const users=await p.user.findMany({where:{role:"manager"},select:{id:true,firstName:true,lastName:true,companyName:true,manager:{select:{id:true,level:true,_count:{select:{cars:true,drivers:true}}}}}});console.log(JSON.stringify(users));const cars=await p.car.findMany({select:{id:true,managerId:true,companyName:true,status:true,assignments:{where:{endedAt:null},select:{driver:{select:{managerId:true,companyName:true}}}}}});console.log(JSON.stringify({cars}));}finally{await p.$disconnect()}'
-              ;;
-            contract-numbers)
-              docker exec gopark-postgres psql -U gopark -d gopark -v ON_ERROR_STOP=1 -c 'SELECT contract_number, status FROM contracts ORDER BY created_at;'
-              docker exec gopark-api node --input-type=module -e 'const {PrismaClient}=await import("./apps/api/node_modules/@prisma/client/default.js");const {ContractPrismaRepository}=await import("./apps/api/dist/apps/api/src/infrastructure/repositories/contract.prisma.repository.js");const client=new PrismaClient();try{console.log(JSON.stringify({nextContractNumber:await new ContractPrismaRepository({client}).getNextNumber()}))}finally{await client.$disconnect()}'
-              ;;
-            status)
-              compose ps
-              cat "$BASE/gopark-current-sha" 2>/dev/null || true
-              curl -fsS http://127.0.0.1:3000/api/health
-              ;;
-            dashboard-totals)
-              # Aggregate diagnostics only: no names, phone numbers or record identifiers.
-              docker exec gopark-postgres psql -U gopark -d gopark -v ON_ERROR_STOP=1 -c "SELECT CURRENT_DATE AS server_date; SELECT status, count(*) AS drivers FROM drivers GROUP BY status; SELECT c.status AS contract_status, d.status AS driver_status, count(*) AS contracts, sum(c.installment_amount) AS daily_payment FROM contracts c LEFT JOIN drivers d ON d.id=c.driver_id GROUP BY c.status,d.status; SELECT o.due_date::date AS due_date, o.type, c.status AS contract_status, d.status AS driver_status, EXISTS(SELECT 1 FROM car_assignments a JOIN cars car ON car.id=a.car_id WHERE a.driver_id=o.driver_id AND a.ended_at IS NULL AND car.status='assigned') AS assigned, count(*) AS obligations, sum(o.amount) AS charged, sum(o.paid_amount) AS paid, sum(GREATEST(COALESCE((o.metadata->>'installmentAmount')::numeric,o.amount)-LEAST(o.paid_amount,COALESCE((o.metadata->>'installmentAmount')::numeric,o.amount)),0)) AS open_installment FROM obligations o LEFT JOIN contracts c ON c.id=o.contract_id LEFT JOIN drivers d ON d.id=o.driver_id WHERE o.due_date::date BETWEEN CURRENT_DATE AND CURRENT_DATE+6 GROUP BY o.due_date::date,o.type,c.status,d.status,assigned ORDER BY o.due_date::date,o.type;"
-              docker exec gopark-api node --input-type=module -e 'const {DashboardService}=await import("./apps/api/dist/apps/api/src/modules/dashboard/dashboard.service.js");const date=new Date().toISOString().slice(0,10);const overview=await new DashboardService().getOverview("today",null,date,date);console.log(JSON.stringify({date,plannedPayment:overview.plannedPayment,debt:overview.debt,actualPayment:overview.actualPayment,overpayment:overview.overpayment}));process.exit(0)'
-              ;;
-            incident-schema)
-              cat "$BASE/gopark-current-sha" 2>/dev/null || true
-              find "$APP_DIR/apps/api/prisma/migrations" -maxdepth 2 -type f -name migration.sql -printf '%P\n' 2>/dev/null || true
-              docker exec gopark-postgres psql -U gopark -d gopark -v ON_ERROR_STOP=1 -c "SELECT to_regclass('public._prisma_migrations') AS migration_table; SELECT column_name, data_type FROM information_schema.columns WHERE table_schema='public' AND table_name='incidents' ORDER BY ordinal_position;"
-              if docker exec gopark-postgres psql -U gopark -d gopark -Atc "SELECT to_regclass('public._prisma_migrations') IS NOT NULL" | grep -q '^t$'; then
-                docker exec gopark-postgres psql -U gopark -d gopark -c 'SELECT migration_name, finished_at, rolled_back_at FROM _prisma_migrations ORDER BY started_at;'
-              fi
-              ;;
-            logs)
-              compose logs --tail=200 api worker crm-web | sed -E 's/(Authorization: Bearer )[A-Za-z0-9._-]+/\1[redacted]/g'
-              ;;
-            recover-contract-runtime)
-              # Restore only compiled module files in the existing application containers.
-              # Database, Redis, configuration and volumes are untouched.
-              RECOVERY_DIR=$(mktemp -d /tmp/gopark-contract-runtime.XXXXXX)
-              docker cp gopark-api:/app/apps/api/dist/packages/contracts/src/. "$RECOVERY_DIR/"
-              test -f "$RECOVERY_DIR/platform.js"
-              for container in gopark-api gopark-worker; do
-                docker cp "$RECOVERY_DIR/." "$container:/app/packages/contracts/src/"
-              done
-              docker restart gopark-api gopark-worker
-              docker restart gopark-crm-web
-              for attempt in $(seq 1 30); do
-                if curl --max-time 5 -fsS http://127.0.0.1:3000/api/health; then
-                  echo 'Recovered application health'
-                  exit 0
-                fi
-                sleep 2
-              done
-              exit 1
-              ;;
-            restart)
-              compose restart api worker crm-web
-              curl -fsS http://127.0.0.1:3000/api/health
-              ;;
-            redeploy)
-              compose up -d --no-deps --force-recreate api worker crm-web
-              curl -fsS http://127.0.0.1:3000/api/health
-              ;;
-            rollback)
-              test -n "$ROLLBACK_SHA"
-              TARGET="$BASE/gopark-releases/$ROLLBACK_SHA"
-              test -d "$TARGET"
-              cd "$TARGET"
-              compose build api crm-web
-              compose up -d --no-deps --force-recreate api worker crm-web
-              ln -sfn "$TARGET" "$CURRENT"
-              echo "$ROLLBACK_SHA" > "$BASE/gopark-current-sha"
-              curl -fsS http://127.0.0.1:3000/api/health
-              ;;
-            *)
-              echo "Unsupported operation"
-              exit 2
-              ;;
-          esac
-          REMOTE
+  mac-connectivity:
+    if: inputs.operation == 'connectivity-mac'
+    runs-on: [milanium-mac-arm64, repo-gopark]
+    timeout-minutes: 3
+    environment: production
+    steps:
+      - name: Check configured server without changing it
+        shell: bash
+        env:
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          PROD_SSH_KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
+          PROD_SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+          PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          PROD_SSH_PORT: ${{ secrets.PROD_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          ssh_dir=$(mktemp -d "$RUNNER_TEMP/gopark-connectivity.XXXXXX")
+          trap 'rm -rf "$ssh_dir"' EXIT
+          chmod 700 "$ssh_dir"
+          printf '%s\n' "$PROD_SSH_PRIVATE_KEY" > "$ssh_dir/key"
+          chmod 600 "$ssh_dir/key"
+          printf '%s\n' "$PROD_SSH_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          ssh -i "$ssh_dir/key" -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o ConnectTimeout=15 -o ConnectionAttempts=1 -o StrictHostKeyChecking=yes \
+            -o "UserKnownHostsFile=$ssh_dir/known_hosts" -p "$PROD_SSH_PORT" \
+            "$PROD_SSH_USER@$PROD_SSH_HOST" \
+            'cat /home/client/gopark-current-sha; curl --max-time 15 -fsS http://127.0.0.1:3000/api/health'

@@ -1,3 +1,4 @@
+import type { ServiceRepairDetails, AccidentDetails } from "@gopark/contracts";
 export interface UpdateIncidentDto {
   title?: string;
   incidentType?: string;
@@ -17,6 +18,8 @@ export interface UpdateIncidentDto {
   repairNote?: string | null;
   locationNote?: string | null;
   managerLabel?: string | null;
+  serviceDetails?: ServiceRepairDetails | null;
+  accidentDetails?: AccidentDetails | null;
   serviceStage?: string | null;
   serviceCaseType?: string | null;
   servicePaymentStatus?: string | null;

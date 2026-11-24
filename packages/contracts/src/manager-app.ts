@@ -24,6 +24,7 @@ export interface ManagerAssignedDriverItem {
   overdueSinceDate: string | null;
   overdueUntilDate: string | null;
   duePeriodAmount?: number;
+  overduePeriodAmount?: number | null;
   yandexBalance: number;
   nextPaymentAmount: number;
   nextPaymentDate: string | null;
@@ -35,7 +36,13 @@ export interface ManagerAssignedDriverItem {
   photoStatus?: "missing" | "pending" | "approved" | "rejected" | string;
 }
 
-export type ManagerIdleVehicleCategory = "office" | "accident" | "insurance_gps" | "service" | "impound" | "written_off";
+export type ManagerIdleVehicleCategory =
+  | "office"
+  | "accident"
+  | "insurance_gps"
+  | "service"
+  | "impound"
+  | "written_off";
 
 export interface ManagerIdleVehicleItem {
   id: string;
@@ -106,6 +113,8 @@ export interface ManagerDriverDetail {
     status: string;
     occurredAt?: string | null;
     statusHistory?: IncidentStatusHistoryEntry[];
+    serviceDetails?: ServiceRepairDetails | null;
+    accidentDetails?: AccidentDetails | null;
     serviceStage?: string | null;
     serviceCaseType?: string | null;
     repairNote?: string | null;
@@ -187,7 +196,81 @@ export interface IncidentStatusHistoryEntry {
   changedAt: string;
 }
 
+export interface ServicePaymentEntry {
+  id: string;
+  amount: number;
+  paidAt: string;
+  payer: "company" | "driver" | "insurance";
+  insurer?: "gosstrakh" | "nsk" | "alma";
+}
+export interface ServiceRepairDetails {
+  reason: string;
+  repairCategory?: "repair" | "accident" | "accident_repair";
+  workshop?: "body" | "main" | "both";
+  accidentFault?: "driver" | "other" | "both" | "unknown";
+  expectedPayer?: "company" | "driver" | "insurance";
+  manualVehicle?: {
+    plateNumber: string;
+    make: string;
+    model: string;
+    companyName?: string | null;
+  };
+  sentAt?: string;
+  arrivedAt?: string;
+  arrivalConfirmed?: boolean;
+  waitingComment?: string;
+  plannedRepairDate?: string;
+  repairStartedAt?: string;
+  completedAt?: string;
+  orderNumber?: string;
+  works?: string[];
+  orderItems?: {
+    id: string;
+    description: string;
+    category: "painting" | "repair";
+    amount?: number;
+    serviceAmount?: number;
+    laborAmount?: number;
+    profitAmount?: number;
+  }[];
+  expenses?: {
+    id: string;
+    description: string;
+    amount?: number;
+    purchaser: "sto" | "company" | "driver";
+    inventoryMode?: "purchase" | "stock";
+    partId?: string;
+    inventoryApplied?: boolean;
+  }[];
+  serviceBaseCost?: number;
+  serviceCost?: number;
+  paintingCost?: number;
+  repairCost?: number;
+  costDate?: string;
+  payments?: ServicePaymentEntry[];
+  insurance?: {
+    insurer: "gosstrakh" | "nsk" | "alma";
+    paid: boolean;
+    confirmedAmount?: number;
+    paidAt?: string;
+  };
+  beforePhoto?: string;
+  afterPhoto?: string;
+}
+export interface AccidentDetails {
+  location: string;
+  occurredAt: string;
+  fault: "driver" | "other" | "both" | "unknown";
+  insurer: "gosstrakh" | "nsk" | "alma";
+  otherPlate: string;
+  otherMake: string;
+  otherModel: string;
+}
+
 export interface ManagerIncidentItem {
+  serviceDetails?: ServiceRepairDetails | null;
+  accidentDetails?: AccidentDetails | null;
+
   id: string;
   title: string;
   incidentType?: string;

@@ -1,6 +1,7 @@
+import { formatContractTerm } from "../lib/contract-term";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Outlet, useNavigate, useSearchParams } from "react-router-dom";
-import { formatCurrency, formatDateOnly, getStatusLabel, getStatusTone } from "../lib/utils";
+import { getDefaultContractCompany, getLocalDateOnly, downloadCsvTable, formatCurrency, formatDateOnly, getStatusLabel, getStatusTone } from "../lib/utils";
 import { hasCrmCapability } from "../lib/crm-access";
 import { useApiQuery } from "../hooks/useApiQuery";
 import { useApiMutation } from "../hooks/useApiMutation";
@@ -9,7 +10,6 @@ import { AsyncState } from "../ui/AsyncState";
 import { useAuth } from "../ui/AuthContext";
 import { EmptyStatePanel } from "../ui/EmptyStatePanel";
 import { ReadOnlyNotice } from "../ui/ReadOnlyNotice";
-import { downloadCsvTable } from "../lib/utils";
 import { VEHICLE_MAKE_OPTIONS, getVehicleModelOptions } from "../lib/vehicleCatalog";
 import { CarIcon, DriversIcon, FinanceIcon } from "../ui/CrmIcons";
 import type { ContractListItem, DriverListItem, ManagerIncidentItem, PaymentListItem, UserAdminListItem, VehicleListItem } from "@gopark/contracts";
@@ -202,7 +202,7 @@ export function VehiclesPage() {
   const [monthlyGpsAmount, setMonthlyGpsAmount] = useState("");
   const [insuranceMode, setInsuranceMode] = useState<"monthly" | "daily">("monthly");
   const [gpsMode, setGpsMode] = useState<"monthly" | "daily">("monthly");
-  const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
+  const [startDate, setStartDate] = useState(getLocalDateOnly);
   const [endDate, setEndDate] = useState("");
   const [formMessage, setFormMessage] = useState<string | null>(null);
   const [presetNotice, setPresetNotice] = useState<string | null>(null);
@@ -494,6 +494,15 @@ export function VehiclesPage() {
     return new Date(endDate).getDate() || 15;
   }, [endDate]);
 
+  const defaultContractCompany = getDefaultContractCompany(companies, session.companyName);
+  useEffect(() => {
+    if (isCreateModalOpen) setCompanyName((current) => current || defaultContractCompany);
+  }, [isCreateModalOpen, defaultContractCompany]);
+
+  useEffect(() => {
+    if (isCreateModalOpen) setStartDate(getLocalDateOnly());
+  }, [isCreateModalOpen]);
+
   useEffect(() => {
     const principal = Number(principalAmount);
     const dailyPayment = Number(installmentAmount);
@@ -749,7 +758,7 @@ export function VehiclesPage() {
     setPlateNumber("");
     setMake("");
     setModel("");
-    setCompanyName("");
+    setCompanyName(defaultContractCompany);
     setProductionYear("");
     setMileage("");
     setColor("");
@@ -772,7 +781,7 @@ export function VehiclesPage() {
     setMonthlyGpsAmount("");
     setInsuranceMode("monthly");
     setGpsMode("monthly");
-    setStartDate("");
+    setStartDate(getLocalDateOnly());
     setEndDate("");
     setFormMessage(assignDriverId ? "Автомобиль добавлен, договор создан, машина выведена на линию." : "Автомобиль добавлен.");
     vinInputRef.current?.focus();
@@ -1119,7 +1128,7 @@ export function VehiclesPage() {
               ) : null}
               {assignDriverId ? (
                 <p className="panel-note">
-                  Дата выплаты и срок рассчитываются автоматически из суммы договора и ежедневного платежа: {calculatedTermMonths > 0 ? `${calculatedTermMonths} мес.` : "укажите сумму и платёж"}.
+                  Дата выплаты и срок рассчитываются автоматически из суммы договора и ежедневного платежа: {calculatedTermMonths > 0 ? formatContractTerm(startDate, endDate) : "укажите сумму и платёж"}.
                   {" "}Рабочих дней в графике: {payableDays || "—"}. Страховку и GPS можно вводить ежедневно или ежемесячно.
                 </p>
               ) : null}
@@ -1236,6 +1245,7 @@ export function VehiclesPage() {
                                 <span className={getStatusTone(vehicle.status)}>{getStatusLabel(vehicle.status)}</span>
                               </strong>
                               <span>{incidentCount > 0 ? `Открытых инцидентов: ${incidentCount}` : "Открытых инцидентов нет"}</span>
+                              {(incidentsApi.data ?? []).filter(i => i.carId === vehicle.id && !["closed", "resolved", "archived"].includes(i.status)).slice(0, 1).map(i => <span key={i.id} className="sto-reason">{i.serviceDetails?.reason ?? i.repairNote ?? i.description}</span>)}
                             </div>
                           </td>
                           <td>

@@ -1,3 +1,4 @@
+import { DateRangePicker } from "../ui/DateRangePicker";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Outlet, useSearchParams } from "react-router-dom";
 import { formatCurrency, formatDateOnly, getStatusLabel, getStatusTone } from "../lib/utils";
@@ -47,7 +48,7 @@ function getDebtViewAmount(
     return driver.overdueDebt ?? 0;
   }
 
-  return (driver.overdueDebt ?? 0) > 0 ? driver.overdueDebt ?? 0 : getDuePeriodAmount(driver);
+  return getDuePeriodAmount(driver);
 }
 
 function formatDriverNextPayment(driver: DriverListItem & {
@@ -102,6 +103,9 @@ export function DriversPage() {
   const [isCreatePanelOpen, setIsCreatePanelOpen] = useState(false);
   const [companyFilter, setCompanyFilter] = useState(searchParams.get("companyName") ?? session.companyName?.trim() ?? "all");
   const [formMessage, setFormMessage] = useState<string | null>(null);
+  const [financeError, setFinanceError] = useState<string | null>(null);
+  const [financeLoading, setFinanceLoading] = useState(false);
+  const [financeRetry, setFinanceRetry] = useState(0);
   const [effectiveDrivers, setEffectiveDrivers] = useState<ManagerAssignedDriverItem[] | null>(null);
   const firstNameInputRef = useRef<HTMLInputElement | null>(null);
   const quickFormRef = useRef<HTMLDivElement | null>(null);
@@ -153,11 +157,12 @@ export function DriversPage() {
     }
 
     let active = true;
+    setFinanceError(null); setFinanceLoading(true);
 
     const today = getLocalDateOnly();
     const query = new URLSearchParams({
-      dueDateFrom: dueDateFrom || today,
-      dueDateTo: dueDateTo || dueDateFrom || today,
+      dueDateFrom: dueDateFrom || (status === "overdue" ? "" : today),
+      dueDateTo: dueDateTo || dueDateFrom || (status === "overdue" ? "" : today),
     });
 
     fetchJson<ManagerAssignedDriverItem[]>(`mobile/manager/drivers?${query.toString()}`)
@@ -166,20 +171,21 @@ export function DriversPage() {
           return;
         }
 
-        setEffectiveDrivers(data);
+        setEffectiveDrivers(data); setFinanceLoading(false);
       })
-      .catch(() => {
+      .catch((error) => {
         if (!active) {
           return;
         }
 
-        setEffectiveDrivers(null);
+        setEffectiveDrivers(null); setFinanceLoading(false);
+        setFinanceError(error instanceof Error ? error.message : "Не удалось загрузить суммы");
       });
 
     return () => {
       active = false;
     };
-  }, [canReadEffectiveDriverStates, dueDateFrom, dueDateTo, session.requestUserRole]);
+  }, [canReadEffectiveDriverStates, dueDateFrom, dueDateTo, session.requestUserRole, status, financeRetry]);
 
   const statusBaseRows = useMemo(
     () =>
@@ -191,7 +197,7 @@ export function DriversPage() {
             status: effectiveDriver?.status ?? driver.status,
             creditBalance: effectiveDriver?.creditBalance ?? driver.creditBalance,
             activeContractId: effectiveDriver?.contractId ?? driver.activeContractId,
-            overdueDebt: effectiveDriver?.overdueDebt ?? 0,
+            overdueDebt: dueDateFrom || dueDateTo ? effectiveDriver?.overduePeriodAmount ?? 0 : effectiveDriver?.overdueDebt ?? 0,
             duePeriodAmount: effectiveDriver?.duePeriodAmount ?? 0,
             yandexBalance: effectiveDriver?.yandexBalance ?? 0,
             nextPaymentAmount: effectiveDriver?.nextPaymentAmount ?? 0,
@@ -207,7 +213,7 @@ export function DriversPage() {
           const inManager = managerFilter === "all" || (driver.managerId ?? "") === managerFilter;
           return inSearch && inCompany && inManager;
         }),
-    [companyFilter, drivers, effectiveDriverMap, managerFilter, query],
+    [companyFilter, drivers, dueDateFrom, dueDateTo, effectiveDriverMap, managerFilter, query],
   );
   const rows = useMemo(
     () =>
@@ -257,7 +263,7 @@ export function DriversPage() {
         return {
           ...driver,
           status: effectiveDriver?.status ?? driver.status,
-          overdueDebt: effectiveDriver?.overdueDebt ?? 0,
+          overdueDebt: dueDateFrom || dueDateTo ? effectiveDriver?.overduePeriodAmount ?? 0 : effectiveDriver?.overdueDebt ?? 0,
           duePeriodAmount: effectiveDriver?.duePeriodAmount ?? 0,
           nextPaymentAmount: effectiveDriver?.nextPaymentAmount ?? 0,
           nextPaymentDate: effectiveDriver?.nextPaymentDate ?? null,
@@ -633,18 +639,22 @@ export function DriversPage() {
             </p>
             {isDebtView ? (
               <div className="debt-manager-panel">
+                {financeLoading ? <p role="status">Загрузка сумм…</p> : null}
+                {financeError ? <div role="alert"><p>{financeError}</p><button type="button" onClick={() => setFinanceRetry((value) => value + 1)}>Повторить загрузку сумм</button></div> : null}
+                <DateRangePicker from={dueDateFrom} to={dueDateTo} onChange={(from, to) => { setDueDateFrom(from); setDueDateTo(to); }} />
+                <p className="panel-note">{status === "overdue" ? "Непогашенные платежи выбранного периода, просроченные на сегодня." : "Непогашенные платежи выбранного периода."}</p>
                 <div className="panel__title">
                   <FinanceIcon width={18} height={18} />
                   <h3>{status === "overdue" ? "Просрочка по бригадирам" : "К оплате сегодня по бригадирам"}</h3>
                 </div>
-                <div className="debt-manager-strip">
+                {!financeError && !financeLoading ? <div className="debt-manager-strip">
                   <button
                     type="button"
                     className={`debt-manager-card${managerFilter === "all" ? " debt-manager-card--active" : ""}`}
                     onClick={() => setManagerFilter("all")}
                   >
-                    <span>Все бригадиры</span>
-                    <strong>{rows.length}</strong>
+                    <span>Все водители</span>
+                    <strong>{rows.length} водителей</strong>
                     <p>{formatCurrency(rows.reduce(
                       (sum, driver) => sum + getDebtViewAmount(status, driver),
                       0,
@@ -658,11 +668,11 @@ export function DriversPage() {
                       onClick={() => setManagerFilter(manager.managerProfileId)}
                     >
                       <span>{manager.name}</span>
-                      <strong>{manager.count}</strong>
+                      <strong>{manager.count} водителей</strong>
                       <p>{formatCurrency(manager.amount)}</p>
                     </button>
                   ))}
-                </div>
+                </div> : null}
               </div>
             ) : null}
             {canCreateDriver && managerOptions.length ? (

@@ -359,7 +359,7 @@ export function IncidentsPage() {
       }
 
       setFormMessage(editingIncidentId ? `Кейс обновлён: ${incident.title}.` : `Инцидент зарегистрирован: ${incident.title}.`);
-      await api.refetch();
+      await Promise.all([api.refetch(), vehiclesApi.refetch()]);
       resetForm();
     } catch (error) {
       setFormMessage(error instanceof Error ? error.message : editingIncidentId ? "Не удалось обновить инцидент." : "Не удалось зарегистрировать инцидент.");
@@ -384,12 +384,8 @@ export function IncidentsPage() {
         setFormMessage("Инцидент не найден.");
         return;
       }
-      if (nextStatus === "written_off" && item.carId) {
-        await patchJson(`cars/${item.carId}`, { status: "written_off" });
-        await vehiclesApi.refetch();
-      }
 
-      await api.refetch();
+      await Promise.all([api.refetch(), vehiclesApi.refetch()]);
       setFormMessage(`Кейс ${formatShortId(item.id)} переведён в статус «${getStatusLabel(nextStatus)}».`);
       if (editingIncidentId === item.id) {
         setEditingIncidentId(null);
@@ -419,16 +415,10 @@ export function IncidentsPage() {
         });
         if (updated) {
           updatedCount += 1;
-          if (nextStatus === "written_off" && sourceIncident?.carId) {
-            await patchJson(`cars/${sourceIncident.carId}`, { status: "written_off" });
-          }
         }
       }
 
-      await api.refetch();
-      if (nextStatus === "written_off") {
-        await vehiclesApi.refetch();
-      }
+      await Promise.all([api.refetch(), vehiclesApi.refetch()]);
       setSelectedIncidentIds([]);
       setFormMessage(`Массовое действие выполнено: ${updatedCount} кейсов переведены в статус «${getStatusLabel(nextStatus)}».`);
       if (editingIncidentId && !selectedIncidentIds.includes(editingIncidentId)) {
@@ -458,7 +448,7 @@ export function IncidentsPage() {
         }
       }
 
-      await api.refetch();
+      await Promise.all([api.refetch(), vehiclesApi.refetch()]);
       setSelectedIncidentIds([]);
       setFormMessage(`В архив перемещено ${updatedCount} кейсов.`);
       if (editingIncidentId && !selectedIncidentIds.includes(editingIncidentId)) {
@@ -493,7 +483,7 @@ export function IncidentsPage() {
         }
       }
 
-      await api.refetch();
+      await Promise.all([api.refetch(), vehiclesApi.refetch()]);
       setSelectedIncidentIds([]);
       setBulkPriority("keep");
       setFormMessage(`Приоритет обновлён для ${updatedCount} кейсов.`);
@@ -526,7 +516,7 @@ export function IncidentsPage() {
         }
       }
 
-      await api.refetch();
+      await Promise.all([api.refetch(), vehiclesApi.refetch()]);
       setSelectedIncidentIds([]);
       setBulkManagerLabel("keep");
       setFormMessage(`Ответственный обновлён для ${updatedCount} кейсов.`);
@@ -547,7 +537,7 @@ export function IncidentsPage() {
         return;
       }
 
-      await api.refetch();
+      await Promise.all([api.refetch(), vehiclesApi.refetch()]);
       setFormMessage(`Кейс ${formatShortId(item.id)} отправлен в архив.`);
       if (editingIncidentId === item.id) {
         setEditingIncidentId(null);
@@ -990,6 +980,7 @@ export function IncidentsPage() {
                         {item.insuranceNote ? <span>НСК: {item.insuranceNote}</span> : null}
                         {item.repairNote ? <span>СТО: {item.repairNote}</span> : null}
                         {item.locationNote ? <span>Локация: {item.locationNote}</span> : null}
+                        {item.accidentDetails ? <><span>Дата ДТП: {formatDateOnly(item.accidentDetails.occurredAt)}</span><span>Виновник: {({driver:"Наш водитель",other:"Второй участник",both:"Оба участника",unknown:"Не установлен"})[item.accidentDetails.fault]}</span><span>Страховая: {({gosstrakh:"Госстрах",nsk:"НСК",alma:"Алма"})[item.accidentDetails.insurer]}</span><span>Второй участник: {item.accidentDetails.otherPlate} · {item.accidentDetails.otherMake} {item.accidentDetails.otherModel}</span></> : null}
                         {item.accidentPhotoUrl?.startsWith("data:image/") ? (
                           <button type="button" className="photo-preview-button photo-preview-button--small" onClick={() => setPhotoPreviewUrl(item.accidentPhotoUrl ?? null)}>
                             <img src={item.accidentPhotoUrl} alt="Фото ДТП" className="photo-preview-image photo-preview-image--contain" />

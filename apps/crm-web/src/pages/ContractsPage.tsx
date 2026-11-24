@@ -1,7 +1,8 @@
+import { formatContractTerm } from "../lib/contract-term";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Outlet, useSearchParams } from "react-router-dom";
 import { patchJson } from "../lib/api";
-import { formatCurrency, formatDateOnly, formatShortId, getStatusLabel, getStatusTone } from "../lib/utils";
+import { getDefaultContractCompany, getLocalDateOnly, downloadCsvTable, formatCurrency, formatDateOnly, formatShortId, getStatusLabel, getStatusTone } from "../lib/utils";
 import { hasCrmAccess, hasCrmCapability } from "../lib/crm-access";
 import { useApiQuery } from "../hooks/useApiQuery";
 import { useApiMutation } from "../hooks/useApiMutation";
@@ -9,7 +10,6 @@ import { AsyncState } from "../ui/AsyncState";
 import { useAuth } from "../ui/AuthContext";
 import { EmptyStatePanel } from "../ui/EmptyStatePanel";
 import { ReadOnlyNotice } from "../ui/ReadOnlyNotice";
-import { downloadCsvTable } from "../lib/utils";
 import { VEHICLE_MAKE_OPTIONS, getVehicleModelOptions } from "../lib/vehicleCatalog";
 import { ContractsIcon, FinanceIcon } from "../ui/CrmIcons";
 import type { ContractListItem, DriverListItem, UserAdminListItem, VehicleListItem } from "@gopark/contracts";
@@ -151,7 +151,7 @@ export function ContractsPage() {
   const [newCarProductionYear, setNewCarProductionYear] = useState("");
   const [newCarMileage, setNewCarMileage] = useState("");
   const [newCarColor, setNewCarColor] = useState("");
-  const [newRecordCompanyName, setNewRecordCompanyName] = useState(session.companyName?.trim() || "");
+  const [newRecordCompanyName, setNewRecordCompanyName] = useState("");
   const nextContractNumber = useApiQuery<{ contractNumber: string }>("contracts/next-number");
   const contractNumber = nextContractNumber.data?.contractNumber ?? "";
   const [principalAmount, setPrincipalAmount] = useState("1000000");
@@ -165,7 +165,7 @@ export function ContractsPage() {
   const [osagoStartDate, setOsagoStartDate] = useState("");
   const [hasCasco, setHasCasco] = useState(false);
   const [cascoStartDate, setCascoStartDate] = useState("");
-  const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
+  const [startDate, setStartDate] = useState(getLocalDateOnly);
   const [endDate, setEndDate] = useState("");
   const [formMessage, setFormMessage] = useState<string | null>(null);
   const [isCreatePanelOpen, setIsCreatePanelOpen] = useState(false);
@@ -283,8 +283,8 @@ export function ContractsPage() {
   const debtTotal = activeContracts.reduce((sum, item) => sum + item.currentDebt, 0);
   const calculatedTermMonths = useMemo(() => calculateTermMonthsFromDates(startDate, endDate), [endDate, startDate]);
   const payableDays = useMemo(
-    () => calculatePayableDays(startDate, endDate, driverWeekOffMap.get(driverId) ?? null),
-    [driverId, driverWeekOffMap, endDate, startDate],
+    () => calculatePayableDays(startDate, endDate, driverMode === "new" ? newDriverWeeklyDayOff : (driverWeekOffMap.get(driverId) ?? null)),
+    [driverId, driverMode, newDriverWeeklyDayOff, driverWeekOffMap, endDate, startDate],
   );
   const newCarModelOptions = getVehicleModelOptions(newCarMake);
   const calculatedInstallmentDay = useMemo(() => {
@@ -320,6 +320,15 @@ export function ContractsPage() {
   const isPrincipalAbovePreviousIssue =
     selectedCarMaxIssuedAmount > 0 && Number(principalAmount) > selectedCarMaxIssuedAmount;
 
+  const defaultContractCompany = getDefaultContractCompany(companies, session.companyName);
+  useEffect(() => {
+    if (isCreatePanelOpen) setNewRecordCompanyName((current) => current || defaultContractCompany);
+  }, [isCreatePanelOpen, defaultContractCompany]);
+
+  useEffect(() => {
+    if (isCreatePanelOpen) setStartDate(getLocalDateOnly());
+  }, [isCreatePanelOpen]);
+
   useEffect(() => {
     const principal = Number(principalAmount);
     const dailyPayment = Number(installmentAmount);
@@ -329,11 +338,11 @@ export function ContractsPage() {
     }
 
     const payableDaysNeeded = Math.ceil(principal / dailyPayment);
-    const nextEndDate = calculateEndDateFromPayableDays(startDate, payableDaysNeeded, driverWeekOffMap.get(driverId) ?? null);
+    const nextEndDate = calculateEndDateFromPayableDays(startDate, payableDaysNeeded, driverMode === "new" ? newDriverWeeklyDayOff : (driverWeekOffMap.get(driverId) ?? null));
     if (nextEndDate && nextEndDate !== endDate) {
       setEndDate(nextEndDate);
     }
-  }, [driverId, driverWeekOffMap, endDate, installmentAmount, principalAmount, startDate]);
+  }, [driverId, driverMode, newDriverWeeklyDayOff, driverWeekOffMap, endDate, installmentAmount, principalAmount, startDate]);
 
   useEffect(() => {
     setStatusFilter(searchParams.get("status") ?? "active");
@@ -512,7 +521,7 @@ export function ContractsPage() {
     nextSearchParams.delete("driverId");
     nextSearchParams.delete("carId");
     setSearchParams(nextSearchParams, { replace: true });
-    setNewRecordCompanyName("");
+    setNewRecordCompanyName(defaultContractCompany);
     setDriverId("");
     setCarId("");
     void nextContractNumber.refetch({ silent: true }).catch(() => undefined);
@@ -527,7 +536,7 @@ export function ContractsPage() {
     setOsagoStartDate("");
     setHasCasco(false);
     setCascoStartDate("");
-    setStartDate("");
+    setStartDate(getLocalDateOnly());
     setEndDate("");
     if (driverMode === "new") {
       setNewDriverFirstName("");
@@ -827,7 +836,7 @@ export function ContractsPage() {
                 </div>
               </div>
               <p className="panel-note">
-                Срок и дата выплаты рассчитываются автоматически из суммы договора и ежедневного платежа: {calculatedTermMonths > 0 ? `${calculatedTermMonths} мес.` : "укажите сумму и платёж"}.
+                Срок и дата выплаты рассчитываются автоматически из суммы договора и ежедневного платежа: {calculatedTermMonths > 0 ? formatContractTerm(startDate, endDate) : "укажите сумму и платёж"}.
                 {" "}Рабочих дней в графике: {payableDays || "—"}. ОСАГО и КАСКО считаются на 1 год от даты начала.
               </p>
               {carMode === "existing" && isPrincipalAbovePreviousIssue ? (

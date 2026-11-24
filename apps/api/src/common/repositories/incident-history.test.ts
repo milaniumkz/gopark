@@ -11,7 +11,8 @@ for (const [name, repository] of [
 ] as const) {
   test(`${name}: preserves repeated incident transitions and their dates`, async () => {
     const incident = await repository.create({
-      title: "History test", incidentType: "accident", status: "open",
+      // History tracking is independent of the sequential STO workflow.
+      title: "History test", incidentType: "inspection", status: "open",
       priority: "high", occurredAt: "2025-01-01T00:00:00Z",
       serviceStage: "awaiting_repair",
     });
@@ -21,7 +22,7 @@ for (const [name, repository] of [
       }
       await repository.update(incident.id, { repairNote: "No status change" });
       await repository.update(incident.id, { serviceStage: "in_repair" });
-      await repository.update(incident.id, { status: "resolved", serviceStage: "completed" });
+      await repository.update(incident.id, { status: "resolved", serviceStage: "completed", serviceDetails: {reason:"Проверка истории",orderNumber:"TEST-HISTORY",works:["Диагностика"]} });
       const updated = await repository.update(incident.id, { status: "closed" });
       assert.deepEqual(updated?.statusHistory?.map(({ status, serviceStage }) => [status, serviceStage]), [
         ["open", "awaiting_repair"], ["open", "in_repair"],

@@ -1,6 +1,9 @@
+import type { ServiceRepairDetails, AccidentDetails } from "@gopark/contracts";
 import type { ManagerIncidentItem } from "@gopark/contracts";
 
 export interface CreateIncidentRecord {
+  enforceUniqueVehicleIncident?: boolean;
+  inventoryCompanyScope?: string | null;
   title: string;
   incidentType: string;
   status: string;
@@ -19,6 +22,8 @@ export interface CreateIncidentRecord {
   repairNote?: string | null;
   locationNote?: string | null;
   managerLabel?: string | null;
+  serviceDetails?: ServiceRepairDetails | null;
+  accidentDetails?: AccidentDetails | null;
   serviceStage?: string | null;
   serviceCaseType?: string | null;
   servicePaymentStatus?: string | null;
@@ -26,6 +31,7 @@ export interface CreateIncidentRecord {
 }
 
 export interface UpdateIncidentRecord {
+  inventoryCompanyScope?: string | null;
   title?: string;
   incidentType?: string;
   status?: string;
@@ -44,6 +50,8 @@ export interface UpdateIncidentRecord {
   repairNote?: string | null;
   locationNote?: string | null;
   managerLabel?: string | null;
+  serviceDetails?: ServiceRepairDetails | null;
+  accidentDetails?: AccidentDetails | null;
   serviceStage?: string | null;
   serviceCaseType?: string | null;
   servicePaymentStatus?: string | null;
@@ -57,5 +65,12 @@ export interface IncidentRepository {
   countOpenByDrivers(driverIds: string[]): Promise<number>;
   listOpenByDriver(driverId: string): Promise<ManagerIncidentItem[]>;
   create(input: CreateIncidentRecord): Promise<ManagerIncidentItem>;
-  update(incidentId: string, input: UpdateIncidentRecord): Promise<ManagerIncidentItem | null>;
+  completeUntrackedRepair(
+    carId: string,
+    serviceDetails?: ServiceRepairDetails,
+  ): Promise<ManagerIncidentItem | null>;
+  update(
+    incidentId: string,
+    input: UpdateIncidentRecord,
+  ): Promise<ManagerIncidentItem | null>;
 }

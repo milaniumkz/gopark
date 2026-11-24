@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -546,15 +547,16 @@ class DriverChatThreadDetailDto extends DriverChatThreadDto {
 }
 
 class DriverApiClient {
-  DriverApiClient({
-    String? baseUrl,
-    http.Client? httpClient,
-  })  : baseUrl = baseUrl ?? _resolveBaseUrl(),
+  DriverApiClient(
+      {String? baseUrl, http.Client? httpClient, this.onSessionRefreshed})
+      : baseUrl = baseUrl ?? _resolveBaseUrl(),
         _httpClient = httpClient;
 
   final String baseUrl;
   final http.Client? _httpClient;
   DriverAuthSessionDto? _session;
+  Future<DriverAuthSessionDto>? _refreshFuture;
+  final Future<void> Function(DriverAuthSessionDto session)? onSessionRefreshed;
 
   http.Client get client => _httpClient ?? http.Client();
 
@@ -570,21 +572,40 @@ class DriverApiClient {
     return session;
   }
 
-  Future<DriverAuthSessionDto> refresh() async {
+  Future<DriverAuthSessionDto> refresh() {
+    return _refreshFuture ??=
+        _refreshSession().whenComplete(() => _refreshFuture = null);
+  }
+
+  Future<DriverAuthSessionDto> _refreshSession() async {
     final session = _session;
     if (session == null) {
       throw Exception('Driver session is not initialized');
     }
 
-    final response = await client.post(
-      Uri.parse('$baseUrl/auth/refresh'),
-      headers: const {'content-type': 'application/json'},
-      body: jsonEncode({'refreshToken': session.refreshToken}),
-    );
+    final response = await client
+        .post(
+          Uri.parse('$baseUrl/auth/refresh'),
+          headers: const {'content-type': 'application/json'},
+          body: jsonEncode({'refreshToken': session.refreshToken}),
+        )
+        .timeout(const Duration(seconds: 20));
 
-    final refreshedSession =
-        DriverAuthSessionDto.fromJson(_decodeObject(response));
+    final refreshedSession = DriverAuthSessionDto.fromJson(
+      _decodeObject(response),
+    );
+    if (_session?.refreshToken != session.refreshToken) {
+      throw const DriverApiException('Сессия изменилась. Войдите снова.',
+          statusCode: 401);
+    }
+    if (refreshedSession.requestUserRole != 'driver') {
+      throw const DriverApiException('Для приложения требуется аккаунт водителя.', statusCode: 403);
+    }
     _session = refreshedSession;
+    await onSessionRefreshed?.call(refreshedSession);
+    if (_session?.refreshToken != refreshedSession.refreshToken) {
+      throw const DriverApiException('Сессия изменилась. Войдите снова.', statusCode: 401);
+    }
     return refreshedSession;
   }
 
@@ -594,10 +615,7 @@ class DriverApiClient {
   }) async {
     final response = await client.post(
       Uri.parse('$baseUrl/auth/change-password'),
-      headers: {
-        'content-type': 'application/json',
-        ..._headers,
-      },
+      headers: {'content-type': 'application/json', ..._headers},
       body: jsonEncode({
         'currentPassword': currentPassword,
         'newPassword': newPassword,
@@ -665,24 +683,20 @@ class DriverApiClient {
       throw Exception('Driver session is not initialized');
     }
 
-    return {
-      'authorization': 'Bearer ${session.accessToken}',
-    };
+    return {'authorization': 'Bearer ${session.accessToken}'};
   }
 
   Future<DriverHomeSummaryDto> getHomeSummary(String driverId) async {
-    final response = await client.get(
+    final response = await _authenticatedGet(
       Uri.parse('$baseUrl/mobile/driver/$driverId/home-summary'),
-      headers: _headers,
     );
 
     return DriverHomeSummaryDto.fromJson(_decodeObject(response));
   }
 
   Future<DriverProfileSummaryDto?> getProfileSummary(String driverId) async {
-    final response = await client.get(
+    final response = await _authenticatedGet(
       Uri.parse('$baseUrl/mobile/driver/$driverId/profile-summary'),
-      headers: _headers,
     );
 
     final decoded = _decodeNullableObject(response);
@@ -690,18 +704,16 @@ class DriverApiClient {
   }
 
   Future<DriverDebtSummaryDto> getDebtSummary(String driverId) async {
-    final response = await client.get(
+    final response = await _authenticatedGet(
       Uri.parse('$baseUrl/mobile/driver/$driverId/debt-summary'),
-      headers: _headers,
     );
 
     return DriverDebtSummaryDto.fromJson(_decodeObject(response));
   }
 
   Future<DriverActiveContractDto?> getActiveContract(String driverId) async {
-    final response = await client.get(
+    final response = await _authenticatedGet(
       Uri.parse('$baseUrl/mobile/driver/$driverId/contract'),
-      headers: _headers,
     );
 
     final decoded = _decodeNullableObject(response);
@@ -709,29 +721,28 @@ class DriverApiClient {
   }
 
   Future<List<DriverPayoutItemDto>> getPayouts(String driverId) async {
-    final response = await client.get(
+    final response = await _authenticatedGet(
       Uri.parse('$baseUrl/mobile/driver/$driverId/payouts'),
-      headers: _headers,
     );
 
     return _decodeList(response).map(DriverPayoutItemDto.fromJson).toList();
   }
 
   Future<List<DriverStatusRequestDto>> getStatusRequests(
-      String driverId) async {
-    final response = await client.get(
+    String driverId,
+  ) async {
+    final response = await _authenticatedGet(
       Uri.parse('$baseUrl/mobile/driver/$driverId/status-requests'),
-      headers: _headers,
     );
 
     return _decodeList(response).map(DriverStatusRequestDto.fromJson).toList();
   }
 
   Future<List<DriverPaymentScheduleItemDto>> getPaymentSchedule(
-      String driverId) async {
-    final response = await client.get(
+    String driverId,
+  ) async {
+    final response = await _authenticatedGet(
       Uri.parse('$baseUrl/mobile/driver/$driverId/payment-schedule'),
-      headers: _headers,
     );
 
     return _decodeList(response)
@@ -740,10 +751,10 @@ class DriverApiClient {
   }
 
   Future<List<DriverPaymentStatementItemDto>> getPaymentStatement(
-      String driverId) async {
-    final response = await client.get(
+    String driverId,
+  ) async {
+    final response = await _authenticatedGet(
       Uri.parse('$baseUrl/mobile/driver/$driverId/payment-statement'),
-      headers: _headers,
     );
 
     return _decodeList(response)
@@ -752,10 +763,10 @@ class DriverApiClient {
   }
 
   Future<List<DriverNotificationItemDto>> getNotifications(
-      String driverId) async {
-    final response = await client.get(
+    String driverId,
+  ) async {
+    final response = await _authenticatedGet(
       Uri.parse('$baseUrl/mobile/driver/$driverId/notifications'),
-      headers: _headers,
     );
 
     return _decodeList(response)
@@ -764,18 +775,16 @@ class DriverApiClient {
   }
 
   Future<List<DriverChatThreadDto>> getChats() async {
-    final response = await client.get(
+    final response = await _authenticatedGet(
       Uri.parse('$baseUrl/chats'),
-      headers: _headers,
     );
 
     return _decodeList(response).map(DriverChatThreadDto.fromJson).toList();
   }
 
   Future<DriverChatThreadDetailDto> getChat(String threadId) async {
-    final response = await client.get(
+    final response = await _authenticatedGet(
       Uri.parse('$baseUrl/chats/$threadId'),
-      headers: _headers,
     );
 
     return DriverChatThreadDetailDto.fromJson(_decodeObject(response));
@@ -794,10 +803,7 @@ class DriverApiClient {
     final response = await client.post(
       Uri.parse('$baseUrl/chats'),
       headers: {..._headers, 'content-type': 'application/json'},
-      body: jsonEncode({
-        'subject': 'Чат с бригадиром',
-        'body': body,
-      }),
+      body: jsonEncode({'subject': 'Чат с бригадиром', 'body': body}),
     );
 
     return DriverChatThreadDetailDto.fromJson(_decodeObject(response));
@@ -883,9 +889,40 @@ class DriverApiClient {
     return decoded == null ? null : DriverProfileSummaryDto.fromJson(decoded);
   }
 
+  Future<http.Response> _authenticatedGet(Uri uri) async {
+    final token = _session?.accessToken;
+    var response = await client
+        .get(uri, headers: _headers)
+        .timeout(const Duration(seconds: 20));
+    if (response.statusCode != 401) return response;
+    // A parallel request may already have refreshed the token.
+    if (_session?.accessToken == token) {
+      try {
+        await refresh();
+      } on DriverApiException catch (error) {
+        if (error.statusCode == 401 || error.statusCode == 403) {
+          throw const DriverApiException(
+              'Сессия истекла. Войдите в аккаунт заново.',
+              statusCode: 401);
+        }
+        rethrow;
+      }
+    }
+    response = await client
+        .get(uri, headers: _headers)
+        .timeout(const Duration(seconds: 20));
+    if (response.statusCode == 401) {
+      throw const DriverApiException(
+          'Сессия истекла. Войдите в аккаунт заново.',
+          statusCode: 401);
+    }
+    return response;
+  }
+
   Map<String, dynamic>? _decodeNullableObject(http.Response response) {
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw DriverApiException(_decodeErrorMessage(response));
+      throw DriverApiException(_decodeErrorMessage(response),
+          statusCode: response.statusCode);
     }
 
     if (response.body == 'null' || response.body.isEmpty) {
@@ -898,14 +935,17 @@ class DriverApiClient {
   Map<String, dynamic> _decodeObject(http.Response response) {
     final decoded = _decodeNullableObject(response);
     if (decoded == null) {
-      throw const DriverApiException('Сервер вернул пустой ответ. Попробуйте ещё раз.');
+      throw const DriverApiException(
+        'Сервер вернул пустой ответ. Попробуйте ещё раз.',
+      );
     }
     return decoded;
   }
 
   List<Map<String, dynamic>> _decodeList(http.Response response) {
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw DriverApiException(_decodeErrorMessage(response));
+      throw DriverApiException(_decodeErrorMessage(response),
+          statusCode: response.statusCode);
     }
 
     final decoded = jsonDecode(response.body) as List<dynamic>;
@@ -914,9 +954,10 @@ class DriverApiClient {
 }
 
 class DriverApiException implements Exception {
-  const DriverApiException(this.message);
+  const DriverApiException(this.message, {this.statusCode});
 
   final String message;
+  final int? statusCode;
 
   @override
   String toString() => message;
@@ -981,7 +1022,8 @@ String _translateApiError(String message, int statusCode) {
   if (normalized.contains('field "') && normalized.contains('required')) {
     return 'Заполните обязательные поля.';
   }
-  if (normalized.contains('insufficient role') || normalized.contains('forbidden')) {
+  if (normalized.contains('insufficient role') ||
+      normalized.contains('forbidden')) {
     return 'Недостаточно прав для этого действия.';
   }
   if (normalized.contains('not found')) {

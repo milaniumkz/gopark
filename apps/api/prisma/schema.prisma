@@ -63,6 +63,7 @@ enum DriverRiskStatusReviewStatus {
 }
 
 enum CarStatus {
+  written_off
   free
   assigned
   maintenance
@@ -150,6 +151,7 @@ model User {
   status          UserStatus  @default(invited)
   firstName       String      @map("first_name")
   lastName        String      @map("last_name")
+  middleName      String?     @map("middle_name")
   mfaEnabled      Boolean     @default(false) @map("mfa_enabled")
   lastLoginAt     DateTime?   @map("last_login_at")
   createdAt       DateTime    @default(now()) @map("created_at")
@@ -161,6 +163,7 @@ model User {
   driverRiskStatusChanges DriverRiskStatusChange[]
   devicePushTokens DevicePushToken[]
   paymentCalendarDayOverrides PaymentCalendarDayOverride[]
+  managerCalendarComments ManagerCalendarComment[]
 
   @@map("users")
 }
@@ -232,6 +235,7 @@ model Driver {
   obligations    Obligation[]
   payments       Payment[]
   paymentCalendarDayOverrides PaymentCalendarDayOverride[]
+  managerCalendarComments ManagerCalendarComment[]
   payouts        Payout[]
   yandexBalances YandexBalance[]
   creditBalance  DriverCreditBalance?
@@ -372,6 +376,9 @@ model Part {
 model PartMovement {
   id        String   @id @default(uuid()) @db.Uuid
   partId    String   @db.Uuid @map("part_id")
+  requesterCompany String? @map("requester_company")
+  incidentId String? @db.Uuid @map("incident_id")
+  expenseId String? @map("expense_id")
   carId     String?  @db.Uuid @map("car_id")
   type      String
   quantity  Int
@@ -382,9 +389,14 @@ model PartMovement {
   part      Part     @relation(fields: [partId], references: [id])
   car       Car?     @relation(fields: [carId], references: [id])
 
+  incident Incident? @relation(fields:[incidentId],references:[id],onDelete:SetNull)
+
   @@index([partId])
   @@index([carId])
   @@index([type])
+  @@index([requesterCompany])
+  @@unique([incidentId,expenseId,type])
+  @@index([incidentId])
   @@map("part_movements")
 }
 
@@ -648,7 +660,12 @@ model Incident {
   servicePayer String? @map("service_payer")
   createdAt    DateTime @default(now()) @map("created_at")
 
+  partMovements PartMovement[]
+
   @@map("incidents")
+  serviceDetails Json?
+  accidentDetails Json?
+
 }
 
 model OutboxEvent {
@@ -715,4 +732,20 @@ model AuditLog {
   actorUser     User?    @relation(fields: [actorUserId], references: [id])
 
   @@map("audit_logs")
+}
+
+model ManagerCalendarComment {
+  id              String   @id @default(uuid()) @db.Uuid
+  driverId        String   @db.Uuid @map("driver_id")
+  date            DateTime @db.Date
+  comment         String
+  updatedByUserId String?  @db.Uuid @map("updated_by_user_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  driver          Driver   @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  updatedByUser   User?    @relation(fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([driverId, date])
+  @@index([date])
+  @@map("manager_calendar_comments")
 }

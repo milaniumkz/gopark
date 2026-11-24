@@ -1,3 +1,8 @@
+/** Today's date on the user's device, without conversion to UTC. */
+export function getLocalDateOnly(date = new Date()): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
 export function formatCurrency(amount: number): string {
   return `${new Intl.NumberFormat("ru-KG", {
     style: "decimal",
@@ -435,4 +440,10 @@ export function getAuditActionLabel(action: string): string {
   };
 
   return labels[action] ?? action;
+}
+
+/** Resolve the existing company name; do not create a second spelling. */
+export function getDefaultContractCompany(companies: string[], fallback?: string | null): string {
+  return companies.find((name) => ["гоупарк", "гопарк", "gopark"].includes(name.toLowerCase().replace(/[\s._-]/g, "")))
+    ?? (fallback && companies.includes(fallback) ? fallback : "");
 }

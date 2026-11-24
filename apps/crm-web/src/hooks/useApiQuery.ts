@@ -46,7 +46,7 @@ export function useApiQuery<T>(path: string) {
   }, [path]);
 
   useEffect(() => {
-    void refetch();
+    void refetch().catch(() => undefined);
   }, [refetch]);
 
   return {

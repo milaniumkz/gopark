@@ -1,3 +1,4 @@
+import { calculateContractEndDate, formatContractTerm } from "../lib/contract-term";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { hasCrmAccess, hasCrmCapability } from "../lib/crm-access";
@@ -111,7 +112,7 @@ export function ContractDetailPage() {
     setEditContractNumber(api.data?.contractNumber ?? "");
     setEditPrincipalAmount(api.data?.principalAmount?.toString() ?? "");
     setEditFinancedAmount(api.data?.financedAmount?.toString() ?? "");
-    setEditInstallmentAmount("2300");
+    setEditInstallmentAmount(api.data?.installmentAmount?.toString() ?? "");
     setEditMonthlyInsuranceAmount(api.data?.monthlyInsuranceAmount?.toString() ?? "");
     setEditMonthlyGpsAmount(api.data?.monthlyGpsAmount?.toString() ?? "");
     setEditStartDate(api.data?.startDate ?? "");
@@ -128,6 +129,15 @@ export function ContractDetailPage() {
     api.data?.endDate,
     api.data?.status,
   ]);
+
+  useEffect(() => {
+    if (!api.data || !driverRecord) return;
+    if (Number(editFinancedAmount) === api.data.financedAmount
+      && Number(editInstallmentAmount) === api.data.installmentAmount
+      && editStartDate === api.data.startDate) return;
+    const end = calculateContractEndDate(editStartDate, Number(editFinancedAmount), Number(editInstallmentAmount), driverRecord.weeklyDayOff);
+    if (end) setEditEndDate(end);
+  }, [api.data, driverRecord, editFinancedAmount, editInstallmentAmount, editStartDate]);
 
   async function handleSaveContract(): Promise<void> {
     if (!api.data?.id) {
@@ -375,7 +385,7 @@ export function ContractDetailPage() {
                   <input value={editContractNumber} onChange={(event) => setEditContractNumber(event.target.value)} placeholder="Номер договора" />
                   <input value={editPrincipalAmount} onChange={(event) => setEditPrincipalAmount(event.target.value)} placeholder="Сумма договора" inputMode="numeric" />
                   <input value={editFinancedAmount} onChange={(event) => setEditFinancedAmount(event.target.value)} placeholder="Рабочий контур" inputMode="numeric" />
-                  <input value={editInstallmentAmount} onChange={(event) => setEditInstallmentAmount(event.target.value)} placeholder="Ежедневный платёж" inputMode="numeric" readOnly />
+                  <input value={editInstallmentAmount} onChange={(event) => setEditInstallmentAmount(event.target.value)} placeholder="Ежедневный платёж" inputMode="numeric" />
                   <input value={editMonthlyInsuranceAmount} onChange={(event) => setEditMonthlyInsuranceAmount(event.target.value)} placeholder="Ежемесячная страховка" inputMode="numeric" />
                   <input value={editMonthlyGpsAmount} onChange={(event) => setEditMonthlyGpsAmount(event.target.value)} placeholder="Ежемесячный GPS" inputMode="numeric" />
                   <input value={editStartDate} onChange={(event) => setEditStartDate(event.target.value)} type="date" />
@@ -642,6 +652,7 @@ export function ContractDetailPage() {
               <div><span>Сумма начислений</span><strong>{formatCurrency(api.data?.financedAmount ?? 0)}</strong></div>
               <div><span>Дата старта</span><strong>{formatDateOnly(api.data?.startDate)}</strong></div>
               <div><span>Дата выплаты</span><strong>{formatDateOnly(api.data?.endDate)}</strong></div>
+              <div><span>Срок договора</span><strong>{formatContractTerm(api.data?.startDate, api.data?.endDate)}</strong></div>
             </div>
           </article>
         </div>

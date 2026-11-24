@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -91,6 +92,7 @@ class ManagerAssignedDriverDto {
     required this.debt,
     required this.creditBalance,
     required this.overdueDebt,
+    this.overduePeriodAmount,
     required this.overdueSinceDate,
     required this.overdueUntilDate,
     required this.yandexBalance,
@@ -117,6 +119,9 @@ class ManagerAssignedDriverDto {
       debt: _asNum(json['debt']),
       creditBalance: _asNum(json['creditBalance']),
       overdueDebt: _asNum(json['overdueDebt']),
+      overduePeriodAmount: json['overduePeriodAmount'] == null
+          ? null
+          : _asNum(json['overduePeriodAmount']),
       overdueSinceDate: json['overdueSinceDate'] as String?,
       overdueUntilDate: json['overdueUntilDate'] as String?,
       yandexBalance: _asNum(json['yandexBalance']),
@@ -142,6 +147,7 @@ class ManagerAssignedDriverDto {
   final num debt;
   final num creditBalance;
   final num overdueDebt;
+  final num? overduePeriodAmount;
   final String? overdueSinceDate;
   final String? overdueUntilDate;
   final num yandexBalance;
@@ -233,6 +239,7 @@ class ManagerVehicleAssignmentDto {
 
 class ManagerVehicleDto {
   const ManagerVehicleDto({
+    this.incidentComment,
     required this.id,
     required this.plateNumber,
     required this.vin,
@@ -259,6 +266,7 @@ class ManagerVehicleDto {
 
   factory ManagerVehicleDto.fromJson(Map<String, dynamic> json) {
     return ManagerVehicleDto(
+      incidentComment: json['incidentComment'] as String?,
       id: json['id'] as String,
       plateNumber: json['plateNumber'] as String,
       vin: json['vin'] as String,
@@ -287,6 +295,7 @@ class ManagerVehicleDto {
     );
   }
 
+  final String? incidentComment;
   final String id;
   final String plateNumber;
   final String vin;
@@ -474,6 +483,8 @@ class ManagerDriverIncidentDto {
     required this.occurredAt,
     required this.periodLabel,
     this.statusHistory = const [],
+    this.serviceDetails,
+    this.accidentDetails,
     required this.serviceStage,
     required this.serviceCaseType,
     required this.repairNote,
@@ -490,6 +501,8 @@ class ManagerDriverIncidentDto {
       occurredAt: json['occurredAt'] as String?,
       periodLabel: json['periodLabel'] as String?,
       statusHistory: _incidentStatusHistory(json['statusHistory']),
+      serviceDetails: json['serviceDetails'] as Map<String, dynamic>?,
+      accidentDetails: json['accidentDetails'] as Map<String, dynamic>?,
       serviceStage: json['serviceStage'] as String?,
       serviceCaseType: json['serviceCaseType'] as String?,
       repairNote: json['repairNote'] as String?,
@@ -505,6 +518,8 @@ class ManagerDriverIncidentDto {
   final String? occurredAt;
   final String? periodLabel;
   final List<ManagerIncidentStatusHistoryDto> statusHistory;
+  final Map<String, dynamic>? serviceDetails;
+  final Map<String, dynamic>? accidentDetails;
   final String? serviceStage;
   final String? serviceCaseType;
   final String? repairNote;
@@ -704,6 +719,8 @@ class ManagerIncidentDto {
     required this.occurredAt,
     required this.periodLabel,
     this.statusHistory = const [],
+    this.serviceDetails,
+    this.accidentDetails,
     required this.serviceStage,
     required this.serviceCaseType,
     required this.repairNote,
@@ -722,6 +739,8 @@ class ManagerIncidentDto {
       occurredAt: json['occurredAt'] as String?,
       periodLabel: json['periodLabel'] as String?,
       statusHistory: _incidentStatusHistory(json['statusHistory']),
+      serviceDetails: json['serviceDetails'] as Map<String, dynamic>?,
+      accidentDetails: json['accidentDetails'] as Map<String, dynamic>?,
       serviceStage: json['serviceStage'] as String?,
       serviceCaseType: json['serviceCaseType'] as String?,
       repairNote: json['repairNote'] as String?,
@@ -739,6 +758,8 @@ class ManagerIncidentDto {
   final String? occurredAt;
   final String? periodLabel;
   final List<ManagerIncidentStatusHistoryDto> statusHistory;
+  final Map<String, dynamic>? serviceDetails;
+  final Map<String, dynamic>? accidentDetails;
   final String? serviceStage;
   final String? serviceCaseType;
   final String? repairNote;
@@ -889,8 +910,12 @@ class ManagerApiClient {
   final String baseUrl;
   final http.Client? _httpClient;
   ManagerAuthSessionDto? _session;
+  Future<ManagerAuthSessionDto>? _refreshFuture;
+  void Function()? onDataChanged;
+  Future<void> Function(ManagerAuthSessionDto)? onSessionRefreshed;
 
-  http.Client get client => _httpClient ?? http.Client();
+  late final http.Client _client = _httpClient ?? http.Client();
+  http.Client get client => _client;
 
   Future<ManagerAuthSessionDto> login(String login, String password) async {
     final response = await client.post(
@@ -904,7 +929,9 @@ class ManagerApiClient {
     return session;
   }
 
-  Future<ManagerAuthSessionDto> refresh() async {
+  Future<ManagerAuthSessionDto> refresh() => _refreshFuture ??= _refreshSession().whenComplete(() => _refreshFuture = null);
+
+  Future<ManagerAuthSessionDto> _refreshSession() async {
     final session = _session;
     if (session == null) {
       throw Exception('Manager session is not initialized');
@@ -914,11 +941,16 @@ class ManagerApiClient {
       Uri.parse('$baseUrl/auth/refresh'),
       headers: const {'content-type': 'application/json'},
       body: jsonEncode({'refreshToken': session.refreshToken}),
-    );
+    ).timeout(const Duration(seconds: 15));
 
     final refreshedSession =
         ManagerAuthSessionDto.fromJson(_decodeObject(response));
+    if (_session?.refreshToken != session.refreshToken) throw Exception('Сессия изменилась. Войдите снова.');
+    if (refreshedSession.requestUserRole != 'manager') throw Exception('Требуется аккаунт бригадира.');
     _session = refreshedSession;
+    onDataChanged?.call();
+    await onSessionRefreshed?.call(refreshedSession);
+    if (_session?.refreshToken != refreshedSession.refreshToken) throw Exception('Сессия изменилась. Войдите снова.');
     return refreshedSession;
   }
 
@@ -974,7 +1006,12 @@ class ManagerApiClient {
   }
 
   Future<http.Response> _authorizedGet(Uri uri) {
-    return _sendAuthorized((headers) => client.get(uri, headers: headers));
+    return _sendAuthorized(
+        (headers) => client.get(uri, headers: headers).timeout(
+              const Duration(seconds: 20),
+              onTimeout: () => throw TimeoutException(
+                  'Сервер не ответил. Проверьте соединение и повторите загрузку.'),
+            ));
   }
 
   Future<http.Response> _authorizedPost(
@@ -988,6 +1025,7 @@ class ManagerApiClient {
         headers: {...authHeaders, ...headers},
         body: body,
       ),
+      mutation: true,
     );
   }
 
@@ -1002,19 +1040,23 @@ class ManagerApiClient {
         headers: {...authHeaders, ...headers},
         body: body,
       ),
+      mutation: true,
     );
   }
 
   Future<http.Response> _sendAuthorized(
-    Future<http.Response> Function(Map<String, String> headers) send,
-  ) async {
-    var response = await send(_headers);
-    if (response.statusCode != 401) {
-      return response;
-    }
+    Future<http.Response> Function(Map<String, String> headers) send, {
+    bool mutation = false,
+  }) => _sendAuthorizedOnce(send, mutation).timeout(const Duration(seconds: 25), onTimeout: () => throw TimeoutException('Сервер не ответил. Повторите загрузку.'));
 
-    await refresh();
-    response = await send(_headers);
+  Future<http.Response> _sendAuthorizedOnce(Future<http.Response> Function(Map<String, String>) send, bool mutation) async {
+    final token = _session?.accessToken;
+    var response = await send(_headers);
+    if (response.statusCode == 401) {
+      if (_session?.accessToken == token) await refresh();
+      response = await send(_headers);
+    }
+    if (mutation && response.statusCode >= 200 && response.statusCode < 300) onDataChanged?.call();
     return response;
   }
 
@@ -1026,9 +1068,13 @@ class ManagerApiClient {
     return ManagerSummaryDto.fromJson(_decodeObject(response));
   }
 
-  Future<List<ManagerAssignedDriverDto>> getDrivers() async {
+  Future<List<ManagerAssignedDriverDto>> getDrivers(
+      {String? from, String? to}) async {
     final response = await _authorizedGet(
-      Uri.parse('$baseUrl/mobile/manager/drivers'),
+      Uri.parse('$baseUrl/mobile/manager/drivers').replace(queryParameters: {
+        if (from != null) 'dueDateFrom': from,
+        if (to != null) 'dueDateTo': to,
+      }),
     );
 
     return _decodeList(response)
@@ -1163,16 +1209,55 @@ class ManagerApiClient {
     return _decodeList(response).map(ManagerIncidentDto.fromJson).toList();
   }
 
+  Future<Map<String, dynamic>> getDriverCalendar(
+      String driverId, String month) async {
+    final response = await _authorizedGet(Uri.parse(
+        '$baseUrl/mobile/manager/drivers/$driverId/calendar?month=$month'));
+    return _decodeObject(response);
+  }
+
+  Future<Map<String, dynamic>> saveDriverCalendarComment(
+      String driverId, String day, String comment) async {
+    final response = await _authorizedPatch(
+        Uri.parse(
+            '$baseUrl/mobile/manager/drivers/$driverId/calendar/$day/comment'),
+        headers: const {'content-type': 'application/json'},
+        body: jsonEncode(
+            {'comment': comment})).timeout(const Duration(seconds: 20));
+    return _decodeObject(response);
+  }
+
+  Future<ManagerIncidentDto> createVehicleIncidentAction(
+      String vehicleId, String action,
+      {String? note,
+      Map<String, dynamic>? serviceDetails,
+      Map<String, dynamic>? accidentDetails}) async {
+    final response = await _authorizedPost(
+        Uri.parse('$baseUrl/mobile/manager/vehicles/$vehicleId/incidents'),
+        headers: const {'content-type': 'application/json'},
+        body: jsonEncode({
+          'action': action,
+          if (note != null) 'note': note,
+          if (serviceDetails != null) 'serviceDetails': serviceDetails,
+          if (accidentDetails != null) 'accidentDetails': accidentDetails
+        }));
+    return ManagerIncidentDto.fromJson(_decodeObject(response));
+  }
+
   Future<ManagerIncidentDto> createDriverIncidentAction(
     String driverId,
     String action, {
     String? note,
     String? accidentPhotoUrl,
+    Map<String, dynamic>? accidentDetails,
+    Map<String, dynamic>? serviceDetails,
   }) async {
     final trimmedNote = note?.trim();
     final trimmedAccidentPhotoUrl = accidentPhotoUrl?.trim();
     final payload = {
       'action': action,
+      if (accidentDetails != null) 'accidentDetails': accidentDetails,
+      if (serviceDetails != null) 'serviceDetails': serviceDetails,
       if (trimmedNote?.isNotEmpty == true) 'note': trimmedNote,
       if (trimmedAccidentPhotoUrl?.isNotEmpty == true)
         'accidentPhotoUrl': trimmedAccidentPhotoUrl,
@@ -1313,7 +1398,8 @@ class ManagerApiClient {
   Map<String, dynamic> _decodeObject(http.Response response) {
     final decoded = _decodeNullableObject(response);
     if (decoded == null) {
-      throw const ManagerApiException('Сервер вернул пустой ответ. Попробуйте ещё раз.');
+      throw const ManagerApiException(
+          'Сервер вернул пустой ответ. Попробуйте ещё раз.');
     }
     return decoded;
   }
@@ -1404,7 +1490,8 @@ String _translateManagerApiError(String message, int statusCode) {
   if (normalized.contains('field "') && normalized.contains('required')) {
     return 'Заполните обязательные поля.';
   }
-  if (normalized.contains('insufficient role') || normalized.contains('forbidden')) {
+  if (normalized.contains('insufficient role') ||
+      normalized.contains('forbidden')) {
     return 'Недостаточно прав для этого действия.';
   }
   if (normalized.contains('not found')) {

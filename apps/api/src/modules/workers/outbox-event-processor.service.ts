@@ -19,7 +19,7 @@ export class OutboxEventProcessorService {
       return false;
     }
 
-    const result = await this.integrationEventsService.handle(event.topic, event.payload);
+    const result = await this.integrationEventsService.handle(event.topic, { ...event.payload, eventId: event.id });
     if (!result.accepted) {
       throw new Error(`Outbox integration handler rejected topic ${event.topic}`);
     }

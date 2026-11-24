@@ -228,43 +228,37 @@ export class DriverMobileReadService {
     };
   }
 
-  async getFinanceSnapshots(driverIds: string[]): Promise<Record<string, DriverFinanceSnapshot>> {
+  async getFinanceSnapshots(driverIds: string[], drivers?: Array<{id: string; activeContractId?: string | null}>): Promise<Record<string, DriverFinanceSnapshot>> {
     const [debtSnapshots, driverCreditBalances, payments, yandexBalances, reservedPayoutAmounts] = await Promise.all([
-      this.obligationRepository.getDebtSnapshotsByDrivers(driverIds, this.today()),
+      drivers ? Promise.resolve({} as Record<string, import("../../common/repositories/obligation.repository.js").ObligationDebtSnapshot>) : this.obligationRepository.getDebtSnapshotsByDrivers(driverIds, this.today()),
       this.driverCreditBalanceRepository.getByDrivers(driverIds),
       this.paymentRepository.getLatestSuccessfulByDrivers(driverIds),
       this.yandexBalanceRepository.getLatestByDrivers(driverIds),
       this.payoutRepository.getRequestedAmountByDrivers(driverIds),
     ]);
 
-    const effectivePolicies = await Promise.all(
-      driverIds.map((driverId) =>
-        this.statusRequestPolicyService.getEffectiveDebtPolicy(
-          driverId,
-          this.today(),
-          driverCreditBalances[driverId] ?? 0,
-        ),
-      ),
+    const batch = drivers ? await this.statusRequestPolicyService.getEffectiveDebtPolicies(drivers, this.today(), driverCreditBalances) : null;
+    const effectivePolicies = batch ? driverIds.map(id => batch[id]) : await Promise.all(
+      driverIds.map(driverId => this.statusRequestPolicyService.getEffectiveDebtPolicy(driverId, this.today(), driverCreditBalances[driverId] ?? 0)),
     );
 
     return Object.fromEntries(
-      driverIds.map((driverId) => {
-        const effectivePolicy = effectivePolicies[driverIds.indexOf(driverId)];
+      driverIds.map((driverId, index) => {
+        const effectivePolicy = effectivePolicies[index];
         const debtSnapshot = debtSnapshots[driverId];
-        const hasOverdue = (debtSnapshot?.overdueDebt ?? 0) > 0;
         const creditBalance = driverCreditBalances[driverId] ?? 0;
         const currentDebt = Math.max(0, (debtSnapshot?.totalDebt ?? 0) - creditBalance);
 
         return [
           driverId,
           {
-            currentDebt: hasOverdue || !effectivePolicy ? currentDebt : effectivePolicy.currentDebt,
+            currentDebt: effectivePolicy?.currentDebt ?? currentDebt,
             creditBalance,
-            overdueDebt: hasOverdue || !effectivePolicy ? debtSnapshot?.overdueDebt ?? 0 : effectivePolicy.overdueDebt,
-            overdueSinceDate: hasOverdue || !effectivePolicy ? debtSnapshot?.overdueSinceDate ?? null : null,
-            overdueUntilDate: hasOverdue || !effectivePolicy ? debtSnapshot?.overdueUntilDate ?? null : null,
-            nextPaymentAmount: hasOverdue || !effectivePolicy ? debtSnapshot?.nextPaymentAmount ?? 0 : effectivePolicy.nextPaymentAmount,
-            nextPaymentDate: hasOverdue || !effectivePolicy ? debtSnapshot?.nextPaymentDate ?? null : effectivePolicy.nextPaymentDate,
+            overdueDebt: effectivePolicy?.overdueDebt ?? debtSnapshot?.overdueDebt ?? 0,
+            overdueSinceDate: effectivePolicy ? effectivePolicy.overdueSinceDate : debtSnapshot?.overdueSinceDate ?? null,
+            overdueUntilDate: effectivePolicy ? effectivePolicy.overdueUntilDate : debtSnapshot?.overdueUntilDate ?? null,
+            nextPaymentAmount: effectivePolicy?.nextPaymentAmount ?? debtSnapshot?.nextPaymentAmount ?? 0,
+            nextPaymentDate: effectivePolicy ? effectivePolicy.nextPaymentDate : debtSnapshot?.nextPaymentDate ?? null,
             lastPaymentDate: payments[driverId]?.createdAt ?? null,
             yandexBalance: yandexBalances[driverId]?.amount ?? 0,
             reservedPayoutAmount: reservedPayoutAmounts[driverId] ?? 0,
@@ -291,6 +285,13 @@ export class DriverMobileReadService {
   async getDriverAssignmentSnapshots(
     inputs: DriverAssignmentSnapshotInput[],
   ): Promise<Record<string, DriverAssignmentSnapshot>> {
+    if (this.carRepository.getAssignmentSummaries && this.contractRepository.getNumbersByIds) {
+      const [cars, numbers] = await Promise.all([
+        this.carRepository.getAssignmentSummaries(inputs.map(d => d.driverId)),
+        this.contractRepository.getNumbersByIds(inputs.map(d => d.activeContractId).filter((id): id is string => !!id)),
+      ]);
+      return Object.fromEntries(inputs.map(d => [d.driverId, {vehicle: cars[d.driverId]?.vehicle ?? null, vehicleStatus: cars[d.driverId]?.vehicleStatus ?? null, contractNumber: d.activeContractId ? numbers[d.activeContractId] ?? null : null}]));
+    }
     const driverDetails = await Promise.all(
       inputs.map(async ({ driverId, activeContractId }) => {
         const [car, contract] = await Promise.all([
@@ -461,9 +462,9 @@ export class DriverMobileReadService {
     return this.incidentRepository.listOpenByDriver(driverId);
   }
 
-  async getManagerDriversSummary(driverIds: string[], date: string): Promise<ManagerDriversSummarySnapshot> {
+  async getManagerDriversSummary(driverIds: string[], date: string, drivers?: Array<{id: string; activeContractId?: string | null}>): Promise<ManagerDriversSummarySnapshot> {
     const [financeSnapshots, dueTodayAmount, pendingStatusRequests, openIncidents] = await Promise.all([
-      this.getFinanceSnapshots(driverIds),
+      this.getFinanceSnapshots(driverIds, drivers),
       this.obligationRepository.getDueAmountByDriversOnDate(driverIds, date),
       this.getPendingStatusRequestsCount(driverIds),
       this.countOpenIncidentsByDrivers(driverIds),

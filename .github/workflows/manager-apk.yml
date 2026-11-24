@@ -1,14 +1,32 @@
 name: manager-apk
 on:
   workflow_dispatch:
+    inputs:
+      signing_diagnostics:
+        description: Inspect public certificate fingerprints without building or publishing
+        type: boolean
+        default: false
+      source_ref:
+        description: Exact already deployed commit to build (empty uses workflow branch)
+        type: string
+        default: ""
+      publish:
+        description: Upload the verified APK to the already deployed matching server release
+        type: boolean
+        default: false
   push:
     branches: [codex/incident-history-release]
+concurrency:
+  group: ${{ inputs.publish == true && 'production-deploy' || format('manager-apk-{0}', github.ref) }}
+  cancel-in-progress: false
 jobs:
   build:
     runs-on: ubuntu-latest
     environment: production
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -30,7 +48,7 @@ jobs:
           printf '%s\n' "$PROD_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           printf '%s\n' "$PROD_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          key_path=$(ssh -i ~/.ssh/id_ed25519 -p "$PROD_SSH_PORT" "$PROD_SSH_USER@$PROD_SSH_HOST" 'for path in "$HOME/.android/debug.keystore" /home/client/.android/debug.keystore /home/client/gopark/secrets/debug.keystore; do if [ -r "$path" ]; then printf "%s\n" "$path"; break; fi; done')
+          key_path=$(ssh -i ~/.ssh/id_ed25519 -p "$PROD_SSH_PORT" "$PROD_SSH_USER@$PROD_SSH_HOST" 'for path in /home/client/gopark/secrets/debug.keystore "$HOME/.android/debug.keystore" /home/client/.android/debug.keystore; do if [ -r "$path" ]; then printf "%s\n" "$path"; break; fi; done')
           if [ -n "$key_path" ]; then
             scp -i ~/.ssh/id_ed25519 -P "$PROD_SSH_PORT" "$PROD_SSH_USER@$PROD_SSH_HOST:$key_path" ~/.android/debug.keystore
             chmod 600 ~/.android/debug.keystore
@@ -39,38 +57,114 @@ jobs:
             echo '::warning::Existing Android debug signing key was not found on the server; signature compatibility must be checked.'
           fi
           scp -i ~/.ssh/id_ed25519 -P "$PROD_SSH_PORT" "$PROD_SSH_USER@$PROD_SSH_HOST:/home/client/gopark-current/gopark-manager.apk" /tmp/previous-manager.apk
+      - name: Diagnose public signing fingerprints only
+        if: inputs.signing_diagnostics == true
+        env:
+          PROD_SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+          PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          PROD_SSH_PORT: ${{ secrets.PROD_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          apksigner=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
+          "$apksigner" verify --print-certs /tmp/previous-manager.apk | sed -n '/certificate SHA-256 digest:/p'
+          remote="$PROD_SSH_USER@$PROD_SSH_HOST"
+          ssh -p "$PROD_SSH_PORT" "$remote" 'find /home/client/gopark/secrets /home/client/.android /home/client/.config/.android /home/client/gopark-releases -type f \( -name "*.keystore" -o -name "*.jks" \) -print 2>/dev/null || true' > /tmp/signing-candidate-paths
+          while IFS= read -r candidate; do
+            private_copy=$(mktemp)
+            scp -q -P "$PROD_SSH_PORT" "$remote:$candidate" "$private_copy"
+            chmod 600 "$private_copy"
+            echo "Certificate candidate: $candidate"
+            keytool -exportcert -keystore "$private_copy" -storepass android -alias androiddebugkey 2>/dev/null | openssl x509 -inform DER -noout -fingerprint -sha256 || echo 'Not a default Android debug key.'
+            rm -f "$private_copy"
+          done < /tmp/signing-candidate-paths
       - name: Resolve manager dependencies
+        if: inputs.signing_diagnostics != true
         working-directory: apps/manager-app
         run: flutter pub get --enforce-lockfile
       - uses: actions/upload-artifact@v4
+        if: inputs.signing_diagnostics != true
         with:
           name: manager-resolved-lockfile
           path: apps/manager-app/pubspec.lock
           if-no-files-found: error
       - name: Analyze and test manager app
+        if: inputs.signing_diagnostics != true
         working-directory: apps/manager-app
         run: |
           flutter analyze
           flutter test
       - name: Build manager APK
+        if: inputs.signing_diagnostics != true
+        env:
+          ANDROID_USER_HOME: /home/runner/.android
+          GOPARK_MANAGER_KEYSTORE: /home/runner/.android/debug.keystore
         working-directory: apps/manager-app
         run: |
-          build_number=$(( $(date +%s) / 60 ))
+          test -s "$GOPARK_MANAGER_KEYSTORE"
+          build_number=$(python3 -c 'import re,time; from pathlib import Path; version=re.search(r"^version:.*[+]([0-9]+)",Path("pubspec.yaml").read_text(),re.M); print(max(int(time.time())//60, int(version[1])+1))')
           flutter build apk --release --dart-define=API_BASE_URL=https://185.138.185.36/api --build-number="$build_number"
+      - name: Build matching manager web application
+        if: inputs.signing_diagnostics != true
+        working-directory: apps/manager-app
+        run: flutter build web --release --base-href=/manager/ --pwa-strategy=none --no-web-resources-cdn
       - name: Verify APK and compare signing certificate
+        if: inputs.signing_diagnostics != true
         run: |
           apksigner=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
           "$apksigner" verify --verbose --print-certs apps/manager-app/build/app/outputs/flutter-apk/app-release.apk > /tmp/new-manager-cert.txt
           "$apksigner" verify --verbose --print-certs /tmp/previous-manager.apk > /tmp/old-manager-cert.txt
-          old_cert=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' /tmp/old-manager-cert.txt)
-          new_cert=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' /tmp/new-manager-cert.txt)
+          old_cert=$(sed -n 's/.*certificate SHA-256 digest: //p' /tmp/old-manager-cert.txt | sort -u)
+          new_cert=$(sed -n 's/.*certificate SHA-256 digest: //p' /tmp/new-manager-cert.txt | sort -u)
           if [ -n "$old_cert" ] && [ "$old_cert" = "$new_cert" ]; then
             echo 'APK signing certificate matches the existing manager APK.'
           else
-            echo '::warning::APK signing certificate differs; installation over the old APK requires the original signing key.'
+            echo '::error::APK signing certificate differs from the installed release; publication cancelled.'
+            exit 1
           fi
       - uses: actions/upload-artifact@v4
+        if: inputs.signing_diagnostics != true
         with:
           name: gopark-manager-apk
           path: apps/manager-app/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
+      - name: Prepare download files
+        if: inputs.publish == true && inputs.signing_diagnostics != true
+        run: |
+          python3 scripts/prepare_manager_download.py apps/manager-app/build/app/outputs/flutter-apk/app-release.apk /tmp/manager-upload
+          tar -czf /tmp/manager-upload/manager-web.tar.gz -C apps/manager-app/build/web .
+      - name: Publish verified APK with rollback
+        if: inputs.publish == true && inputs.signing_diagnostics != true
+        env:
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          PROD_SSH_KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
+          PROD_SSH_PORT: ${{ secrets.PROD_SSH_PORT }}
+          PROD_SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+          PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$PROD_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$PROD_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          code_sha=$(git rev-parse HEAD)
+          apk_sha256=$(sha256sum /tmp/manager-upload/gopark-manager.apk | cut -d' ' -f1)
+          web_sha256=$(sha256sum /tmp/manager-upload/manager-web.tar.gz | cut -d' ' -f1)
+          zip_sha256=$(sha256sum /tmp/manager-upload/gopark-manager.zip | cut -d' ' -f1)
+          remote="$PROD_SSH_USER@$PROD_SSH_HOST"
+          stage="/tmp/gopark-manager-upload-$apk_sha256"
+          ssh -i ~/.ssh/id_ed25519 -p "$PROD_SSH_PORT" "$remote" "mkdir -p '$stage'; chmod 700 '$stage'"
+          scp -i ~/.ssh/id_ed25519 -P "$PROD_SSH_PORT" /tmp/manager-upload/gopark-manager.apk /tmp/manager-upload/gopark-manager.zip /tmp/manager-upload/manager-download.html /tmp/manager-upload/manager-web.tar.gz scripts/publish_manager_apk.sh scripts/publish_manager_web.sh "$remote:$stage/"
+          # Keep the signing key only in the protected server secrets directory.
+          # Never include it in Git, download files, logs, or Actions artifacts.
+          echo 'Download files uploaded; locating verified build signing key.'
+          if [ ! -s ~/.android/debug.keystore ]; then
+            signing_key=$(find "$HOME/.config" "$GITHUB_WORKSPACE/apps/manager-app/android" -name debug.keystore -type f 2>/dev/null | head -1 || true)
+            if [ -z "$signing_key" ]; then echo '::error::Build signing key was not found; leaving published APK unchanged.'; exit 1; fi
+            install -m 600 "$signing_key" ~/.android/debug.keystore
+          fi
+          scp -i ~/.ssh/id_ed25519 -P "$PROD_SSH_PORT" ~/.android/debug.keystore "$remote:$stage/manager-signing.keystore"
+          ssh -i ~/.ssh/id_ed25519 -p "$PROD_SSH_PORT" "$remote" "set -eu; target=/home/client/gopark/secrets/debug.keystore; if [ ! -e \"\$target\" ]; then install -m 600 '$stage/manager-signing.keystore' \"\$target\"; fi; cmp -s '$stage/manager-signing.keystore' \"\$target\"; rm -f '$stage/manager-signing.keystore'"
+          echo 'Signing key preserved; publishing downloads for the matching deployed commit.'
+          ssh -i ~/.ssh/id_ed25519 -p "$PROD_SSH_PORT" "$remote" "deployed_sha=\$(cat /home/client/gopark-current-sha); if [ \"\$deployed_sha\" != '$code_sha' ]; then echo 'Deployed commit differs from APK source; publication cancelled.'; exit 1; fi"
+          ssh -i ~/.ssh/id_ed25519 -p "$PROD_SSH_PORT" "$remote" "CODE_SHA='$code_sha' APK_SHA256='$apk_sha256' ZIP_SHA256='$zip_sha256' STAGE='$stage' bash '$stage/publish_manager_apk.sh'"
+          ssh -i ~/.ssh/id_ed25519 -p "$PROD_SSH_PORT" "$remote" "CODE_SHA='$code_sha' WEB_SHA256='$web_sha256' STAGE='$stage' bash '$stage/publish_manager_web.sh'"

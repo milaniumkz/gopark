@@ -61,6 +61,16 @@ function buildAuthHeadersForToken(accessToken: string, extraHeaders?: HeadersIni
   };
 }
 
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  if (init.method && init.method !== "GET") return fetch(url, init);
+  try {
+    return await fetch(url, { ...init, signal: init.signal ?? AbortSignal.timeout(20_000) });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "TimeoutError") throw new Error("Сервер не ответил. Проверьте соединение и повторите загрузку.");
+    throw error;
+  }
+}
+
 async function fetchWithAuth(path: string, init: RequestInit = {}): Promise<Response> {
   const session = loadCrmSession();
   if (!session) {
@@ -69,7 +79,7 @@ async function fetchWithAuth(path: string, init: RequestInit = {}): Promise<Resp
 
   let response: Response;
   try {
-    response = await fetch(buildUrl(path), {
+    response = await fetchWithTimeout(buildUrl(path), {
       ...init,
       headers: buildAuthHeadersForToken(session.accessToken, init.headers),
     });
@@ -88,7 +98,7 @@ async function fetchWithAuth(path: string, init: RequestInit = {}): Promise<Resp
   }
 
   try {
-    return await fetch(buildUrl(path), {
+    return await fetchWithTimeout(buildUrl(path), {
       ...init,
       headers: buildAuthHeadersForToken(refreshedSession.accessToken, init.headers),
     });

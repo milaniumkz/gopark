@@ -77,6 +77,7 @@ export interface DriverRiskStatusChangeItem {
 }
 
 export interface VehicleListItem {
+  incidentComment?: string | null;
   id: string;
   plateNumber: string;
   vin: string;

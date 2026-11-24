@@ -1,3 +1,5 @@
+import { formatContractTerm } from "../lib/contract-term";
+import { DateRangePicker } from "../ui/DateRangePicker";
 import { Link } from "react-router-dom";
 import { useState } from "react";
 import { useEffect, useMemo } from "react";
@@ -21,6 +23,8 @@ import type {
 } from "@gopark/contracts";
 import { fetchJson, fetchJsonWithQuery, patchJson, postJson } from "../lib/api";
 import {
+  getDefaultContractCompany,
+  getLocalDateOnly,
   downloadCsv,
   formatCurrency,
   formatDateOnly,
@@ -237,13 +241,6 @@ function toOptionalNumber(value: string): number | undefined {
   return Number.isFinite(amount) && amount > 0 ? amount : undefined;
 }
 
-function getLocalDateOnly(date = new Date()): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
 function getDashboardPeriodRange(period: "today" | "week" | "month" | "year"): { startDate: string; endDate: string } {
   const start = new Date(`${getLocalDateOnly()}T00:00:00.000Z`);
   const end = new Date(start);
@@ -303,7 +300,7 @@ export function DashboardPage() {
   const [quickMake, setQuickMake] = useState("");
   const [quickModel, setQuickModel] = useState("");
   const quickModelOptions = getVehicleModelOptions(quickMake);
-  const [quickCompanyName, setQuickCompanyName] = useState(session.companyName?.trim() || "");
+  const [quickCompanyName, setQuickCompanyName] = useState("");
   const [quickProductionYear, setQuickProductionYear] = useState("");
   const [quickMileage, setQuickMileage] = useState("");
   const nextContractNumber = useApiQuery<{ contractNumber: string }>("contracts/next-number");
@@ -318,7 +315,7 @@ export function DashboardPage() {
   const [quickOsagoStartDate, setQuickOsagoStartDate] = useState("");
   const [quickHasCasco, setQuickHasCasco] = useState(false);
   const [quickCascoStartDate, setQuickCascoStartDate] = useState("");
-  const [quickStartDate, setQuickStartDate] = useState(new Date().toISOString().slice(0, 10));
+  const [quickStartDate, setQuickStartDate] = useState(getLocalDateOnly);
   const [quickEndDate, setQuickEndDate] = useState("");
   const [idleVehicleFilter, setIdleVehicleFilter] = useState<DashboardIdleVehicleFilter>("all");
   const paymentPeriodRange = getDashboardPeriodRange(period);
@@ -398,6 +395,15 @@ export function DashboardPage() {
     () => calculatePayableDays(quickStartDate, quickEndDate, quickDriverWeeklyDayOff || null),
     [quickDriverWeeklyDayOff, quickEndDate, quickStartDate],
   );
+
+  const defaultContractCompany = getDefaultContractCompany(companies, session.companyName);
+  useEffect(() => {
+    if (isQuickCreateOpen) setQuickCompanyName((current) => current || defaultContractCompany);
+  }, [isQuickCreateOpen, defaultContractCompany]);
+
+  useEffect(() => {
+    if (isQuickCreateOpen) setQuickStartDate(getLocalDateOnly());
+  }, [isQuickCreateOpen]);
 
   useEffect(() => {
     setDashboardDateFrom(paymentPeriodRange.startDate);
@@ -907,7 +913,7 @@ export function DashboardPage() {
       setQuickModel("");
       setQuickProductionYear("");
       setQuickMileage("");
-      setQuickCompanyName("");
+      setQuickCompanyName(defaultContractCompany);
       void nextContractNumber.refetch({ silent: true }).catch(() => undefined);
       setQuickPrincipalAmount("");
       setQuickDailyPayment("");
@@ -919,7 +925,7 @@ export function DashboardPage() {
       setQuickOsagoStartDate("");
       setQuickHasCasco(false);
       setQuickCascoStartDate("");
-      setQuickStartDate("");
+      setQuickStartDate(getLocalDateOnly());
       setQuickEndDate("");
     } catch (quickCreateError) {
       setQuickCreateMessage(quickCreateError instanceof Error ? quickCreateError.message : "Не удалось создать водителя, авто и договор.");
@@ -1228,18 +1234,7 @@ export function DashboardPage() {
                 </option>
               ))}
             </select>
-            <input
-              aria-label="Дата начала периода"
-              type="date"
-              value={dashboardDateFrom}
-              onChange={(event) => setDashboardDateFrom(event.target.value)}
-            />
-            <input
-              aria-label="Дата окончания периода"
-              type="date"
-              value={dashboardDateTo}
-              onChange={(event) => setDashboardDateTo(event.target.value)}
-            />
+            <DateRangePicker from={dashboardDateFrom} to={dashboardDateTo} onChange={(from, to) => { setDashboardDateFrom(from); setDashboardDateTo(to); }} />
             {canCreateCar && canCreateDriver ? (
               <button type="button" onClick={() => setIsQuickCreateOpen(true)}>
                 <DriversIcon width={16} height={16} />
@@ -1372,7 +1367,7 @@ export function DashboardPage() {
                 <input value={quickEndDate} onChange={(event) => setQuickEndDate(event.target.value)} type="date" min="2020-01-01" />
               </div>
               <p className="panel-note">
-                Дата выплаты считается автоматически из суммы и ежедневного платежа: {quickTermMonths > 0 ? `${quickTermMonths} мес.` : "укажите сумму и платёж"}.
+                Дата выплаты считается автоматически из суммы и ежедневного платежа: {quickTermMonths > 0 ? formatContractTerm(quickStartDate, quickEndDate) : "укажите сумму и платёж"}.
                 {" "}Рабочих дней: {quickPayableDays || "—"}.
               </p>
               <div className="toolbar">
@@ -1496,7 +1491,7 @@ export function DashboardPage() {
             <span>ДТП</span>
             <strong>{stats?.vehicles.accident ?? 0}</strong>
           </Link>
-          <Link className="dashboard-shortcut dashboard-shortcut--orange" to="/vehicles?status=maintenance">
+          <Link className="dashboard-shortcut dashboard-shortcut--orange" to="/service?view=operations">
             <CarIcon width={20} height={20} />
             <span>Ремонт</span>
             <strong>{(vehiclesApi.data ?? []).filter((item) => item.status === "maintenance" || item.status === "repair").length}</strong>

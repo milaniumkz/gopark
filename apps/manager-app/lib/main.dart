@@ -2,24 +2,29 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
 import 'api.dart';
+import 'design.dart';
 import 'platform_storage.dart';
 import 'push_notifications.dart';
 import 'repository.dart';
+import 'service_screens.dart';
+import 'service_dispatch_form.dart';
+import 'vehicle_incident_actions.dart';
 import 'support_links.dart';
 
-const _managerBg = Color(0xFFF4F7FB);
-const _managerSurface = Color(0xFFFFFFFF);
-const _managerText = Color(0xFF0F172A);
-const _managerMuted = Color(0xFF64748B);
-const _managerBlue = Color(0xFF2563EB);
-const _managerCyan = Color(0xFF06B6D4);
-const _managerPurple = Color(0xFF9333EA);
-const _managerOrange = Color(0xFFF97316);
-const _managerGreen = Color(0xFF10B981);
+const _managerBg = ManagerDesign.background;
+const _managerSurface = ManagerDesign.surface;
+const _managerText = ManagerDesign.text;
+const _managerMuted = ManagerDesign.muted;
+const _managerBlue = ManagerDesign.primary;
+const _managerCyan = ManagerDesign.primary;
+const _managerPurple = ManagerDesign.primary;
+const _managerOrange = ManagerDesign.orange;
+const _managerGreen = ManagerDesign.primary;
 const _managerSessionStorageKey = 'gopark_manager_session';
 const _managerSessionMaxAge = Duration(days: 7);
 
@@ -63,36 +68,11 @@ class GoParkManagerApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'GoPark Brigadier',
+      locale: const Locale('ru'),
+      supportedLocales: const [Locale('ru')],
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: _managerBlue,
-          primary: _managerBlue,
-          secondary: _managerCyan,
-          surface: _managerSurface,
-        ),
-        scaffoldBackgroundColor: _managerBg,
-        useMaterial3: true,
-        textTheme: ThemeData.light().textTheme.apply(
-              bodyColor: _managerText,
-              displayColor: _managerText,
-            ),
-        navigationBarTheme: NavigationBarThemeData(
-          height: 64,
-          backgroundColor: Colors.white.withValues(alpha: 0.94),
-          indicatorColor: _managerBlue.withValues(alpha: 0.14),
-          labelTextStyle: WidgetStateProperty.resolveWith(
-            (states) => TextStyle(
-              fontSize: 11,
-              height: 1.1,
-              fontWeight: FontWeight.w700,
-              color: states.contains(WidgetState.selected)
-                  ? _managerBlue
-                  : _managerMuted,
-            ),
-          ),
-        ),
-      ),
+      theme: ManagerDesign.theme(),
       home: const ManagerShell(),
     );
   }
@@ -123,6 +103,11 @@ class _ManagerShellState extends State<ManagerShell>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    repository.api.onSessionRefreshed = (refreshed) async {
+      await writeStorageValue(_managerSessionStorageKey, _encodeManagerStoredSession(refreshed));
+      if (repository.currentSession == null) { await removeStorageValue(_managerSessionStorageKey); return; }
+      if (mounted && repository.currentSession?.refreshToken == refreshed.refreshToken) setState(() => session = refreshed);
+    };
     unawaited(_restoreStoredSession());
   }
 
@@ -137,6 +122,13 @@ class _ManagerShellState extends State<ManagerShell>
     if (state == AppLifecycleState.resumed && session != null) {
       unawaited(_refreshStoredSession());
     }
+  }
+
+  void showNotifications() {
+    setState(() {
+      index = 4;
+      alertsSection = ManagerAlertsSection.all;
+    });
   }
 
   @override
@@ -229,16 +221,19 @@ class _ManagerShellState extends State<ManagerShell>
       ManagerChatPage(repository: repository),
       ManagerProfilePage(
         session: activeSession,
+        repository: repository,
         onOpenNotifications: openNotifications,
         onSignOut: _signOut,
       ),
     ];
 
-    final selectedNavIndex = index <= 3
-        ? index
-        : index == 5
-            ? 4
-            : 5;
+    final selectedNavIndex =
+        switch (index) { 0 => 0, 1 => 1, 2 => 2, 4 => 3, _ => 4 };
+    pages.add(ManagerMorePage(
+        onOpen: (target, section) => setState(() {
+              index = target;
+              alertsSection = section;
+            })));
 
     return PopScope(
       canPop: false,
@@ -278,44 +273,25 @@ class _ManagerShellState extends State<ManagerShell>
           child: SafeArea(child: pages[index]),
         ),
         bottomNavigationBar: NavigationBar(
-          height: 64,
+          height: 76,
           selectedIndex: selectedNavIndex,
           onDestinationSelected: (value) => setState(() {
-            index = value <= 3
-                ? value
-                : value == 4
-                    ? 5
-                    : 6;
-            if (value == 2) {
-              vehicleFilter = ManagerVehicleFilter.assigned;
-            }
+            index = [0, 1, 2, 4, 7][value];
+            if (value == 2) vehicleFilter = ManagerVehicleFilter.all;
+            if (value == 3) alertsSection = ManagerAlertsSection.incidents;
             _lastBackPressedAt = null;
           }),
           destinations: const [
             NavigationDestination(
-              icon: Icon(Icons.dashboard_outlined),
-              label: 'Главная',
-            ),
+                icon: Icon(Icons.home_outlined), label: 'Главная'),
             NavigationDestination(
-              icon: Icon(Icons.groups_outlined),
-              label: 'Водители',
-            ),
+                icon: Icon(Icons.people_outline), label: 'Водители'),
             NavigationDestination(
-              icon: Icon(Icons.directions_car_outlined),
-              label: 'Авто',
-            ),
+                icon: Icon(Icons.directions_car_outlined), label: 'Авто'),
             NavigationDestination(
-              icon: Icon(Icons.verified_user_outlined),
-              label: 'ТО',
-            ),
+                icon: Icon(Icons.build_outlined), label: 'Инциденты'),
             NavigationDestination(
-              icon: Icon(Icons.chat_bubble_outline),
-              label: 'Чат',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.person_outline),
-              label: 'Профиль',
-            ),
+                icon: Icon(Icons.grid_view_outlined), label: 'Ещё'),
           ],
         ),
       ),
@@ -395,6 +371,10 @@ class _ManagerShellState extends State<ManagerShell>
       if (!mounted) {
         return;
       }
+      if (repository.currentSession?.refreshToken != activeSession.refreshToken) {
+        if (repository.currentSession == null) await removeStorageValue(_managerSessionStorageKey);
+        return;
+      }
       setState(() {
         session = activeSession;
         index = 0;
@@ -408,16 +388,7 @@ class _ManagerShellState extends State<ManagerShell>
   Future<void> _refreshStoredSession() async {
     try {
       final refreshedSession = await repository.refreshSession();
-      await writeStorageValue(
-        _managerSessionStorageKey,
-        _encodeManagerStoredSession(refreshedSession),
-      );
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        session = refreshedSession;
-      });
+      if (!mounted || repository.currentSession?.refreshToken != refreshedSession.refreshToken) return;
       unawaited(_registerPushToken());
     } catch (_) {
       if (!mounted) {
@@ -519,7 +490,7 @@ void _showIdleVehiclesSheet(
             ),
             child: ListView(
               controller: controller,
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(16),
               children: [
                 const _SectionTitle('Машины в простое'),
                 const SizedBox(height: 6),
@@ -577,7 +548,7 @@ void _showManagersSheet(
             ),
             child: ListView(
               controller: controller,
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(16),
               children: [
                 const _SectionTitle('Бригадиры'),
                 const SizedBox(height: 6),
@@ -621,7 +592,7 @@ void _showManagersSheet(
   );
 }
 
-class ManagerDashboardPage extends StatelessWidget {
+class ManagerDashboardPage extends StatefulWidget {
   const ManagerDashboardPage({
     super.key,
     required this.repository,
@@ -642,122 +613,384 @@ class ManagerDashboardPage extends StatelessWidget {
   final VoidCallback onOpenInsuranceTo;
 
   @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<ManagerSummaryDto>(
-      future: repository.loadSummary(),
-      builder: (context, snapshot) {
-        final summary = snapshot.data;
+  State<ManagerDashboardPage> createState() => _ManagerDashboardPageState();
+}
 
-        return ListView(
-          padding: const EdgeInsets.all(8),
-          children: [
-            FutureBuilder<List<ManagerTeamDto>>(
-              future: repository.loadManagers(),
-              builder: (context, managersSnapshot) {
-                final managerName = _currentManagerDisplayName(
-                  session,
-                  managersSnapshot.data ?? const <ManagerTeamDto>[],
-                );
-                return _ManagerHero(
-                  title: managerName,
-                  subtitle: session.managerLevel == 'senior'
-                      ? 'Старший бригадир'
-                      : 'Бригадир',
-                  icon: Icons.dashboard_customize_rounded,
-                );
-              },
-            ),
-            const SizedBox(height: 6),
-            SummaryGrid(
-              repository: repository,
-              summary: summary,
-              onOpenDrivers: onOpenDrivers,
-              onOpenAlerts: onOpenAlerts,
-              onOpenVehicles: onOpenVehicles,
-              onOpenInsuranceTo: onOpenInsuranceTo,
-            ),
-            const SizedBox(height: 6),
-            FutureBuilder<List<ManagerIdleVehicleDto>>(
-              future: repository.loadIdleVehicles(),
-              builder: (context, snapshot) {
-                final idleVehicles =
-                    snapshot.data ?? const <ManagerIdleVehicleDto>[];
-                return GestureDetector(
-                  onTap: () => _showIdleVehiclesSheet(context, idleVehicles),
-                  child: ManagerInfoCard(
-                    title: 'Машины в простое',
-                    lines: [
-                      '${idleVehicles.length} авто без активной выдачи',
-                      'В офисе: ${_countIdleVehicles(idleVehicles, 'office')}',
-                      'ДТП: ${_countIdleVehicles(idleVehicles, 'accident')} · СТО: ${_countIdleVehicles(idleVehicles, 'service')}',
-                      'Страховка/GPS: ${_countIdleVehicles(idleVehicles, 'insurance_gps')} · Штрафстоянка: ${_countIdleVehicles(idleVehicles, 'impound')}',
-                    ],
-                    icon: Icons.local_parking_rounded,
-                  ),
-                );
-              },
-            ),
-            const SizedBox(height: 6),
-            FutureBuilder<List<ManagerTeamDto>>(
-              future: repository.loadManagers(),
-              builder: (context, snapshot) {
-                final managers = snapshot.data ?? const <ManagerTeamDto>[];
-                return GestureDetector(
-                  onTap: () => _showManagersSheet(
-                      context, managers, onOpenManagerDrivers),
-                  child: ManagerInfoCard(
-                    title: 'Бригадиры',
-                    lines: [
-                      '${managers.length} бригадиров в доступе',
-                      'Водителей: ${managers.fold<int>(0, (sum, item) => sum + item.driversTotal)}',
-                      'Проблемных: ${managers.fold<int>(0, (sum, item) => sum + item.problemDrivers)}',
-                      'Машин: ${managers.fold<int>(0, (sum, item) => sum + item.carsTotal)}',
-                      'В простое: ${managers.fold<int>(0, (sum, item) => sum + item.idleCarsTotal)}',
-                    ],
-                    icon: Icons.supervisor_account_outlined,
-                  ),
-                );
-              },
-            ),
-            const SizedBox(height: 6),
-            const _SectionTitle('Быстрые действия'),
-            const SizedBox(height: 6),
-            FutureBuilder<List<ManagerQuickActionDto>>(
-              future: repository.loadQuickActions(),
-              builder: (context, snapshot) {
-                final items = snapshot.data ?? const [];
-                return Column(
-                  children: items
-                      .map(
-                        (item) => Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: GestureDetector(
-                            onTap: () async {
-                              final messenger = ScaffoldMessenger.of(context);
-                              await repository.executeQuickAction(item.id);
-                              messenger.showSnackBar(
-                                const SnackBar(
-                                  content: Text('Действие выполнено'),
-                                ),
-                              );
-                            },
-                            child: ManagerInfoCard(
-                              title: item.label,
-                              lines: [item.target],
-                              icon: Icons.flash_on_rounded,
-                            ),
-                          ),
-                        ),
-                      )
-                      .toList(),
-                );
-              },
-            ),
-          ],
-        );
-      },
-    );
+class _ManagerDashboardPageState extends State<ManagerDashboardPage> {
+  late Future<ManagerSummaryDto> _summaryFuture;
+  Future<List<ManagerTeamDto>>? _managersFuture;
+  Future<List<ManagerVehicleDto>>? _vehiclesFuture;
+  ManagerRepository get repository => widget.repository;
+  @override
+  void initState() {
+    super.initState();
+    _reload();
   }
+
+  void _reload() {
+    _summaryFuture = repository.loadSummary();
+    _managersFuture = null;
+    _vehiclesFuture = null;
+  }
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<ManagerSummaryDto>(
+      future: _summaryFuture,
+      builder: (context, s) {
+        if (s.connectionState != ConnectionState.done)
+          return const Center(child: CircularProgressIndicator());
+        if (s.hasError)
+          return _ManagerLoadError(
+              error: s.error, onRetry: () => setState(_reload));
+        final data = s.data!;
+        _managersFuture ??= repository.loadManagers();
+        _vehiclesFuture ??= repository.loadVehicles();
+        return RefreshIndicator(
+            onRefresh: () async {
+              repository.invalidate();
+              setState(_reload);
+              await _summaryFuture;
+            },
+            child: ListView(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
+                children: [
+                  Row(children: [
+                    Image.asset('assets/gopark-logo.png',
+                        width: 100,
+                        height: 38,
+                        fit: BoxFit.contain,
+                        semanticLabel: 'GoPark'),
+                    const Spacer(),
+                    IconButton.filledTonal(
+                        tooltip: 'Уведомления',
+                        onPressed: () =>
+                            widget.onOpenAlerts(ManagerAlertsSection.all),
+                        icon: const Icon(Icons.notifications_none_rounded))
+                  ]),
+                  const SizedBox(height: 24),
+                  FutureBuilder<List<ManagerTeamDto>>(
+                      future: _managersFuture,
+                      builder: (c, m) => Text(
+                          _currentManagerDisplayName(
+                              widget.session, m.data ?? const []),
+                          style: const TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: -.5))),
+                  const SizedBox(height: 7),
+                  Text(
+                      MaterialLocalizations.of(context)
+                          .formatFullDate(DateTime.now()),
+                      style:
+                          const TextStyle(color: _managerMuted, fontSize: 14)),
+                  const SizedBox(height: 22),
+                  Material(
+                      color: ManagerDesign.bright,
+                      borderRadius: BorderRadius.circular(22),
+                      child: InkWell(
+                          onTap: () => widget.onOpenDrivers(
+                              ManagerDriverListFilter.paymentDue),
+                          borderRadius: BorderRadius.circular(22),
+                          child: Padding(
+                              padding: const EdgeInsets.all(20),
+                              child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Wrap(
+                                        spacing: 12,
+                                        runSpacing: 8,
+                                        crossAxisAlignment:
+                                            WrapCrossAlignment.center,
+                                        children: [
+                                          const Text('К оплате сегодня',
+                                              style: TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 16)),
+                                          Text(
+                                              '${data.paymentDueDrivers} водителей',
+                                              style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 13)),
+                                        ]),
+                                    const SizedBox(height: 16),
+                                    Text(
+                                        '${_managerMoney(data.dueTodayAmount)} сом',
+                                        style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 38,
+                                            fontWeight: FontWeight.w700,
+                                            letterSpacing: -1)),
+                                    const SizedBox(height: 16),
+                                    const Divider(color: Colors.white30),
+                                    const SizedBox(height: 8),
+                                    const Row(children: [
+                                      Expanded(
+                                          child: Text('Посмотреть платежи',
+                                              style: TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 14))),
+                                      Icon(Icons.chevron_right,
+                                          color: Colors.white)
+                                    ]),
+                                  ])))),
+                  const SizedBox(height: 14),
+                  FutureBuilder<List<ManagerVehicleDto>>(
+                      future: _vehiclesFuture,
+                      builder: (c, v) {
+                        final cars = v.data;
+                        final repairs = cars == null
+                            ? null
+                            : _filterManagerVehicles(
+                                    cars, ManagerVehicleFilter.repair)
+                                .length;
+                        return LayoutBuilder(builder: (context, box) {
+                          final scale =
+                              MediaQuery.textScalerOf(context).scale(14) / 14;
+                          final columns = scale > 1.5
+                              ? 1
+                              : box.maxWidth < 340
+                                  ? 2
+                                  : 3;
+                          final width =
+                              (box.maxWidth - (columns - 1) * 8) / columns;
+                          return Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                (
+                                  'Водителей',
+                                  '${data.assignedDrivers}',
+                                  Icons.people_outline,
+                                  () => widget.onOpenDrivers(
+                                      ManagerDriverListFilter.all)
+                                ),
+                                (
+                                  'Автомобилей',
+                                  cars == null ? '—' : '${cars.length}',
+                                  Icons.directions_car_outlined,
+                                  () => widget
+                                      .onOpenVehicles(ManagerVehicleFilter.all)
+                                ),
+                                (
+                                  'В ремонте',
+                                  repairs == null ? '—' : '$repairs',
+                                  Icons.build_outlined,
+                                  () => widget.onOpenVehicles(
+                                      ManagerVehicleFilter.repair)
+                                ),
+                              ]
+                                  .map((item) => SizedBox(
+                                      width: width,
+                                      height: 100 * scale,
+                                      child: ManagerMetric(
+                                          title: item.$1,
+                                          value: item.$2,
+                                          icon: item.$3,
+                                          colorA: _managerBlue,
+                                          colorB: _managerBlue,
+                                          onTap: item.$4)))
+                                  .toList());
+                        });
+                      }),
+                  const SizedBox(height: 16),
+                  _ManagerMenuTile(
+                      title: 'Календарь платежей',
+                      subtitle: 'Платежи, статусы и комментарии',
+                      icon: Icons.calendar_month_outlined,
+                      onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                              builder: (_) => ManagerPaymentCalendarPage(
+                                  repository: repository)))),
+                  const _SectionTitle('Требует внимания'),
+                  _ManagerMenuTile(
+                      title: 'Инциденты',
+                      subtitle: 'Открыто: ${data.incidentsOpen}',
+                      icon: Icons.build_outlined,
+                      onTap: () =>
+                          widget.onOpenAlerts(ManagerAlertsSection.incidents)),
+                  const SizedBox(height: 10),
+                  _ManagerMenuTile(
+                      title: 'Запросы водителей',
+                      subtitle:
+                          'Ожидают решения: ${data.pendingStatusRequests}',
+                      icon: Icons.event_available_outlined,
+                      onTap: () =>
+                          widget.onOpenAlerts(ManagerAlertsSection.requests)),
+                  const SizedBox(height: 10),
+                  _ManagerMenuTile(
+                      title: 'Страховка и ТО',
+                      subtitle: 'Документы, сроки и обслуживание',
+                      icon: Icons.verified_user_outlined,
+                      onTap: widget.onOpenInsuranceTo),
+                  const SizedBox(height: 10),
+                  FutureBuilder<List<ManagerIdleVehicleDto>>(
+                      future: repository.loadIdleVehicles(),
+                      builder: (c, idle) => _ManagerMenuTile(
+                          title: 'Машины в простое',
+                          subtitle: idle.hasData
+                              ? '${idle.data!.length} авто · офис, ДТП, СТО и штрафстоянка'
+                              : 'Открыть список',
+                          icon: Icons.local_parking_outlined,
+                          onTap: () => _showIdleVehiclesSheet(
+                              context, idle.data ?? const []))),
+                  ...[
+                    const _SectionTitle('Команда'),
+                    FutureBuilder<List<ManagerTeamDto>>(
+                        future: _managersFuture,
+                        builder: (c, m) => _ManagerMenuTile(
+                            title: 'Бригадиры',
+                            subtitle: m.hasData
+                                ? '${m.data!.length} в вашей команде'
+                                : 'Открыть список',
+                            icon: Icons.groups_outlined,
+                            onTap: () => _showManagersSheet(
+                                context,
+                                m.data ?? const [],
+                                widget.onOpenManagerDrivers)))
+                  ],
+                  FutureBuilder<List<ManagerQuickActionDto>>(
+                      future: repository.loadQuickActions(),
+                      builder: (c, q) => Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (q.data?.isNotEmpty == true)
+                                  const _SectionTitle('Быстрые действия'),
+                                ...?q.data?.map((item) => Padding(
+                                    padding: const EdgeInsets.only(top: 8),
+                                    child: _ManagerMenuTile(
+                                        title: item.label,
+                                        subtitle: item.target,
+                                        icon: Icons.flash_on_outlined,
+                                        onTap: () async {
+                                          try {
+                                            await repository
+                                                .executeQuickAction(item.id);
+                                            if (context.mounted)
+                                              ScaffoldMessenger.of(context)
+                                                  .showSnackBar(const SnackBar(
+                                                      content: Text(
+                                                          'Действие выполнено')));
+                                          } catch (e) {
+                                            if (context.mounted)
+                                              ScaffoldMessenger.of(context)
+                                                  .showSnackBar(SnackBar(
+                                                      content: Text(
+                                                          _managerUserError(
+                                                              e))));
+                                          }
+                                        }))),
+                              ])),
+                ]));
+      });
+}
+
+String _managerMoney(num value) {
+  final parts = value.toStringAsFixed(value % 1 == 0 ? 0 : 2).split('.');
+  final integer = parts.first
+      .replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+(?!\d))'), (m) => '${m[1]} ');
+  return parts.length == 1 ? integer : '$integer,${parts[1]}';
+}
+
+class _ManagerMenuTile extends StatelessWidget {
+  const _ManagerMenuTile(
+      {required this.title,
+      required this.subtitle,
+      required this.icon,
+      required this.onTap});
+  final String title, subtitle;
+  final IconData icon;
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) => Material(
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(15),
+          side: const BorderSide(color: ManagerDesign.border)),
+      child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(15),
+          child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(children: [
+                Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                        color: ManagerDesign.soft,
+                        borderRadius: BorderRadius.circular(12)),
+                    child: Icon(icon, color: _managerBlue, size: 22)),
+                const SizedBox(width: 12),
+                Expanded(
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                      Text(title,
+                          style: const TextStyle(
+                              fontSize: 15, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 5),
+                      Text(subtitle,
+                          style: const TextStyle(
+                              fontSize: 13, color: _managerMuted)),
+                    ])),
+                const SizedBox(width: 8),
+                const Icon(Icons.chevron_right, size: 18, color: _managerMuted),
+              ]))));
+}
+
+class ManagerMorePage extends StatelessWidget {
+  const ManagerMorePage({super.key, required this.onOpen});
+  final void Function(int, ManagerAlertsSection) onOpen;
+  @override
+  Widget build(BuildContext context) =>
+      ListView(padding: const EdgeInsets.all(20), children: [
+        const _ManagerHero(
+            title: 'Ещё',
+            subtitle: 'Рабочие разделы',
+            icon: Icons.grid_view_outlined),
+        ...[
+          (
+            'Страховка и ТО',
+            'Документы, сроки и обслуживание',
+            Icons.verified_user_outlined,
+            3,
+            ManagerAlertsSection.all
+          ),
+          (
+            'Чаты',
+            'Связь с водителями',
+            Icons.chat_bubble_outline,
+            5,
+            ManagerAlertsSection.all
+          ),
+          (
+            'Запросы водителей',
+            'Выходные и изменения статусов',
+            Icons.calendar_today_outlined,
+            4,
+            ManagerAlertsSection.requests
+          ),
+          (
+            'Уведомления',
+            'События по вашим автомобилям',
+            Icons.notifications_none,
+            4,
+            ManagerAlertsSection.all
+          ),
+          (
+            'Мой профиль',
+            'Настройки аккаунта и выход',
+            Icons.person_outline,
+            6,
+            ManagerAlertsSection.all
+          ),
+        ].map((x) => Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: _ManagerMenuTile(
+                title: x.$1,
+                subtitle: x.$2,
+                icon: x.$3,
+                onTap: () => onOpen(x.$4, x.$5)))),
+      ]);
 }
 
 class SummaryGrid extends StatelessWidget {
@@ -780,11 +1013,12 @@ class SummaryGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GridView.count(
+    return _ManagerMetricGrid(
       crossAxisCount: 2,
       crossAxisSpacing: 6,
       mainAxisSpacing: 6,
-      childAspectRatio: 3.15,
+      childAspectRatio: 1.2 /
+          (MediaQuery.textScalerOf(context).scale(14) / 14).clamp(1.0, 3.0),
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       children: [
@@ -910,7 +1144,7 @@ class _ManagerInsuranceToPageState extends State<ManagerInsuranceToPage> {
         final mileageCount = allRows.where((item) => item.mileage <= 0).length;
 
         return ListView(
-          padding: const EdgeInsets.all(8),
+          padding: const EdgeInsets.all(20),
           children: [
             const _ManagerHero(
               title: 'Страховка и техосмотр',
@@ -918,11 +1152,13 @@ class _ManagerInsuranceToPageState extends State<ManagerInsuranceToPage> {
               icon: Icons.verified_user_rounded,
             ),
             const SizedBox(height: 6),
-            GridView.count(
+            _ManagerMetricGrid(
               crossAxisCount: 2,
               crossAxisSpacing: 6,
               mainAxisSpacing: 6,
-              childAspectRatio: 3.15,
+              childAspectRatio: 1.2 /
+                  (MediaQuery.textScalerOf(context).scale(14) / 14)
+                      .clamp(1.0, 3.0),
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               children: [
@@ -1077,6 +1313,8 @@ class _ManagerInsuranceVehicleCard extends StatelessWidget {
       title: vehicle.plateNumber,
       icon: Icons.directions_car_filled_rounded,
       lines: [
+        if (vehicle.incidentComment?.isNotEmpty == true)
+          'Комментарий бригадира: ${vehicle.incidentComment}',
         '${vehicle.make} ${vehicle.model}'.trim().isEmpty
             ? 'Марка и модель не указаны'
             : '${vehicle.make} ${vehicle.model}'.trim(),
@@ -1097,8 +1335,12 @@ class ManagerVehiclesPage extends StatefulWidget {
     required this.repository,
     required this.initialFilter,
     required this.onFilterChanged,
+    this.selectedManagerId,
+    this.selectedManagerName,
   });
 
+  final String? selectedManagerId;
+  final String? selectedManagerName;
   final ManagerRepository repository;
   final ManagerVehicleFilter initialFilter;
   final ValueChanged<ManagerVehicleFilter> onFilterChanged;
@@ -1110,6 +1352,11 @@ class ManagerVehiclesPage extends StatefulWidget {
 class _ManagerVehiclesPageState extends State<ManagerVehiclesPage> {
   final _searchController = TextEditingController();
   String _query = '';
+  late ManagerVehicleFilter _filter;
+  @override
+  void initState() { super.initState(); _filter = widget.initialFilter; }
+  @override
+  void didUpdateWidget(covariant ManagerVehiclesPage oldWidget) { super.didUpdateWidget(oldWidget); if (oldWidget.initialFilter != widget.initialFilter) _filter = widget.initialFilter; }
 
   @override
   void dispose() {
@@ -1124,18 +1371,18 @@ class _ManagerVehiclesPageState extends State<ManagerVehiclesPage> {
       builder: (context, snapshot) {
         final vehicles = _searchManagerVehicles(
           _filterManagerVehicles(
-            snapshot.data ?? const [],
-            widget.initialFilter,
+            (snapshot.data ?? const <ManagerVehicleDto>[]).where((car) => widget.selectedManagerId == null || car.managerId == widget.selectedManagerId).toList(),
+            _filter,
           ),
           _query,
         );
 
         return ListView(
-          padding: const EdgeInsets.all(8),
+          padding: const EdgeInsets.all(20),
           children: [
-            const _ManagerHero(
-              title: 'Автомобили',
-              subtitle: 'Все машины компании',
+            _ManagerHero(
+              title: widget.selectedManagerName == null ? 'Автомобили' : 'Автомобили бригадира',
+              subtitle: widget.selectedManagerName ?? 'Все машины компании',
               icon: Icons.directions_car_rounded,
             ),
             const SizedBox(height: 6),
@@ -1155,8 +1402,8 @@ class _ManagerVehiclesPageState extends State<ManagerVehiclesPage> {
                   .map(
                     (filter) => _ManagerFilterChip(
                       label: _managerVehicleFilterLabel(filter),
-                      selected: widget.initialFilter == filter,
-                      onTap: () => widget.onFilterChanged(filter),
+                      selected: _filter == filter,
+                      onTap: () { setState(() => _filter = filter); widget.onFilterChanged(filter); },
                     ),
                   )
                   .toList(),
@@ -1190,12 +1437,14 @@ class _ManagerVehiclesPageState extends State<ManagerVehiclesPage> {
     );
   }
 
-  Future<void> _openManagerVehicleCard(
-    BuildContext context,
-    String vehicleId,
-  ) async {
-    final detail = await widget.repository.loadVehicleDetail(vehicleId);
-    final incidents = await widget.repository.loadIncidents();
+  Future<void> _openManagerVehicleCard(BuildContext context, String vehicleId) => _showManagerVehicleCard(context, widget.repository, vehicleId, onChanged: () { if (mounted) setState(() {}); });
+
+}
+
+Future<void> _showManagerVehicleCard(BuildContext context, ManagerRepository repository, String vehicleId, {VoidCallback? onChanged}) async {
+  try {
+    final detail = await repository.loadVehicleDetail(vehicleId);
+    final incidents = await repository.loadIncidents();
     if (!context.mounted || detail == null) {
       return;
     }
@@ -1206,7 +1455,7 @@ class _ManagerVehiclesPageState extends State<ManagerVehiclesPage> {
               !['resolved', 'closed', 'archived'].contains(item.status),
         )
         .toList();
-    showModalBottomSheet<void>(
+    await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -1221,7 +1470,7 @@ class _ManagerVehiclesPageState extends State<ManagerVehiclesPage> {
           ),
           child: ListView(
             controller: controller,
-            padding: const EdgeInsets.all(8),
+            padding: const EdgeInsets.all(16),
             children: [
               _SectionTitle(detail.plateNumber),
               const SizedBox(height: 6),
@@ -1238,6 +1487,15 @@ class _ManagerVehiclesPageState extends State<ManagerVehiclesPage> {
                 icon: Icons.directions_car_filled_rounded,
               ),
               const SizedBox(height: 6),
+              if (!['sold', 'written_off'].contains(detail.status))
+                ManagerVehicleIncidentActions(
+                    repository: repository,
+                    vehicleId: detail.id,
+                    onSaved: () {
+                      Navigator.pop(context);
+                      onChanged?.call();
+                    }),
+              const SizedBox(height: 12),
               ManagerInfoCard(
                 title: 'Открытые инциденты',
                 lines: openIncidents.isEmpty
@@ -1268,6 +1526,8 @@ class _ManagerVehiclesPageState extends State<ManagerVehiclesPage> {
         ),
       ),
     );
+  } catch (error) {
+    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Не удалось открыть автомобиль: ${_managerUserError(error)}')));
   }
 }
 
@@ -1283,99 +1543,79 @@ class _ManagerVehicleCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final model = '${vehicle.make} ${vehicle.model}'.trim();
+    final repair = ['maintenance', 'repair'].contains(vehicle.status);
     return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
-        child: Ink(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.95),
-            borderRadius: BorderRadius.circular(10),
-            boxShadow: [
-              BoxShadow(
-                color: _managerText.withValues(alpha: 0.04),
-                blurRadius: 8,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 30,
-                height: 30,
-                decoration: BoxDecoration(
-                  color: _managerBlue.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                alignment: Alignment.center,
-                child: Padding(
-                  padding: const EdgeInsets.all(4),
-                  child: Image.asset('assets/gopark-logo.png'),
-                ),
-              ),
-              const SizedBox(width: 7),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      vehicle.plateNumber,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      model.isEmpty ? vehicle.vin : '$model · ${vehicle.vin}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: _managerMuted,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      [
-                        'Бригадир: ${vehicle.managerName?.trim().isNotEmpty == true ? vehicle.managerName : 'не назначен'}',
-                        'с ${_managerDateLabel(vehicle.statusSinceDate)}',
-                      ].join(' · '),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style:
-                          const TextStyle(color: _managerMuted, fontSize: 10),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 6),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  _ManagerBadge(
-                    label: _managerStatusLabel(vehicle.status),
-                    color: _managerVehicleStatusColor(vehicle.status),
-                  ),
-                  const SizedBox(height: 3),
-                  Icon(
-                    Icons.arrow_forward_rounded,
-                    color: _managerMuted.withValues(alpha: 0.7),
-                    size: 14,
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+        color: Colors.white,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(17),
+            side: const BorderSide(color: ManagerDesign.border)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+            onTap: onTap,
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              if (repair)
+                Container(
+                    color: const Color(0xFFEDF1F4),
+                    padding: const EdgeInsets.all(18),
+                    child: Row(children: [
+                      const Icon(Icons.directions_car_outlined,
+                          size: 48, color: Color(0xFF8398A5)),
+                      const SizedBox(width: 14),
+                      Expanded(
+                          child: Text(model,
+                              style: const TextStyle(
+                                  fontSize: 14, color: _managerMuted))),
+                      _ManagerBadge(
+                          label: _managerStatusLabel(vehicle.status),
+                          color: _managerOrange)
+                    ])),
+              Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(children: [
+                          Expanded(
+                              child: Text(vehicle.plateNumber,
+                                  style: const TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w600))),
+                          if (!repair)
+                            _ManagerBadge(
+                                label: _managerStatusLabel(vehicle.status),
+                                color: _managerBlue),
+                          const SizedBox(width: 6),
+                          const Icon(Icons.chevron_right,
+                              color: _managerMuted, size: 18)
+                        ]),
+                        const SizedBox(height: 7),
+                        Text(
+                            '$model · ${_managerCurrentVehicleDriver(vehicle)}',
+                            style: const TextStyle(
+                                fontSize: 14, color: _managerMuted)),
+                        if (vehicle.incidentComment?.trim().isNotEmpty ==
+                            true) ...[
+                          const SizedBox(height: 14),
+                          Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                  color: const Color(0xFFF8F4EE),
+                                  borderRadius: BorderRadius.circular(10)),
+                              child: Text(vehicle.incidentComment!,
+                                  style: const TextStyle(
+                                      fontSize: 14,
+                                      color: Color(0xFF897151),
+                                      height: 1.5)))
+                        ],
+                        const SizedBox(height: 10),
+                        Text(
+                            'Бригадир: ${vehicle.managerName ?? '—'} · с ${_managerDateLabel(vehicle.statusSinceDate)}',
+                            style: const TextStyle(
+                                fontSize: 12, color: _managerMuted)),
+                      ])),
+            ])));
   }
 }
 
@@ -1608,26 +1848,6 @@ String _managerCurrentVehicleDriver(ManagerVehicleDto vehicle) {
   return 'назначен';
 }
 
-Color _managerVehicleStatusColor(String status) {
-  switch (status) {
-    case 'assigned':
-    case 'active_installment':
-      return _managerGreen;
-    case 'accident':
-    case 'impound':
-    case 'written_off':
-      return _managerOrange;
-    case 'maintenance':
-    case 'repair':
-    case 'idle':
-      return _managerPurple;
-    case 'office':
-    case 'free':
-    default:
-      return _managerBlue;
-  }
-}
-
 class ManagerDriversPage extends StatefulWidget {
   const ManagerDriversPage({
     super.key,
@@ -1664,19 +1884,22 @@ class _ManagerDriversPageState extends State<ManagerDriversPage> {
     String action,
     String successText,
   ) async {
-    final details = action == 'inspection' || action == 'impound'
-        ? await _showManagerIncidentDetailsDialog(
-            context,
-            title: action == 'impound'
-                ? 'Поставить на штрафстоянку'
-                : 'Осмотр водителя',
-            noteLabel: action == 'impound'
-                ? 'Причина / комментарий по штрафстоянке'
-                : 'Комментарий к осмотру',
-          )
-        : null;
-    if ((action == 'inspection' || action == 'impound') && details == null) {
-      return;
+    Map<String, dynamic>? accidentDetails;
+    Map<String, dynamic>? serviceDispatch;
+    _ManagerIncidentDetails? details;
+    if (action == 'accident') {
+      accidentDetails = await showAccidentForm(context);
+      if (accidentDetails == null) return;
+    } else if (action == 'repair') {
+      serviceDispatch = await showServiceDispatchForm(context);
+      if (serviceDispatch == null) return;
+      accidentDetails =
+          serviceDispatch['accidentDetails'] as Map<String, dynamic>?;
+    } else if (action == 'inspection' || action == 'impound') {
+      details = await _showManagerIncidentDetailsDialog(context,
+          title: action == 'impound' ? 'Штрафстоянка' : 'Осмотр',
+          noteLabel: 'Причина / комментарий');
+      if (details == null) return;
     }
 
     final actionKey = '${driver.id}:$action';
@@ -1685,7 +1908,10 @@ class _ManagerDriversPageState extends State<ManagerDriversPage> {
       await widget.repository.createDriverIncidentAction(
         driver.id,
         action,
-        note: details?.note,
+        note: serviceDispatch?['note'] as String? ?? details?.note,
+        serviceDetails:
+            serviceDispatch?['serviceDetails'] as Map<String, dynamic>?,
+        accidentDetails: accidentDetails,
       );
       if (!mounted) {
         return;
@@ -1763,8 +1989,15 @@ class _ManagerDriversPageState extends State<ManagerDriversPage> {
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<List<ManagerAssignedDriverDto>>(
-      future: widget.repository.loadDrivers(),
+      future: widget.initialFilter == ManagerDriverListFilter.paymentDue
+          ? widget.repository.loadDriversDueYesterday()
+          : widget.repository.loadDrivers(),
       builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done)
+          return const Center(child: CircularProgressIndicator());
+        if (snapshot.hasError)
+          return _ManagerLoadError(
+              error: snapshot.error, onRetry: () => setState(() {}));
         final items = snapshot.data ?? const [];
         final scopedItems = widget.selectedManagerId == null
             ? items
@@ -1782,7 +2015,7 @@ class _ManagerDriversPageState extends State<ManagerDriversPage> {
         final visibleItems = _searchManagerDrivers(filteredItems, _searchQuery);
 
         return ListView(
-          padding: const EdgeInsets.all(8),
+          padding: const EdgeInsets.all(20),
           children: [
             _ManagerHero(
               title: widget.selectedManagerName == null
@@ -1794,11 +2027,30 @@ class _ManagerDriversPageState extends State<ManagerDriversPage> {
               icon: Icons.groups_rounded,
             ),
             const SizedBox(height: 6),
-            GridView.count(
+            if (widget.selectedManagerId != null)
+              FutureBuilder<List<ManagerVehicleDto>>(
+                future: widget.repository.loadVehicles(),
+                builder: (context, cars) {
+                  if (cars.hasError) return _ManagerLoadError(error: cars.error, onRetry: () => setState(() {}));
+                  if (!cars.hasData) return const LinearProgressIndicator();
+                  final ids = scopedItems.map((d) => d.id).toSet();
+                  final owned = cars.data!.where((car) => car.managerId == widget.selectedManagerId || (car.managerId == null && ids.contains(car.assignedDriverId))).toList();
+                  return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    _SectionTitle('Автомобили бригадира (${owned.length})'),
+                    if (owned.isEmpty) const Text('Закреплённых автомобилей нет'),
+                    if (owned.length > 5) TextButton(onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => Scaffold(appBar: AppBar(title: Text(widget.selectedManagerName ?? 'Бригадир')), body: ManagerVehiclesPage(repository: widget.repository, initialFilter: ManagerVehicleFilter.all, selectedManagerId: widget.selectedManagerId, selectedManagerName: widget.selectedManagerName, onFilterChanged: (_) {})))), child: Text('Все автомобили (${owned.length})')),
+
+                    ...owned.take(5).map((car) => Padding(padding: const EdgeInsets.only(bottom: 6), child: _ManagerVehicleCard(vehicle: car, onTap: () => _showManagerVehicleCard(context, widget.repository, car.id, onChanged: () { if (mounted) setState(() {}); })))),
+                  ]);
+                },
+              ),
+            _ManagerMetricGrid(
               crossAxisCount: 2,
               crossAxisSpacing: 6,
               mainAxisSpacing: 6,
-              childAspectRatio: 3.15,
+              childAspectRatio: 1.2 /
+                  (MediaQuery.textScalerOf(context).scale(14) / 14)
+                      .clamp(1.0, 3.0),
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               children: [
@@ -1953,8 +2205,8 @@ class _ManagerDriversPageState extends State<ManagerDriversPage> {
               (item) => Padding(
                 padding: const EdgeInsets.only(bottom: 6),
                 child: GestureDetector(
-                  onTap: () {
-                    Navigator.of(context).push(
+                  onTap: () async {
+                    await Navigator.of(context).push(
                       MaterialPageRoute<void>(
                         builder: (_) => ManagerDriverDetailPage(
                           repository: widget.repository,
@@ -1962,9 +2214,17 @@ class _ManagerDriversPageState extends State<ManagerDriversPage> {
                         ),
                       ),
                     );
+                    if (mounted) setState(() {});
                   },
                   child: ManagerDriverCard(
                     driver: item,
+                    repository: widget.repository,
+                    yesterdayOverdue: widget.initialFilter ==
+                            ManagerDriverListFilter.paymentDue
+                        ? item.overduePeriodAmount
+                        : null,
+                    showYesterdayOverdue: widget.initialFilter ==
+                        ManagerDriverListFilter.paymentDue,
                     pendingAction: _pendingDriverAction,
                     onInspection: () => _createDriverIncidentAction(
                       item,
@@ -2151,25 +2411,6 @@ bool _managerHasVehicle(ManagerAssignedDriverDto item) {
   return vehicle.isNotEmpty && vehicle != 'unassigned';
 }
 
-String _managerPaymentDueBadgeLabel(ManagerAssignedDriverDto driver) {
-  if (driver.overdueDebt > 0) {
-    return 'просрочено с ${_managerDateLabel(driver.overdueSinceDate ?? driver.nextPaymentDate)}';
-  }
-
-  final dueDate = _managerDateOnly(driver.nextPaymentDate);
-  final today = _managerDateOnly(DateTime.now().toIso8601String())!;
-  if (driver.nextPaymentAmount > 0 && dueDate != null) {
-    if (dueDate.isAtSameMomentAs(today)) {
-      return 'оплата сегодня ${_managerDateLabel(driver.nextPaymentDate)}';
-    }
-    if (dueDate.isBefore(today)) {
-      return 'оплата просрочена ${_managerDateLabel(driver.nextPaymentDate)}';
-    }
-  }
-
-  return 'след. оплата ${_managerDateLabel(driver.nextPaymentDate)}';
-}
-
 String _managerDriverFilterTitle(ManagerDriverListFilter filter) {
   switch (filter) {
     case ManagerDriverListFilter.paymentDue:
@@ -2248,16 +2489,16 @@ class _ManagerFilterChip extends StatelessWidget {
       label: Text(label),
       onPressed: onTap,
       visualDensity: VisualDensity.compact,
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
-      backgroundColor: selected ? _managerBlue : Colors.white,
+      materialTapTargetSize: MaterialTapTargetSize.padded,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      backgroundColor: selected ? ManagerDesign.soft : Colors.white,
       side: BorderSide(
         color: selected ? _managerBlue : _managerText.withValues(alpha: 0.1),
       ),
       labelStyle: TextStyle(
-        color: selected ? Colors.white : _managerText,
-        fontWeight: FontWeight.w800,
-        fontSize: 10.5,
+        color: selected ? _managerBlue : _managerMuted,
+        fontWeight: FontWeight.w600,
+        fontSize: 12.5,
       ),
     );
   }
@@ -2428,7 +2669,7 @@ class _ManagerAlertsPageState extends State<ManagerAlertsPage> {
               ),
               child: ListView(
                 controller: controller,
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.all(16),
                 children: [
                   const _SectionTitle('Заявка на риск-статус'),
                   const SizedBox(height: 6),
@@ -2511,16 +2752,18 @@ class _ManagerAlertsPageState extends State<ManagerAlertsPage> {
                   builder: (context, incidentsSnapshot) {
                     final incidents = incidentsSnapshot.data ?? const [];
                     final activeIncidents = incidents
-                        .where((item) => !_managerIncidentIsArchived(item.status))
+                        .where(
+                            (item) => !_managerIncidentIsArchived(item.status))
                         .toList();
                     final visibleIncidents = _showIncidentArchive
                         ? incidents
-                            .where((item) => _managerIncidentIsArchived(item.status))
+                            .where((item) =>
+                                _managerIncidentIsArchived(item.status))
                             .toList()
                         : activeIncidents;
 
                     return ListView(
-                      padding: const EdgeInsets.all(8),
+                      padding: const EdgeInsets.all(16),
                       children: [
                         const _ManagerHero(
                           title: 'Уведомления и инциденты',
@@ -2529,11 +2772,13 @@ class _ManagerAlertsPageState extends State<ManagerAlertsPage> {
                           icon: Icons.notifications_active_rounded,
                         ),
                         const SizedBox(height: 6),
-                        GridView.count(
+                        _ManagerMetricGrid(
                           crossAxisCount: 2,
                           crossAxisSpacing: 6,
                           mainAxisSpacing: 6,
-                          childAspectRatio: 3.15,
+                          childAspectRatio: 1.2 /
+                              (MediaQuery.textScalerOf(context).scale(14) / 14)
+                                  .clamp(1.0, 3.0),
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
                           children: [
@@ -2770,8 +3015,8 @@ class _ManagerAlertsPageState extends State<ManagerAlertsPage> {
                           const SizedBox(height: 6),
                           _ManagerIncidentArchiveToggle(
                             showArchive: _showIncidentArchive,
-                            onChanged: (value) => setState(
-                                () => _showIncidentArchive = value),
+                            onChanged: (value) =>
+                                setState(() => _showIncidentArchive = value),
                           ),
                           const SizedBox(height: 6),
                           if (visibleIncidents.isEmpty)
@@ -2787,33 +3032,47 @@ class _ManagerAlertsPageState extends State<ManagerAlertsPage> {
                           ...visibleIncidents.map(
                             (item) => Padding(
                               padding: const EdgeInsets.only(bottom: 6),
-                              child: ManagerSignalCard(
-                                showAllDetails: true,
-                                title: item.driverName?.isNotEmpty == true
-                                    ? item.driverName!
-                                    : item.title,
-                                subtitle: [
-                                  if (item.occurredAt?.isNotEmpty == true)
-                                    item.incidentType == 'repair'
-                                        ? _managerRepairPeriodLabel(
-                                            item.occurredAt, item.periodLabel)
-                                        : 'Дата: ${_managerDateTimeLabel(item.occurredAt)}',
-                                  'Событие: ${_managerIncidentTypeLabel(item.incidentType)}',
-                                  'Приоритет: ${_managerPriorityLabel(item.priority)}',
-                                  'Статус: ${_managerStatusLabel(item.status)}',
-                                  if (item.repairNote?.isNotEmpty == true)
-                                    item.repairNote!,
-                                  if (item.carId != null)
-                                    'Есть привязанное авто',
-                                  ..._managerIncidentHistoryLines(item.statusHistory),
-                                ].join('\n'),
-                                badge: _managerIncidentTypeLabel(
-                                    item.incidentType),
-                                accent: item.priority == 'high'
-                                    ? _managerOrange
-                                    : _managerPurple,
-                                icon: Icons.report_problem_outlined,
-                              ),
+                              child: item.serviceDetails != null
+                                  ? ManagerRepairCard(
+                                      title: item.title,
+                                      stage: item.serviceStage,
+                                      details: item.serviceDetails!,
+                                      accidentDetails: item.accidentDetails,
+                                      history: item.statusHistory,
+                                      note: item.repairNote)
+                                  : ManagerSignalCard(
+                                      showAllDetails: true,
+                                      title: item.driverName?.isNotEmpty == true
+                                          ? item.driverName!
+                                          : item.title,
+                                      subtitle: [
+                                        if (item.occurredAt?.isNotEmpty == true)
+                                          item.incidentType == 'repair'
+                                              ? _managerRepairPeriodLabel(
+                                                  item.occurredAt,
+                                                  item.periodLabel)
+                                              : 'Дата: ${_managerDateTimeLabel(item.occurredAt)}',
+                                        'Событие: ${_managerIncidentTypeLabel(item.incidentType)}',
+                                        'Приоритет: ${_managerPriorityLabel(item.priority)}',
+                                        'Статус: ${_managerStatusLabel(item.status)}',
+                                        if (item.repairNote?.isNotEmpty == true)
+                                          item.repairNote!,
+                                        if (item.carId != null)
+                                          'Есть привязанное авто',
+                                        ...repairDetailLines(
+                                            item.serviceDetails),
+                                        ...accidentDetailLines(
+                                            item.accidentDetails),
+                                        ..._managerIncidentHistoryLines(
+                                            item.statusHistory),
+                                      ].join('\n'),
+                                      badge: _managerIncidentTypeLabel(
+                                          item.incidentType),
+                                      accent: item.priority == 'high'
+                                          ? _managerOrange
+                                          : _managerPurple,
+                                      icon: Icons.report_problem_outlined,
+                                    ),
                             ),
                           ),
                         ],
@@ -2848,7 +3107,7 @@ class ManagerDriverDetailPage extends StatefulWidget {
 class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
   late Future<ManagerDriverDetailDto?> _detailFuture;
   String? _pendingAction;
-  int _selectedTab = 0;
+  int _selectedTab = 1;
   bool _showIncidentArchive = false;
 
   @override
@@ -2861,29 +3120,74 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
     _detailFuture = widget.repository.loadDriverDetail(widget.driverId);
   }
 
+  Future<void> _showOverdueCalendar(ManagerDriverDetailDto data) async {
+    final today = DateUtils.dateOnly(DateTime.now());
+    final since = DateTime.tryParse(data.overdueSinceDate ?? '');
+    final earliest = DateTime(2000);
+    final initialStart =
+        since != null && !since.isAfter(today) && !since.isBefore(earliest)
+            ? since
+            : today;
+    final period = await showDateRangePicker(
+      context: context,
+      firstDate: earliest,
+      lastDate: today,
+      initialDateRange: DateTimeRange(start: initialStart, end: today),
+      helpText: 'Просрочка',
+      saveText: 'Готово',
+      builder: (context, child) => Theme(
+        data: Theme.of(context).copyWith(
+            datePickerTheme: Theme.of(context).datePickerTheme.copyWith(
+                  rangePickerHeaderHeadlineStyle:
+                      const TextStyle(fontSize: 20, letterSpacing: -2.4),
+                )),
+        child: child!,
+      ),
+    );
+    if (period == null || !mounted) return;
+    setState(() => _pendingAction = 'debt-period');
+    try {
+      final amount = await widget.repository
+          .loadDriverOverduePeriod(widget.driverId, period.start, period.end);
+      if (!mounted) return;
+      await showDialog<void>(
+          context: context,
+          builder: (context) => AlertDialog(
+                title: const Text('Просрочка за период'),
+                content: Text(
+                    '${_managerDateLabel(period.start.toIso8601String())} — ${_managerDateLabel(period.end.toIso8601String())}\n$amount сом\nНепогашенные платежи периода, просроченные на сегодня.'),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('Закрыть'))
+                ],
+              ));
+    } catch (error) {
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$error')));
+    } finally {
+      if (mounted) setState(() => _pendingAction = null);
+    }
+  }
+
   Future<void> _createIncidentAction(String action, String successText) async {
-    final details =
-        action == 'inspection' || action == 'accident' || action == 'impound'
-            ? await _showManagerIncidentDetailsDialog(
-                context,
-                title: action == 'accident'
-                    ? 'Фиксация ДТП'
-                    : action == 'impound'
-                        ? 'Поставить на штрафстоянку'
-                        : 'Осмотр водителя',
-                noteLabel: action == 'accident'
-                    ? 'Комментарий по ДТП'
-                    : action == 'impound'
-                        ? 'Причина / комментарий по штрафстоянке'
-                        : 'Комментарий к осмотру',
-                requirePhoto: action == 'accident',
-              )
-            : null;
-    if ((action == 'inspection' ||
-            action == 'accident' ||
-            action == 'impound') &&
-        details == null) {
-      return;
+    Map<String, dynamic>? accidentDetails;
+    Map<String, dynamic>? serviceDispatch;
+    _ManagerIncidentDetails? details;
+    if (action == 'accident') {
+      accidentDetails = await showAccidentForm(context);
+      if (accidentDetails == null) return;
+    } else if (action == 'repair') {
+      serviceDispatch = await showServiceDispatchForm(context);
+      if (serviceDispatch == null) return;
+      accidentDetails =
+          serviceDispatch['accidentDetails'] as Map<String, dynamic>?;
+    } else if (action == 'inspection' || action == 'impound') {
+      details = await _showManagerIncidentDetailsDialog(context,
+          title: action == 'impound' ? 'Штрафстоянка' : 'Осмотр',
+          noteLabel: 'Причина / комментарий');
+      if (details == null) return;
     }
 
     setState(() => _pendingAction = action);
@@ -2891,7 +3195,10 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
       await widget.repository.createDriverIncidentAction(
         widget.driverId,
         action,
-        note: details?.note,
+        note: serviceDispatch?['note'] as String? ?? details?.note,
+        serviceDetails:
+            serviceDispatch?['serviceDetails'] as Map<String, dynamic>?,
+        accidentDetails: accidentDetails,
         accidentPhotoUrl: details?.photoDataUrl,
       );
       if (!mounted) {
@@ -3118,21 +3425,20 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
         child: FutureBuilder<ManagerDriverDetailDto?>(
           future: _detailFuture,
           builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done)
+              return const Center(child: CircularProgressIndicator());
+            if (snapshot.hasError)
+              return _ManagerLoadError(
+                  error: snapshot.error, onRetry: () => setState(_reload));
             final data = snapshot.data;
             if (data == null) {
               return const Center(child: Text('Данные по водителю не найдены'));
             }
 
             return Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [_managerBg, Color(0xFFE9F2FF)],
-                ),
-              ),
+              color: _managerBg,
               child: ListView(
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.all(16),
                 children: [
                   ManagerInfoCard(
                     title: data.fullName,
@@ -3147,11 +3453,13 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
                     icon: Icons.person_outline_rounded,
                   ),
                   const SizedBox(height: 6),
-                  GridView.count(
+                  _ManagerMetricGrid(
                     crossAxisCount: 2,
                     crossAxisSpacing: 6,
                     mainAxisSpacing: 6,
-                    childAspectRatio: 3.15,
+                    childAspectRatio: 1.2 /
+                        (MediaQuery.textScalerOf(context).scale(14) / 14)
+                            .clamp(1.0, 3.0),
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
                     children: [
@@ -3179,7 +3487,7 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
                       ManagerMetric(
                         title: 'Яндекс',
                         value: '${data.yandexBalance} сом',
-                        icon: Icons.savings_outlined,
+                        icon: Icons.currency_exchange_rounded,
                         colorA: _managerBlue,
                         colorB: _managerCyan,
                       ),
@@ -3204,6 +3512,13 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
                       ],
                       icon: Icons.date_range_rounded,
                     ),
+                    TextButton.icon(
+                      onPressed: _pendingAction == null
+                          ? () => _showOverdueCalendar(data)
+                          : null,
+                      icon: const Icon(Icons.calendar_month),
+                      label: const Text('Выбрать период просрочки'),
+                    ),
                     const SizedBox(height: 6),
                   ],
                   _DriverDetailTabs(
@@ -3224,66 +3539,72 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
                       ],
                       icon: Icons.analytics_outlined,
                     ),
+                    ManagerPaymentCalendarPage(
+                        repository: widget.repository,
+                        driverId: widget.driverId,
+                        embedded: true),
                   ] else if (_selectedTab == 1) ...[
                     const _SectionTitle('Действия бригадира'),
                     const SizedBox(height: 6),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: [
-                        FilledButton.icon(
-                          onPressed: _pendingAction == null
-                              ? () => _createIncidentAction(
-                                    'inspection',
-                                    'Осмотр создан',
-                                  )
-                              : null,
-                          icon: const Icon(Icons.fact_check_outlined),
-                          label: const Text('Осмотр',
-                              style: TextStyle(fontSize: 10.5)),
-                        ),
-                        FilledButton.icon(
-                          onPressed: _pendingAction == null
-                              ? () => _createIncidentAction(
-                                    'repair',
-                                    'Водитель поставлен на ремонт',
-                                  )
-                              : null,
-                          icon: const Icon(Icons.build_outlined),
-                          label: const Text('СТО',
-                              style: TextStyle(fontSize: 10.5)),
-                        ),
-                        OutlinedButton.icon(
-                          onPressed: _pendingAction == null
-                              ? () => _createIncidentAction(
-                                    'accident',
-                                    'ДТП зафиксировано',
-                                  )
-                              : null,
-                          icon: const Icon(Icons.car_crash_outlined),
-                          label: const Text('ДТП',
-                              style: TextStyle(fontSize: 10.5)),
-                        ),
-                        FilledButton.icon(
-                          onPressed: _pendingAction == null
-                              ? () => _createIncidentAction(
-                                    'impound',
-                                    'Авто поставлено на штрафстоянку',
-                                  )
-                              : null,
-                          style: FilledButton.styleFrom(
-                            backgroundColor: _managerPurple,
-                            visualDensity: VisualDensity.compact,
-                            padding: const EdgeInsets.symmetric(horizontal: 6),
-                          ),
-                          icon: const Icon(Icons.local_parking_rounded),
-                          label: const Text(
-                            'Штрафстоянка',
-                            style: TextStyle(fontSize: 10.5),
-                          ),
-                        ),
-                      ],
-                    ),
+                    SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          spacing: 6,
+                          children: [
+                            FilledButton.icon(
+                              onPressed: _pendingAction == null
+                                  ? () => _createIncidentAction(
+                                        'inspection',
+                                        'Осмотр создан',
+                                      )
+                                  : null,
+                              icon: const Icon(Icons.fact_check_outlined),
+                              label: const Text('Осмотр',
+                                  style: TextStyle(fontSize: 12.5)),
+                            ),
+                            FilledButton.icon(
+                              onPressed: _pendingAction == null
+                                  ? () => _createIncidentAction(
+                                        'repair',
+                                        'Водитель поставлен на ремонт',
+                                      )
+                                  : null,
+                              icon: const Icon(Icons.build_outlined),
+                              label: const Text('СТО',
+                                  style: TextStyle(fontSize: 12.5)),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: _pendingAction == null
+                                  ? () => _createIncidentAction(
+                                        'accident',
+                                        'ДТП зафиксировано',
+                                      )
+                                  : null,
+                              icon: const Icon(Icons.car_crash_outlined),
+                              label: const Text('ДТП',
+                                  style: TextStyle(fontSize: 12.5)),
+                            ),
+                            FilledButton.icon(
+                              onPressed: _pendingAction == null
+                                  ? () => _createIncidentAction(
+                                        'impound',
+                                        'Авто поставлено на штрафстоянку',
+                                      )
+                                  : null,
+                              style: FilledButton.styleFrom(
+                                backgroundColor: _managerPurple,
+                                visualDensity: VisualDensity.compact,
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 10),
+                              ),
+                              icon: const Icon(Icons.local_parking_rounded),
+                              label: const Text(
+                                'Штрафстоянка',
+                                style: TextStyle(fontSize: 12.5),
+                              ),
+                            ),
+                          ],
+                        )),
                     const SizedBox(height: 6),
                     const _SectionTitle('Риск-статус водителя'),
                     const SizedBox(height: 6),
@@ -3293,6 +3614,10 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
                       actionPrefix: 'risk',
                       onChanged: _updateDriverRiskStatus,
                     ),
+                    ManagerPaymentCalendarPage(
+                        repository: widget.repository,
+                        driverId: widget.driverId,
+                        embedded: true),
                     const SizedBox(height: 6),
                     if (data.contractNumber != null)
                       OutlinedButton.icon(
@@ -3301,7 +3626,7 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
                         icon: const Icon(Icons.link_off_rounded),
                         label: const Text(
                           'Расторгнуть',
-                          style: TextStyle(fontSize: 10.5),
+                          style: TextStyle(fontSize: 12.5),
                         ),
                       ),
                   ] else if (_selectedTab == 2) ...[
@@ -3325,108 +3650,131 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
                         ],
                         icon: Icons.verified_outlined,
                       ),
-                    ...data.openIncidents.where((item) =>
-                        _managerIncidentIsArchived(item.status) ==
-                        _showIncidentArchive).map(
-                      (item) => Padding(
-                        padding: const EdgeInsets.only(bottom: 6),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            ManagerSignalCard(
-                              showAllDetails: true,
-                              title: item.title,
-                              subtitle: [
-                                item.incidentType == 'repair'
-                                    ? _managerRepairPeriodLabel(
-                                        item.occurredAt, item.periodLabel)
-                                    : _managerDateLabel(item.occurredAt),
-                                _managerPriorityLabel(item.priority),
-                                _managerStatusLabel(item.status),
-                                if (item.serviceStage != null)
-                                  _managerServiceStageLabel(item.serviceStage!),
-                                if (item.serviceCaseType != null)
-                                  _managerServiceCaseTypeLabel(
-                                    item.serviceCaseType!,
-                                  ),
-                                ..._managerIncidentHistoryLines(item.statusHistory),
-                              ].join('\n'),
-                              badge: _managerPriorityLabel(item.priority),
-                              accent: item.priority == 'high'
-                                  ? _managerOrange
-                                  : _managerPurple,
-                              icon: Icons.report_problem_outlined,
-                            ),
-                            if (!_managerIncidentIsArchived(item.status)) ...[
-                              const SizedBox(height: 6),
-                              Wrap(
-                                spacing: 6,
-                                runSpacing: 6,
-                                children: [
-                                  OutlinedButton(
-                                    onPressed: _pendingAction == null
-                                        ? () => _updateIncidentAction(
-                                              item,
-                                              'awaiting_repair',
-                                              'Кейс переведен в ожидание ремонта',
-                                            )
-                                        : null,
-                                    child: const Text('Ожидает ремонт'),
-                                  ),
-                                  FilledButton(
-                                    onPressed: _pendingAction == null
-                                        ? () => _updateIncidentAction(
-                                              item,
-                                              'in_repair',
-                                              'Кейс переведен в ремонт',
-                                            )
-                                        : null,
-                                    child: const Text('В ремонте'),
-                                  ),
-                                  OutlinedButton(
-                                    onPressed: _pendingAction == null
-                                        ? () => _updateIncidentAction(
-                                              item,
-                                              'completed',
-                                              item.serviceCaseType == 'inspection'
-                                                  ? 'Осмотр завершен'
-                                                  : 'Ремонт завершен',
-                                            )
-                                        : null,
-                                    child: const Text('Завершить'),
-                                  ),
-                                  if (item.incidentType == 'accident' ||
-                                      item.incidentType == 'repair' ||
-                                      item.serviceCaseType == 'repair')
-                                    OutlinedButton(
-                                      onPressed: _pendingAction == null
-                                          ? () => _updateIncidentAction(
-                                                item,
-                                                'written_off',
-                                                'Заявка на списание отправлена',
-                                              )
-                                          : null,
-                                      child: const Text(
-                                        'Не подлежит восстановлению',
+                    ...data.openIncidents
+                        .where((item) =>
+                            _managerIncidentIsArchived(item.status) ==
+                            _showIncidentArchive)
+                        .map(
+                          (item) => Padding(
+                            padding: const EdgeInsets.only(bottom: 6),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                item.serviceDetails != null
+                                    ? ManagerRepairCard(
+                                        title: item.title,
+                                        stage: item.serviceStage,
+                                        details: item.serviceDetails!,
+                                        accidentDetails: item.accidentDetails,
+                                        history: item.statusHistory,
+                                        note: item.repairNote)
+                                    : ManagerSignalCard(
+                                        showAllDetails: true,
+                                        title: item.title,
+                                        subtitle: [
+                                          item.incidentType == 'repair'
+                                              ? _managerRepairPeriodLabel(
+                                                  item.occurredAt,
+                                                  item.periodLabel)
+                                              : _managerDateLabel(
+                                                  item.occurredAt),
+                                          _managerPriorityLabel(item.priority),
+                                          _managerStatusLabel(item.status),
+                                          if (item.serviceStage != null)
+                                            _managerServiceStageLabel(
+                                                item.serviceStage!),
+                                          if (item.serviceCaseType != null)
+                                            _managerServiceCaseTypeLabel(
+                                              item.serviceCaseType!,
+                                            ),
+                                          ...repairDetailLines(
+                                              item.serviceDetails),
+                                          ...accidentDetailLines(
+                                              item.accidentDetails),
+                                          ..._managerIncidentHistoryLines(
+                                              item.statusHistory),
+                                        ].join('\n'),
+                                        badge: _managerPriorityLabel(
+                                            item.priority),
+                                        accent: item.priority == 'high'
+                                            ? _managerOrange
+                                            : _managerPurple,
+                                        icon: Icons.report_problem_outlined,
                                       ),
-                                    ),
-                                  TextButton(
-                                    onPressed: _pendingAction == null
-                                        ? () => _updateIncidentAction(
-                                              item,
-                                              'closed',
-                                              'Кейс закрыт',
-                                            )
-                                        : null,
-                                    child: const Text('Закрыть'),
+                                if (!_managerIncidentIsArchived(
+                                    item.status)) ...[
+                                  const SizedBox(height: 6),
+                                  Wrap(
+                                    spacing: 6,
+                                    runSpacing: 6,
+                                    children: [
+                                      if (item.serviceDetails == null &&
+                                          !const {'repair', 'accident'}
+                                              .contains(item.incidentType))
+                                        FilledButton(
+                                          onPressed: _pendingAction == null
+                                              ? () => _updateIncidentAction(
+                                                    item,
+                                                    'in_repair',
+                                                    'Кейс переведен в ремонт',
+                                                  )
+                                              : null,
+                                          child: const Text('В ремонте'),
+                                        ),
+                                      if (item.serviceDetails == null &&
+                                          !const {'repair', 'accident'}
+                                              .contains(item.incidentType))
+                                        OutlinedButton(
+                                          onPressed: _pendingAction == null
+                                              ? () => _updateIncidentAction(
+                                                    item,
+                                                    'completed',
+                                                    item.serviceCaseType ==
+                                                            'inspection'
+                                                        ? 'Осмотр завершен'
+                                                        : 'Ремонт завершен',
+                                                  )
+                                              : null,
+                                          child: Text(item.incidentType ==
+                                                  'inspection'
+                                              ? 'Завершить осмотр'
+                                              : 'Завершить ремонт / на линию'),
+                                        ),
+                                      if (item.incidentType == 'accident' ||
+                                          item.incidentType == 'repair' ||
+                                          item.serviceCaseType == 'repair')
+                                        OutlinedButton(
+                                          onPressed: _pendingAction == null
+                                              ? () => _updateIncidentAction(
+                                                    item,
+                                                    'written_off',
+                                                    'Заявка на списание отправлена',
+                                                  )
+                                              : null,
+                                          child: const Text(
+                                            'Не подлежит восстановлению',
+                                          ),
+                                        ),
+                                      if (item.serviceDetails == null &&
+                                          !const {'repair', 'accident'}
+                                              .contains(item.incidentType))
+                                        TextButton(
+                                          onPressed: _pendingAction == null
+                                              ? () => _updateIncidentAction(
+                                                    item,
+                                                    'closed',
+                                                    'Кейс закрыт',
+                                                  )
+                                              : null,
+                                          child: const Text('Закрыть'),
+                                        ),
+                                    ],
                                   ),
                                 ],
-                              ),
-                            ],
-                          ],
+                              ],
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
                   ] else if (_selectedTab == 3) ...[
                     const _SectionTitle('Запросы'),
                     const SizedBox(height: 6),
@@ -3492,9 +3840,9 @@ class _DriverDetailTabs extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(6),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.95),
+        color: Colors.white,
+        border: Border.all(color: ManagerDesign.border),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: _managerText.withValues(alpha: 0.1)),
       ),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
@@ -3511,7 +3859,7 @@ class _DriverDetailTabs extends StatelessWidget {
                   label: Text(_tabs[index].$1),
                   onSelected: (_) => onChanged(index),
                   labelStyle: TextStyle(
-                    fontSize: 12,
+                    fontSize: 14,
                     fontWeight:
                         selected == index ? FontWeight.w800 : FontWeight.w700,
                   ),
@@ -3545,7 +3893,8 @@ class _ManagerChatPageState extends State<ManagerChatPage> {
     super.initState();
     _reload();
     _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (mounted) {
+      if (mounted && ModalRoute.of(context)?.isCurrent != false &&
+          WidgetsBinding.instance.lifecycleState != AppLifecycleState.paused) {
         setState(_reload);
       }
     });
@@ -3654,7 +4003,7 @@ class _ManagerChatPageState extends State<ManagerChatPage> {
         final filteredThreads = _searchChatThreads(threads, _driverSearchQuery);
 
         return ListView(
-          padding: const EdgeInsets.all(8),
+          padding: const EdgeInsets.all(20),
           children: [
             const _ManagerHero(
               title: 'Чат с водителями',
@@ -3677,10 +4026,11 @@ class _ManagerChatPageState extends State<ManagerChatPage> {
                   final filteredDrivers =
                       _searchManagerDrivers(drivers, _driverSearchQuery);
                   return Container(
-                    padding: const EdgeInsets.all(8),
+                    padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.95),
-                      borderRadius: BorderRadius.circular(10),
+                      color: Colors.white,
+                      border: Border.all(color: ManagerDesign.border),
+                      borderRadius: BorderRadius.circular(17),
                     ),
                     child: Column(
                       children: [
@@ -3808,13 +4158,17 @@ class ManagerChatThreadPage extends StatefulWidget {
   State<ManagerChatThreadPage> createState() => _ManagerChatThreadPageState();
 }
 
-class _ManagerChatThreadPageState extends State<ManagerChatThreadPage> {
+class _ManagerChatThreadPageState extends State<ManagerChatThreadPage>
+    with WidgetsBindingObserver {
   ManagerChatThreadDetailDto? _threadDetail;
   Object? _threadError;
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
   String? _threadId;
   bool _isSending = false;
+  String? _pendingText;
+  bool _isRefreshing = false;
+  int _readVersion = 0;
   bool _isThreadLoading = false;
   bool _stickToBottom = true;
   String? _lastMessageSignature;
@@ -3823,23 +4177,32 @@ class _ManagerChatThreadPageState extends State<ManagerChatThreadPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _threadId = widget.threadId;
     final threadId = _threadId;
     if (threadId != null) {
       unawaited(_loadThread(threadId, forceScroll: true));
     }
     _scrollController.addListener(_rememberScrollPosition);
-    _refreshTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+    _refreshTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       _refreshThread();
     });
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _refreshTimer?.cancel();
     _scrollController.dispose();
     _messageController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_refreshThread());
+    }
   }
 
   void _rememberScrollPosition() {
@@ -3914,6 +4277,7 @@ class _ManagerChatThreadPageState extends State<ManagerChatThreadPage> {
     bool forceScroll = false,
     bool showLoader = true,
   }) async {
+    final version = ++_readVersion;
     if (showLoader) {
       setState(() {
         _isThreadLoading = true;
@@ -3922,7 +4286,7 @@ class _ManagerChatThreadPageState extends State<ManagerChatThreadPage> {
     }
     try {
       final detail = await widget.repository.loadChat(threadId);
-      if (!mounted || _threadId != threadId) {
+      if (!mounted || _threadId != threadId || version != _readVersion) {
         return;
       }
       setState(() {
@@ -3932,7 +4296,7 @@ class _ManagerChatThreadPageState extends State<ManagerChatThreadPage> {
       });
       _scrollToBottomIfNeeded(detail, force: forceScroll);
     } catch (error) {
-      if (!mounted || _threadId != threadId) {
+      if (!mounted || _threadId != threadId || version != _readVersion) {
         return;
       }
       setState(() {
@@ -3944,14 +4308,22 @@ class _ManagerChatThreadPageState extends State<ManagerChatThreadPage> {
 
   Future<void> _refreshThread() async {
     final threadId = _threadId;
-    if (threadId == null || _isSending) {
+    if (!mounted ||
+        threadId == null ||
+        _isSending ||
+        _isRefreshing ||
+        _isThreadLoading ||
+        ModalRoute.of(context)?.isCurrent == false ||
+        WidgetsBinding.instance.lifecycleState == AppLifecycleState.paused) {
       return;
     }
 
+    _isRefreshing = true;
+    final version = ++_readVersion;
     try {
       final keepBottom = _stickToBottom || _isNearBottom();
       final updated = await widget.repository.loadChat(threadId);
-      if (!mounted || _threadId != threadId) {
+      if (!mounted || _threadId != threadId || version != _readVersion) {
         return;
       }
       setState(() {
@@ -3966,6 +4338,8 @@ class _ManagerChatThreadPageState extends State<ManagerChatThreadPage> {
       }
     } catch (_) {
       // Следующий опрос попробует обновить чат ещё раз.
+    } finally {
+      _isRefreshing = false;
     }
   }
 
@@ -3984,7 +4358,12 @@ class _ManagerChatThreadPageState extends State<ManagerChatThreadPage> {
       return;
     }
 
-    setState(() => _isSending = true);
+    ++_readVersion; // Ignore a poll started before this send.
+    setState(() {
+      _isSending = true;
+      _pendingText = text;
+    });
+    _scheduleScrollToBottom();
     try {
       final updated = threadId == null
           ? await widget.repository.startDriverChat(driverId!, text)
@@ -3992,7 +4371,9 @@ class _ManagerChatThreadPageState extends State<ManagerChatThreadPage> {
       if (!mounted) {
         return;
       }
-      _messageController.clear();
+      if (_messageController.text.trim() == text) {
+        _messageController.clear();
+      }
       setState(() {
         _threadId = updated.id;
         _threadDetail = updated;
@@ -4009,7 +4390,11 @@ class _ManagerChatThreadPageState extends State<ManagerChatThreadPage> {
       );
     } finally {
       if (mounted) {
-        setState(() => _isSending = false);
+        setState(() {
+          _isSending = false;
+          _pendingText = null;
+          _isThreadLoading = false;
+        });
       }
     }
   }
@@ -4025,8 +4410,26 @@ class _ManagerChatThreadPageState extends State<ManagerChatThreadPage> {
             Expanded(
               child: ListView(
                 controller: _scrollController,
-                padding: const EdgeInsets.all(8),
-                children: [_buildThreadBody()],
+                padding: const EdgeInsets.all(16),
+                children: [
+                  _buildThreadBody(),
+                  if (_pendingText != null)
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(_pendingText!),
+                              const Text('Отправляется…'),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
             Padding(
@@ -4119,7 +4522,7 @@ class _ManagerChatBubble extends StatelessWidget {
           color: isManager
               ? _managerBlue.withValues(alpha: 0.12)
               : Colors.white.withValues(alpha: 0.95),
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(17),
           border: Border.all(
             color: isManager
                 ? _managerBlue.withValues(alpha: 0.22)
@@ -4138,8 +4541,8 @@ class _ManagerChatBubble extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: isManager ? _managerBlue : _managerMuted,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
                     ),
                   ),
                 ),
@@ -4149,7 +4552,7 @@ class _ManagerChatBubble extends StatelessWidget {
                   style: const TextStyle(
                     color: _managerMuted,
                     fontWeight: FontWeight.w700,
-                    fontSize: 10,
+                    fontSize: 12,
                   ),
                 ),
               ],
@@ -4160,7 +4563,7 @@ class _ManagerChatBubble extends StatelessWidget {
               style: const TextStyle(
                 color: _managerText,
                 fontWeight: FontWeight.w600,
-                fontSize: 11,
+                fontSize: 13,
                 height: 1.2,
               ),
             ),
@@ -4199,8 +4602,10 @@ class ManagerProfilePage extends StatelessWidget {
     required this.session,
     required this.onOpenNotifications,
     required this.onSignOut,
+    this.repository,
   });
 
+  final ManagerRepository? repository;
   final ManagerAuthSessionDto session;
   final VoidCallback onOpenNotifications;
   final VoidCallback onSignOut;
@@ -4208,7 +4613,7 @@ class ManagerProfilePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.all(20),
       children: [
         const _ManagerHero(
           title: 'Профиль бригадира',
@@ -4216,14 +4621,15 @@ class ManagerProfilePage extends StatelessWidget {
           icon: Icons.person_rounded,
         ),
         const SizedBox(height: 6),
-        ManagerInfoCard(
-          title: 'Бригадир GoPark',
-          lines: [
-            'Роль: ${_managerRoleLabel(session.requestUserRole)}',
-            'Работа с водителями и выплатами',
-          ],
-          icon: Icons.badge_outlined,
-        ),
+        FutureBuilder<List<ManagerTeamDto>>(
+            future: repository?.loadManagers(),
+            builder: (c, m) => ManagerInfoCard(
+                title: _currentManagerDisplayName(session, m.data ?? const []),
+                lines: [
+                  'Роль: ${_managerRoleLabel(session.requestUserRole)}',
+                  'Работа с водителями и выплатами'
+                ],
+                icon: Icons.badge_outlined)),
         const SizedBox(height: 6),
         GestureDetector(
           onTap: onOpenNotifications,
@@ -4257,6 +4663,9 @@ class ManagerDriverCard extends StatelessWidget {
   const ManagerDriverCard({
     super.key,
     required this.driver,
+    this.repository,
+    this.yesterdayOverdue,
+    this.showYesterdayOverdue = false,
     required this.pendingAction,
     required this.onInspection,
     required this.onRepair,
@@ -4266,6 +4675,9 @@ class ManagerDriverCard extends StatelessWidget {
   });
 
   final ManagerAssignedDriverDto driver;
+  final ManagerRepository? repository;
+  final num? yesterdayOverdue;
+  final bool showYesterdayOverdue;
   final String? pendingAction;
   final VoidCallback onInspection;
   final VoidCallback onRepair;
@@ -4275,252 +4687,172 @@ class ManagerDriverCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.95),
-        borderRadius: BorderRadius.circular(10),
-        boxShadow: [
-          BoxShadow(
-            color: _managerText.withValues(alpha: 0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    final disabled = pendingAction != null;
+    final repair = driver.vehicleStatus == 'maintenance' ||
+        driver.vehicleStatus == 'repair';
+    return ManagerPanel(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        CircleAvatar(
+            backgroundColor: ManagerDesign.soft,
+            foregroundColor: _managerBlue,
+            child: Text(
+                driver.fullName
+                    .split(' ')
+                    .where((p) => p.isNotEmpty)
+                    .take(2)
+                    .map((p) => p[0])
+                    .join(),
+                style: const TextStyle(
+                    fontSize: 14, fontWeight: FontWeight.w600))),
+        const SizedBox(width: 12),
+        Expanded(
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(driver.fullName,
+              style:
+                  const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 5),
+          Text(driver.vehicle,
+              style: const TextStyle(color: _managerMuted, fontSize: 13)),
+        ])),
+      ]),
+      const SizedBox(height: 12),
+      Wrap(spacing: 8, runSpacing: 6, children: [
+        _ManagerBadge(
+            label: _managerStatusLabel(driver.status),
+            color: repair ? _managerOrange : _managerBlue),
+        if (driver.riskStatus != 'normal')
+          _ManagerBadge(
+              label: 'Риск: ${_managerRiskStatusLabel(driver.riskStatus)}',
+              color: driver.riskStatus == 'risk'
+                  ? ManagerDesign.red
+                  : _managerOrange),
+      ]),
+      const SizedBox(height: 16),
+      LayoutBuilder(builder: (c, box) {
+        final columns = MediaQuery.textScalerOf(c).scale(14) / 14 > 1.5 ? 1 : 2;
+        return Wrap(
+            spacing: 10,
+            runSpacing: 12,
             children: [
-              Container(
-                width: 28,
-                height: 28,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
-                  gradient: const LinearGradient(
-                    colors: [_managerBlue, _managerCyan],
-                  ),
-                ),
-                child: Center(
-                  child: Text(
-                    driver.fullName
-                        .split(' ')
-                        .take(2)
-                        .map((part) => part.isEmpty ? '' : part[0])
-                        .join(),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 10,
-                    ),
-                  ),
-                ),
+              (
+                'К оплате',
+                '${_managerMoney(driver.nextPaymentAmount)} сом',
+                _managerText
               ),
-              const SizedBox(width: 7),
-              Expanded(
+              (
+                showYesterdayOverdue ? 'Просрочка за вчера' : 'Просрочка',
+                showYesterdayOverdue && yesterdayOverdue == null
+                    ? 'Нет данных'
+                    : '${_managerMoney(showYesterdayOverdue ? yesterdayOverdue! : driver.overdueDebt)} сом',
+                driver.overdueDebt > 0 ? ManagerDesign.red : _managerText
+              ),
+            ]
+                .map((x) => SizedBox(
+                    width: (box.maxWidth - (columns - 1) * 10) / columns,
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(x.$1,
+                              style: const TextStyle(
+                                  fontSize: 13, color: _managerMuted)),
+                          const SizedBox(height: 6),
+                          Text(x.$2,
+                              style: TextStyle(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w600,
+                                  color: x.$3)),
+                        ])))
+                .toList());
+      }),
+      const SizedBox(height: 14),
+      Text('Последняя оплата: ${_managerDateLabel(driver.lastPaymentDate)}',
+          style: const TextStyle(color: _managerMuted, fontSize: 12)),
+      const Divider(height: 24),
+      ExpansionTile(
+          tilePadding: EdgeInsets.zero,
+          childrenPadding: EdgeInsets.zero,
+          shape: const Border(),
+          collapsedShape: const Border(),
+          title: const Text('Детали и действия',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+          children: [
+            Align(
+                alignment: Alignment.centerLeft,
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      driver.fullName,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w800,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      driver.phone,
-                      style: const TextStyle(
-                        color: _managerMuted,
-                        fontSize: 10,
-                      ),
-                    ),
-                    if (driver.managerName?.isNotEmpty == true) ...[
-                      const SizedBox(height: 1),
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(driver.phone,
+                          style: const TextStyle(
+                              color: _managerMuted, fontSize: 14)),
+                      const SizedBox(height: 8),
+                      if (driver.managerName?.isNotEmpty == true)
+                        Text('Бригадир: ${driver.managerName}',
+                            style: const TextStyle(fontSize: 14)),
                       Text(
-                        'Бригадир: ${driver.managerName}',
-                        style: const TextStyle(
-                          color: _managerMuted,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              _ManagerBadge(
-                label: _managerStatusLabel(driver.status),
-                color: driver.overdueDebt > 0 ? _managerOrange : _managerBlue,
-              ),
-            ],
-          ),
-          const SizedBox(height: 5),
-          Wrap(
-            spacing: 5,
-            runSpacing: 5,
-            children: [
-              _ManagerBadge(
-                label: _managerHasVehicle(driver) ? driver.vehicle : 'без авто',
-                color: _managerGreen,
-              ),
-              _ManagerBadge(
-                label: 'риск: ${_managerRiskStatusLabel(driver.riskStatus)}',
-                color: _managerRiskStatusColor(driver.riskStatus),
-              ),
-              _ManagerBadge(
-                label: _managerPaymentDueBadgeLabel(driver),
-                color: _managerIsPaymentDueTodayOrEarlier(driver)
-                    ? _managerOrange
-                    : _managerPurple,
-              ),
-              _ManagerBadge(
-                label: 'выходной ${_managerWeekdayLabel(driver.weeklyDayOff)}',
-                color: _managerBlue,
-              ),
-            ],
-          ),
-          const SizedBox(height: 5),
-          Row(
-            children: [
-              Expanded(
-                child: _ManagerStatPill(
-                  label: 'Долг',
-                  value: '${driver.debt} сом',
-                  color: _managerOrange,
-                ),
-              ),
-              const SizedBox(width: 4),
-              Expanded(
-                child: _ManagerStatPill(
-                  label: 'Просрочка',
-                  value: '${driver.overdueDebt} сом',
-                  color: _managerPurple,
-                ),
-              ),
-              const SizedBox(width: 4),
-              Expanded(
-                child: _ManagerStatPill(
-                  label: 'Переплата',
-                  value: '${driver.creditBalance} сом',
-                  color: _managerGreen,
-                ),
-              ),
-              const SizedBox(width: 4),
-              Expanded(
-                child: _ManagerStatPill(
-                  label: 'Яндекс',
-                  value: '${driver.yandexBalance} сом',
-                  color: _managerBlue,
-                ),
-              ),
-            ],
-          ),
-          if (driver.overdueDebt > 0) ...[
-            const SizedBox(height: 5),
-            ManagerInfoCard(
-              title: 'Период просрочки',
-              lines: [
-                _managerOverduePeriodLabel(
-                  driver.overdueSinceDate,
-                  driver.overdueUntilDate,
-                ),
-              ],
-              icon: Icons.date_range_rounded,
-            ),
-          ],
-          const SizedBox(height: 5),
-          Wrap(
-            spacing: 5,
-            runSpacing: 5,
-            children: [
-              OutlinedButton.icon(
-                onPressed: pendingAction == null ? onInspection : null,
-                style: OutlinedButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                ),
-                icon: pendingAction == '${driver.id}:inspection'
-                    ? const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.fact_check_outlined),
-                label: const Text('Осмотр', style: TextStyle(fontSize: 10.5)),
-              ),
-              FilledButton.icon(
-                onPressed: pendingAction == null ? onRepair : null,
-                style: FilledButton.styleFrom(
-                  backgroundColor: _managerOrange,
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                ),
-                icon: pendingAction == '${driver.id}:repair'
-                    ? const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Icon(Icons.build_outlined),
-                label: const Text('СТО', style: TextStyle(fontSize: 10.5)),
-              ),
-              OutlinedButton.icon(
-                onPressed: pendingAction == null ? onAccident : null,
-                style: OutlinedButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                ),
-                icon: pendingAction == '${driver.id}:accident'
-                    ? const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.car_crash_outlined),
-                label: const Text('ДТП', style: TextStyle(fontSize: 10.5)),
-              ),
-              FilledButton.icon(
-                onPressed: pendingAction == null ? onImpound : null,
-                style: FilledButton.styleFrom(
-                  backgroundColor: _managerPurple,
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                ),
-                icon: pendingAction == '${driver.id}:impound'
-                    ? const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Icon(Icons.local_parking_rounded),
-                label: const Text(
-                  'Штрафстоянка',
-                  style: TextStyle(fontSize: 10.5),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 5),
-          _ManagerRiskStatusSelector(
-            currentStatus: driver.riskStatus,
-            pendingAction: pendingAction,
-            actionPrefix: '${driver.id}:risk',
-            onChanged: onRiskStatusChanged,
-          ),
-        ],
-      ),
-    );
+                          'Выходной: ${_managerWeekdayLabel(driver.weeklyDayOff)}',
+                          style: const TextStyle(fontSize: 14)),
+                      Text(
+                          'Риск: ${_managerRiskStatusLabel(driver.riskStatus)}',
+                          style: const TextStyle(fontSize: 14)),
+                      Text(
+                          'Следующая оплата: ${_managerDateLabel(driver.nextPaymentDate)}',
+                          style: const TextStyle(fontSize: 14)),
+                      Text(
+                          'Вся просрочка: ${_managerMoney(driver.overdueDebt)} сом',
+                          style: const TextStyle(fontSize: 14)),
+                      Text('Долг: ${_managerMoney(driver.debt)} сом',
+                          style: const TextStyle(fontSize: 14)),
+                      Text(
+                          'Переплата: ${_managerMoney(driver.creditBalance)} сом',
+                          style: const TextStyle(fontSize: 14)),
+                      Text('Яндекс: ${_managerMoney(driver.yandexBalance)} сом',
+                          style: const TextStyle(fontSize: 14)),
+                      if (driver.overdueDebt > 0)
+                        Text(
+                            'Просрочка: ${_managerOverduePeriodLabel(driver.overdueSinceDate, driver.overdueUntilDate)}',
+                            style: const TextStyle(fontSize: 14)),
+                    ])),
+            const SizedBox(height: 14),
+            SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(spacing: 8, children: [
+                  OutlinedButton.icon(
+                      onPressed: disabled ? null : onInspection,
+                      icon: const Icon(Icons.fact_check_outlined),
+                      label: const Text('Осмотр')),
+                  OutlinedButton.icon(
+                      onPressed: disabled ? null : onRepair,
+                      icon: const Icon(Icons.build_outlined),
+                      label: const Text('СТО')),
+                  OutlinedButton.icon(
+                      onPressed: disabled ? null : onAccident,
+                      icon: const Icon(Icons.location_on_outlined),
+                      label: const Text('ДТП')),
+                  OutlinedButton.icon(
+                      onPressed: disabled ? null : onImpound,
+                      icon: const Icon(Icons.local_parking),
+                      label: const Text('Штрафстоянка')),
+                ])),
+            if (disabled)
+              const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: LinearProgressIndicator()),
+            const SizedBox(height: 16),
+            _ManagerRiskStatusSelector(
+                currentStatus: driver.riskStatus,
+                pendingAction: pendingAction,
+                actionPrefix: '${driver.id}:risk',
+                onChanged: onRiskStatusChanged),
+            if (repository != null)
+              ManagerPaymentCalendarPage(
+                  key: ValueKey('driver-calendar-${driver.id}'),
+                  repository: repository!,
+                  driverId: driver.id,
+                  embedded: true),
+          ]),
+    ]));
   }
 }
 
@@ -4541,48 +4873,49 @@ class _ManagerRiskStatusSelector extends StatelessWidget {
   Widget build(BuildContext context) {
     const statuses = ['normal', 'medium', 'risk'];
 
-    return Wrap(
-      spacing: 5,
-      runSpacing: 5,
-      children: statuses.map((status) {
-        final isCurrent = currentStatus == status;
-        final actionKey = '$actionPrefix:$status';
-        final isPending = pendingAction == actionKey;
-        final disabled = pendingAction != null || isCurrent;
-        final color = _managerRiskStatusColor(status);
+    return SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          spacing: 5,
+          children: statuses.map((status) {
+            final isCurrent = currentStatus == status;
+            final actionKey = '$actionPrefix:$status';
+            final isPending = pendingAction == actionKey;
+            final disabled = pendingAction != null || isCurrent;
+            final color = _managerRiskStatusColor(status);
 
-        return ChoiceChip(
-          selected: isCurrent,
-          onSelected: disabled ? null : (_) => onChanged(status),
-          avatar: isPending
-              ? const SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : Icon(
-                  status == 'risk'
-                      ? Icons.warning_amber_rounded
-                      : status == 'medium'
-                          ? Icons.speed_rounded
-                          : Icons.verified_user_outlined,
-                  size: 13,
-                  color: isCurrent ? Colors.white : color,
-                ),
-          label: Text(
-            _managerRiskStatusLabel(status),
-            style: const TextStyle(fontSize: 10),
-          ),
-          selectedColor: color,
-          labelStyle: TextStyle(
-            color: isCurrent ? Colors.white : _managerText,
-            fontWeight: FontWeight.w800,
-          ),
-          backgroundColor: color.withValues(alpha: 0.08),
-          side: BorderSide(color: color.withValues(alpha: 0.22)),
-        );
-      }).toList(),
-    );
+            return ChoiceChip(
+              selected: isCurrent,
+              onSelected: disabled ? null : (_) => onChanged(status),
+              avatar: isPending
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Icon(
+                      status == 'risk'
+                          ? Icons.warning_amber_rounded
+                          : status == 'medium'
+                              ? Icons.speed_rounded
+                              : Icons.verified_user_outlined,
+                      size: 13,
+                      color: isCurrent ? Colors.white : color,
+                    ),
+              label: Text(
+                _managerRiskStatusLabel(status),
+                style: const TextStyle(fontSize: 12),
+              ),
+              selectedColor: color,
+              labelStyle: TextStyle(
+                color: isCurrent ? Colors.white : _managerText,
+                fontWeight: FontWeight.w600,
+              ),
+              backgroundColor: color.withValues(alpha: 0.08),
+              side: BorderSide(color: color.withValues(alpha: 0.22)),
+            );
+          }).toList(),
+        ));
   }
 }
 
@@ -4606,9 +4939,9 @@ class ManagerDriverPhotoCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(7),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.94),
+        color: Colors.white,
+        border: Border.all(color: ManagerDesign.border),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
         boxShadow: [
           BoxShadow(
             color: _managerText.withValues(alpha: 0.035),
@@ -4631,7 +4964,7 @@ class ManagerDriverPhotoCard extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                      fontWeight: FontWeight.w900, fontSize: 12),
+                      fontWeight: FontWeight.w700, fontSize: 14),
                 ),
               ),
             ],
@@ -4683,14 +5016,14 @@ class ManagerDriverPhotoCard extends StatelessWidget {
             )
           else
             const Text('Фото еще не загружено',
-                style: TextStyle(color: _managerMuted, fontSize: 10)),
+                style: TextStyle(color: _managerMuted, fontSize: 12)),
           if (driver.photoReviewNote?.trim().isNotEmpty == true) ...[
             const SizedBox(height: 5),
             Text(
               'Комментарий: ${driver.photoReviewNote}',
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: _managerMuted, fontSize: 10),
+              style: const TextStyle(color: _managerMuted, fontSize: 12),
             ),
           ],
           if (driver.photoStatus == 'pending') ...[
@@ -4704,7 +5037,7 @@ class ManagerDriverPhotoCard extends StatelessWidget {
                       visualDensity: VisualDensity.compact,
                     ),
                     child: const Text('Отклонить',
-                        style: TextStyle(fontSize: 10.5)),
+                        style: TextStyle(fontSize: 12.5)),
                   ),
                 ),
                 const SizedBox(width: 6),
@@ -4718,7 +5051,7 @@ class ManagerDriverPhotoCard extends StatelessWidget {
                       pendingAction == 'photo:approve'
                           ? 'Сохраняем...'
                           : 'Одобрить',
-                      style: const TextStyle(fontSize: 10.5),
+                      style: const TextStyle(fontSize: 12.5),
                     ),
                   ),
                 ),
@@ -4778,12 +5111,13 @@ class ManagerSignalCard extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(17),
         child: Ink(
           padding: const EdgeInsets.all(7),
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.95),
-            borderRadius: BorderRadius.circular(10),
+            color: Colors.white,
+            border: Border.all(color: ManagerDesign.border),
+            borderRadius: BorderRadius.circular(17),
             boxShadow: [
               BoxShadow(
                 color: _managerText.withValues(alpha: 0.04),
@@ -4812,14 +5146,16 @@ class ManagerSignalCard extends StatelessWidget {
                     Text(
                       title,
                       style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w800,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
                       ),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 2),
-                    ...detailLines.take(showAllDetails ? detailLines.length : 4).map(
+                    ...detailLines
+                        .take(showAllDetails ? detailLines.length : 4)
+                        .map(
                           (line) => Padding(
                             padding: const EdgeInsets.only(bottom: 1),
                             child: Text(
@@ -4830,8 +5166,8 @@ class ManagerSignalCard extends StatelessWidget {
                                   : TextOverflow.ellipsis,
                               style: const TextStyle(
                                 color: _managerMuted,
-                                height: 1.12,
-                                fontSize: 10,
+                                height: 1.4,
+                                fontSize: 12,
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
@@ -4863,55 +5199,6 @@ class ManagerSignalCard extends StatelessWidget {
   }
 }
 
-class _ManagerStatPill extends StatelessWidget {
-  const _ManagerStatPill({
-    required this.label,
-    required this.value,
-    required this.color,
-  });
-
-  final String label;
-  final String value;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 5),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(7),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(
-              color: _managerMuted,
-              fontSize: 9,
-              fontWeight: FontWeight.w700,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 1),
-          Text(
-            value,
-            style: TextStyle(
-              color: color,
-              fontWeight: FontWeight.w900,
-              fontSize: 9,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _ManagerBadge extends StatelessWidget {
   const _ManagerBadge({required this.label, required this.color});
 
@@ -4930,8 +5217,8 @@ class _ManagerBadge extends StatelessWidget {
         label,
         style: TextStyle(
           color: color,
-          fontWeight: FontWeight.w800,
-          fontSize: 9,
+          fontWeight: FontWeight.w600,
+          fontSize: 11,
         ),
       ),
     );
@@ -5024,7 +5311,7 @@ Future<_ManagerIncidentDetails?> _showManagerIncidentDetailsDialog(
                           : 'После отправки статус будет: ДТП зафиксировано.',
                       style: const TextStyle(
                         color: _managerMuted,
-                        fontSize: 10.5,
+                        fontSize: 12.5,
                       ),
                     ),
                   ],
@@ -5177,6 +5464,10 @@ String _managerStatusLabel(String status) {
       return 'Одобрен';
     case 'rejected':
       return 'Отклонён';
+    case 'sent_to_service':
+      return 'Отправлен на СТО';
+    case 'maintenance':
+      return 'В ремонте';
     case 'active':
       return 'Активен';
     case 'terminated':
@@ -5195,8 +5486,6 @@ String _managerStatusLabel(String status) {
       return 'Простой';
     case 'impound':
       return 'Штрафстоянка';
-    case 'maintenance':
-      return 'Ремонт';
     case 'written_off':
       return 'Списан';
     case 'writeoff_requested':
@@ -5256,7 +5545,7 @@ String _managerServiceStageLabel(String stage) {
     case 'inspection':
       return 'Осмотр';
     case 'awaiting_repair':
-      return 'Ожидает ремонт';
+      return 'Ожидание ремонта';
     case 'in_repair':
       return 'В ремонте';
     case 'completed':
@@ -5462,127 +5751,95 @@ class _ManagerLoginPageState extends State<ManagerLoginPage> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [_managerBg, Color(0xFFE6F0FF)],
-          ),
-        ),
-        child: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(8),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 320),
-                child: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.9),
-                    borderRadius: BorderRadius.circular(10),
-                    boxShadow: [
-                      BoxShadow(
-                        color: _managerBlue.withValues(alpha: 0.14),
-                        blurRadius: 12,
-                        offset: const Offset(0, 5),
-                      ),
-                    ],
-                    border:
-                        Border.all(color: Colors.white.withValues(alpha: 0.7)),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        width: 36,
-                        height: 36,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(9),
-                          gradient: const LinearGradient(
-                            colors: [_managerBlue, _managerCyan],
-                          ),
-                        ),
-                        child: const Icon(
-                          Icons.groups_rounded,
-                          color: Colors.white,
-                          size: 18,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      const Text(
-                        'Вход бригадира',
-                        style: TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.w900),
-                      ),
-                      const SizedBox(height: 6),
-                      const Text(
-                        'После входа откроются доступные разделы.',
-                        style: TextStyle(
-                          color: _managerMuted,
-                          height: 1.2,
-                          fontSize: 11,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      TextField(
-                        controller: loginController,
-                        keyboardType: TextInputType.emailAddress,
-                        decoration: _managerInputDecoration(
-                          'Логин',
-                          Icons.alternate_email_rounded,
-                        ).copyWith(
-                          helperText: 'Телефон с кодом страны или email',
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      TextField(
-                        controller: passwordController,
-                        obscureText: true,
-                        decoration: _managerInputDecoration(
-                          'Пароль',
-                          Icons.lock_outline_rounded,
-                        ),
-                      ),
-                      if (widget.errorText != null) ...[
-                        const SizedBox(height: 6),
-                        Text(
-                          widget.errorText!,
-                          style: const TextStyle(color: Color(0xFFB91C1C)),
-                          textAlign: TextAlign.left,
-                        ),
-                      ],
-                      const SizedBox(height: 6),
-                      FilledButton(
-                        style: FilledButton.styleFrom(
-                          minimumSize: const Size.fromHeight(38),
-                          backgroundColor: _managerBlue,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(9),
-                          ),
-                        ),
-                        onPressed: widget.isSubmitting
-                            ? null
-                            : () => widget.onSubmit(
-                                  loginController.text.trim(),
-                                  passwordController.text,
-                                ),
-                        child: Text(widget.isSubmitting ? 'Вход...' : 'Войти'),
-                      ),
-                      const SupportLinks(),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Scaffold(
+      body: SafeArea(
+          child: LayoutBuilder(
+              builder: (context, box) => SingleChildScrollView(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 36),
+                  child: Center(
+                      child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 400),
+                          child: AutofillGroup(
+                              child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                const SizedBox(height: 35),
+                                Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: Image.asset('assets/gopark-logo.png',
+                                        width: 138,
+                                        height: 54,
+                                        fit: BoxFit.contain,
+                                        semanticLabel: 'GoPark')),
+                                const SizedBox(height: 38),
+                                const Text('Вход бригадира',
+                                    style: TextStyle(
+                                        fontSize: 27,
+                                        fontWeight: FontWeight.w700,
+                                        letterSpacing: -.7)),
+                                const SizedBox(height: 10),
+                                const Text(
+                                    'Войдите, чтобы управлять своей командой.',
+                                    style: TextStyle(
+                                        color: _managerMuted,
+                                        fontSize: 15,
+                                        height: 1.5)),
+                                const SizedBox(height: 32),
+                                TextField(
+                                    controller: loginController,
+                                    keyboardType: TextInputType.emailAddress,
+                                    autofillHints: const [
+                                      AutofillHints.username
+                                    ],
+                                    textInputAction: TextInputAction.next,
+                                    decoration: _managerInputDecoration(
+                                            'Логин', Icons.person_outline)
+                                        .copyWith(
+                                            helperText:
+                                                'Телефон с кодом страны или email')),
+                                const SizedBox(height: 20),
+                                TextField(
+                                    controller: passwordController,
+                                    obscureText: true,
+                                    autofillHints: const [
+                                      AutofillHints.password
+                                    ],
+                                    textInputAction: TextInputAction.done,
+                                    onSubmitted: widget.isSubmitting
+                                        ? null
+                                        : (_) => widget.onSubmit(
+                                            loginController.text.trim(),
+                                            passwordController.text),
+                                    decoration: _managerInputDecoration(
+                                        'Пароль', Icons.lock_outline_rounded)),
+                                if (widget.errorText != null) ...[
+                                  const SizedBox(height: 16),
+                                  Text(widget.errorText!,
+                                      style: const TextStyle(
+                                          color: ManagerDesign.red))
+                                ],
+                                const SizedBox(height: 24),
+                                FilledButton(
+                                    onPressed: widget.isSubmitting
+                                        ? null
+                                        : () => widget.onSubmit(
+                                            loginController.text.trim(),
+                                            passwordController.text),
+                                    child: Text(widget.isSubmitting
+                                        ? 'Вход…'
+                                        : 'Войти')),
+                                const SizedBox(height: 20),
+                                const Text(
+                                    'Доступ предоставляется администратором GoPark.',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                        color: _managerMuted,
+                                        fontSize: 13,
+                                        height: 1.5)),
+                                const SupportLinks(),
+                              ]))))))));
 }
 
 String _normalizeKgPhoneLogin(String value) {
@@ -5600,6 +5857,51 @@ String _normalizeKgPhoneLogin(String value) {
   }
 
   return digits.isEmpty ? trimmed : '+996$digits';
+}
+
+class _ManagerMetricGrid extends StatelessWidget {
+  const _ManagerMetricGrid(
+      {required this.children,
+      this.crossAxisCount = 2,
+      this.crossAxisSpacing = 8,
+      this.mainAxisSpacing = 8,
+      this.childAspectRatio = 1,
+      this.shrinkWrap = true,
+      this.physics});
+  final List<Widget> children;
+  final int crossAxisCount;
+  final double crossAxisSpacing, mainAxisSpacing, childAspectRatio;
+  final bool shrinkWrap;
+  final ScrollPhysics? physics;
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(builder: (c, box) {
+        final scale = MediaQuery.textScalerOf(c).scale(14) / 14;
+        final columns = scale > 1.3
+            ? 1
+            : children.length == 3 && box.maxWidth > 330
+                ? 3
+                : crossAxisCount;
+        return Column(children: [
+          for (var start = 0; start < children.length; start += columns)
+            Padding(
+                padding: EdgeInsets.only(
+                    bottom: start + columns < children.length
+                        ? mainAxisSpacing
+                        : 0),
+                child: IntrinsicHeight(
+                    child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                      for (var i = 0; i < columns; i++) ...[
+                        if (i > 0) SizedBox(width: crossAxisSpacing),
+                        Expanded(
+                            child: start + i < children.length
+                                ? children[start + i]
+                                : const SizedBox())
+                      ],
+                    ]))),
+        ]);
+      });
 }
 
 class ManagerMetric extends StatelessWidget {
@@ -5621,86 +5923,40 @@ class ManagerMetric extends StatelessWidget {
   final VoidCallback? onTap;
 
   @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
+  Widget build(BuildContext context) => Material(
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(15),
+          side: const BorderSide(color: ManagerDesign.border)),
       child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(9),
-        child: Ink(
-          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 6),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.95),
-            borderRadius: BorderRadius.circular(9),
-            boxShadow: [
-              BoxShadow(
-                color: _managerText.withValues(alpha: 0.04),
-                blurRadius: 9,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
-                  gradient: LinearGradient(colors: [colorA, colorB]),
-                ),
-                child: Row(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(15),
+          child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(icon, color: Colors.white, size: 13),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          value,
-                          maxLines: 1,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w900,
-                            fontSize: 11,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 5),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      title,
-                      style: const TextStyle(
-                        color: _managerMuted,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 9.5,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  if (onTap != null)
-                    Icon(
-                      Icons.arrow_forward_rounded,
-                      color: _managerMuted.withValues(alpha: 0.7),
-                      size: 13,
-                    ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+                    Row(children: [
+                      Icon(icon, size: 17, color: colorA),
+                      const SizedBox(width: 7),
+                      Expanded(
+                          child: Text(value,
+                              style: const TextStyle(
+                                  fontSize: 23,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: -.6),
+                              maxLines: 3,
+                              overflow: TextOverflow.ellipsis))
+                    ]),
+                    const SizedBox(height: 7),
+                    Text(title,
+                        style:
+                            const TextStyle(color: _managerMuted, fontSize: 14),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis),
+                  ]))));
 }
 
 class ManagerInfoCard extends StatelessWidget {
@@ -5718,10 +5974,11 @@ class ManagerInfoCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.94),
-        borderRadius: BorderRadius.circular(10),
+        color: Colors.white,
+        border: Border.all(color: ManagerDesign.border),
+        borderRadius: BorderRadius.circular(17),
         boxShadow: [
           BoxShadow(
             color: _managerText.withValues(alpha: 0.04),
@@ -5751,7 +6008,7 @@ class ManagerInfoCard extends StatelessWidget {
                 child: Text(
                   title,
                   style: const TextStyle(
-                      fontSize: 11, fontWeight: FontWeight.w800),
+                      fontSize: 16, fontWeight: FontWeight.w600),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -5766,8 +6023,8 @@ class ManagerInfoCard extends StatelessWidget {
                 line,
                 style: const TextStyle(
                   color: Color(0xFF475569),
-                  height: 1.08,
-                  fontSize: 10,
+                  height: 1.4,
+                  fontSize: 14,
                 ),
               ),
             ),
@@ -5779,147 +6036,59 @@ class ManagerInfoCard extends StatelessWidget {
 }
 
 class _ManagerHero extends StatelessWidget {
-  const _ManagerHero({
-    required this.title,
-    required this.subtitle,
-    required this.icon,
-  });
-
-  final String title;
-  final String subtitle;
+  const _ManagerHero(
+      {required this.title, required this.subtitle, required this.icon});
+  final String title, subtitle;
   final IconData icon;
-
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF0F172A), Color(0xFF1D4ED8)],
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: _managerBlue.withValues(alpha: 0.14),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'GoPark',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.6,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w900,
-                    height: 1.05,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white70),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          Container(
-            width: 38,
-            height: 30,
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            alignment: Alignment.center,
-            child: Padding(
-              padding: const EdgeInsets.all(4),
-              child: Image.asset(
-                'assets/gopark-logo.png',
-                fit: BoxFit.contain,
-                semanticLabel: 'GoPark',
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Padding(
+      padding: const EdgeInsets.only(top: 12, bottom: 18),
+      child: Row(children: [
+        Expanded(
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(title,
+              style: const TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -.5)),
+          if (subtitle.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(subtitle,
+                style: const TextStyle(color: _managerMuted, fontSize: 14))
+          ],
+        ])),
+        const SizedBox(width: 8),
+        IconButton.filledTonal(
+            tooltip: 'Уведомления',
+            onPressed: () {
+              final shell =
+                  context.findAncestorStateOfType<_ManagerShellState>();
+              shell?.showNotifications();
+            },
+            icon: const Icon(Icons.notifications_none_rounded))
+      ]));
 }
 
 class _SectionTitle extends StatelessWidget {
   const _SectionTitle(this.label);
-
   final String label;
-
   @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label.toUpperCase(),
+  Widget build(BuildContext context) => Padding(
+      padding: const EdgeInsets.only(top: 18, bottom: 10),
+      child: Text(label,
           style: const TextStyle(
-            color: _managerMuted,
-            fontSize: 9,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 1,
-          ),
-        ),
-        const SizedBox(height: 3),
-        Text(
-          label,
-          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
-        ),
-      ],
-    );
-  }
+              fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: -.25)));
 }
 
-InputDecoration _managerInputDecoration(String label, IconData icon) {
-  return InputDecoration(
-    labelText: label,
-    prefixIcon: Icon(icon, color: _managerMuted, size: 16),
-    filled: true,
-    fillColor: Colors.white.withValues(alpha: 0.92),
-    isDense: true,
-    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: BorderSide(color: _managerText.withValues(alpha: 0.08)),
-    ),
-    enabledBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: BorderSide(color: _managerText.withValues(alpha: 0.08)),
-    ),
-    focusedBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-      borderSide: const BorderSide(color: _managerBlue, width: 1.5),
-    ),
-  );
-}
+InputDecoration _managerInputDecoration(String label, IconData icon) =>
+    InputDecoration(
+      labelText: label,
+      prefixIcon: Icon(icon, color: _managerMuted, size: 20),
+      filled: true,
+      fillColor: Colors.white,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+    );
 
 String _managerUserError(Object error) {
   var message = error.toString().trim();
@@ -6007,4 +6176,22 @@ List<String> _managerIncidentHistoryLines(
       return '$label: ${_managerDateTimeLabel(entry.changedAt)}';
     }),
   ];
+}
+
+class _ManagerLoadError extends StatelessWidget {
+  const _ManagerLoadError({required this.error, required this.onRetry});
+  final Object? error;
+  final VoidCallback onRetry;
+  @override
+  Widget build(BuildContext context) => Center(
+          child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(
+              'Не удалось загрузить данные. ${_managerUserError(error ?? 'Ошибка соединения')}',
+              textAlign: TextAlign.center),
+          const SizedBox(height: 12),
+          FilledButton(onPressed: onRetry, child: const Text('Повторить')),
+        ]),
+      ));
 }

@@ -2,7 +2,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { crmNavigationItems, hasCrmAccess } from "../lib/crm-access";
 import { useAuth } from "./AuthContext";
 import type { CrmRouteKey } from "../lib/crm-access";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { SettingsOverview } from "@gopark/contracts";
 import { useApiQuery } from "../hooks/useApiQuery";
 import {
@@ -66,22 +66,49 @@ const roleLabels: Record<string, string> = {
 
 export function AppLayout() {
   const location = useLocation();
+  const isCompactWorkspace = ["/service", "/parts"].includes(
+    location.pathname.replace(/\/+$/, ""),
+  );
+  const [stoMobileMenuOpen, setStoMobileMenuOpen] = useState(false);
+  useEffect(() => setStoMobileMenuOpen(false), [location.pathname]);
+  useEffect(() => {
+    if (!stoMobileMenuOpen) return;
+    const close = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setStoMobileMenuOpen(false);
+    };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [stoMobileMenuOpen]);
   const pageRef = useRef<HTMLElement | null>(null);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(() => localStorage.getItem("gopark.crm.sidebar") !== "closed");
+  const [isSidebarOpen, setIsSidebarOpen] = useState(
+    () => localStorage.getItem("gopark.crm.sidebar") !== "closed",
+  );
   const { session, signOut } = useAuth();
   const settingsApi = useApiQuery<SettingsOverview>("settings/overview");
   const roleAccess = settingsApi.data?.crmRoleAccess ?? null;
-  const navigation = crmNavigationItems.filter((item) => hasCrmAccess(session.requestUserRole, item.key, roleAccess, session.customRoleKey));
+  const navigation = crmNavigationItems.filter((item) =>
+    hasCrmAccess(
+      session.requestUserRole,
+      item.key,
+      roleAccess,
+      session.customRoleKey,
+    ),
+  );
   const activeItem =
     navigation.find((item) =>
       item.to === "/"
         ? location.pathname === "/"
-        : location.pathname === item.to || location.pathname.startsWith(`${item.to}/`),
-    ) ?? navigation[0] ?? crmNavigationItems[0];
+        : location.pathname === item.to ||
+          location.pathname.startsWith(`${item.to}/`),
+    ) ??
+    navigation[0] ??
+    crmNavigationItems[0];
 
   return (
-    <div className={`shell shell--immersive${isSidebarOpen ? "" : " shell--sidebar-collapsed"}`}>
-      <aside className="sidebar">
+    <div
+      className={`shell shell--immersive${isCompactWorkspace ? ` shell--sto${stoMobileMenuOpen ? " shell--sto-menu-open" : ""}` : ""}${isSidebarOpen || isCompactWorkspace ? "" : " shell--sidebar-collapsed"}`}
+    >
+      <aside className="sidebar" id="crm-navigation-sidebar">
         <div className="sidebar__body">
           <div className="brand">
             <div className="brand__logo">
@@ -95,7 +122,12 @@ export function AppLayout() {
               type="button"
               className="sidebar-toggle-top"
               title="Скрыть меню"
+              aria-label="Скрыть меню"
               onClick={() => {
+                if (isCompactWorkspace) {
+                  setStoMobileMenuOpen(false);
+                  return;
+                }
                 localStorage.setItem("gopark.crm.sidebar", "closed");
                 setIsSidebarOpen(false);
               }}
@@ -120,9 +152,14 @@ export function AppLayout() {
             {navigation.map((item) => (
               <NavLink
                 key={item.to}
+                aria-label={item.label}
+                title={item.label}
+                onClick={() => setStoMobileMenuOpen(false)}
                 to={item.to}
                 end={item.to === "/"}
-                className={({ isActive }) => `nav__link${isActive ? " nav__link--active" : ""}`}
+                className={({ isActive }) =>
+                  `nav__link${isActive ? " nav__link--active" : ""}`
+                }
               >
                 <span className="nav__icon">
                   {(() => {
@@ -139,18 +176,45 @@ export function AppLayout() {
           <button
             type="button"
             className="sidebar-footer__button"
-            onClick={() =>
+            title={
+              isCompactWorkspace
+                ? stoMobileMenuOpen
+                  ? "Свернуть меню"
+                  : "Развернуть меню"
+                : "Скрыть меню"
+            }
+            aria-label={
+              isCompactWorkspace
+                ? stoMobileMenuOpen
+                  ? "Свернуть меню"
+                  : "Развернуть меню"
+                : "Скрыть меню"
+            }
+            onClick={() => {
+              if (isCompactWorkspace) {
+                setStoMobileMenuOpen((v) => !v);
+                return;
+              }
               setIsSidebarOpen((value) => {
                 const next = !value;
-                localStorage.setItem("gopark.crm.sidebar", next ? "open" : "closed");
+                localStorage.setItem(
+                  "gopark.crm.sidebar",
+                  next ? "open" : "closed",
+                );
                 return next;
-              })
-            }
+              });
+            }}
           >
-            Скрыть меню
+            {isCompactWorkspace
+              ? stoMobileMenuOpen
+                ? "Свернуть меню"
+                : "Развернуть меню"
+              : "Скрыть меню"}
           </button>
           <NavLink
             to="/notifications"
+            title="Оповещения"
+            aria-label="Оповещения"
             className={({ isActive }) =>
               `sidebar-footer__button sidebar-footer__button--link${isActive ? " sidebar-footer__button--active" : ""}`
             }
@@ -158,16 +222,28 @@ export function AppLayout() {
             <BellIcon width={16} height={16} />
             <span>Оповещения</span>
           </NavLink>
-          <BlockLayoutSettings contentRef={pageRef} routeKey={location.pathname} routeLabel={activeItem.label} />
+          <BlockLayoutSettings
+            contentRef={pageRef}
+            routeKey={location.pathname}
+            routeLabel={activeItem.label}
+          />
           <div className="user-pill user-pill--sidebar">
-            <div className="user-pill__avatar">{session.requestUserRole.slice(0, 2).toUpperCase()}</div>
+            <div className="user-pill__avatar">
+              {session.requestUserRole.slice(0, 2).toUpperCase()}
+            </div>
             <div className="user-pill__copy">
-              <strong>{roleLabels[session.requestUserRole] ?? session.requestUserRole}</strong>
-              <span>{session.companyName?.trim() ? session.companyName : "Доступ"}</span>
+              <strong>
+                {roleLabels[session.requestUserRole] ?? session.requestUserRole}
+              </strong>
+              <span>
+                {session.companyName?.trim() ? session.companyName : "Доступ"}
+              </span>
             </div>
           </div>
           <button
             className="sidebar-footer__button sidebar-footer__button--primary"
+            title="Выйти"
+            aria-label="Выйти"
             onClick={() => {
               void signOut();
             }}
@@ -176,8 +252,26 @@ export function AppLayout() {
           </button>
         </div>
       </aside>
+      {isCompactWorkspace && stoMobileMenuOpen && (
+        <button
+          className="sto-menu-backdrop"
+          aria-label="Закрыть меню"
+          onClick={() => setStoMobileMenuOpen(false)}
+        />
+      )}
       <div className="content">
-        {!isSidebarOpen ? (
+        {isCompactWorkspace && (
+          <button
+            className="sto-mobile-menu-button"
+            type="button"
+            aria-controls="crm-navigation-sidebar"
+            aria-expanded={stoMobileMenuOpen}
+            onClick={() => setStoMobileMenuOpen((v) => !v)}
+          >
+            {stoMobileMenuOpen ? "Свернуть меню" : "☰ Меню"}
+          </button>
+        )}
+        {!isSidebarOpen && !isCompactWorkspace ? (
           <button
             type="button"
             className="sidebar-reopen"
