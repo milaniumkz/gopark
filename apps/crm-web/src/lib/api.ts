@@ -1,5 +1,9 @@
 import { loadCrmSession, refreshCrmSession, resetCrmSessionForUnauthorized } from "./auth";
 import { localizeApiError } from "./errors";
+import { ReadCache } from "./read-cache";
+const reads = new ReadCache();
+export function readSessionKey(): string { return loadCrmSession()?.accessToken ?? ""; }
+export function cachedJson<T>(path: string): T | undefined { return reads.snapshot<T>(readSessionKey(), path); }
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "/api").replace(/\/$/, "");
 
@@ -64,7 +68,7 @@ function buildAuthHeadersForToken(accessToken: string, extraHeaders?: HeadersIni
 async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
   if (init.method && init.method !== "GET") return fetch(url, init);
   try {
-    return await fetch(url, { ...init, signal: init.signal ?? AbortSignal.timeout(20_000) });
+    return await fetch(url, { ...init, cache: "no-store", signal: init.signal ?? AbortSignal.timeout(20_000) });
   } catch (error) {
     if (error instanceof DOMException && error.name === "TimeoutError") throw new Error("Сервер не ответил. Проверьте соединение и повторите загрузку.");
     throw error;
@@ -72,6 +76,13 @@ async function fetchWithTimeout(url: string, init: RequestInit): Promise<Respons
 }
 
 async function fetchWithAuth(path: string, init: RequestInit = {}): Promise<Response> {
+  const mutation = !!init.method && init.method !== "GET";
+  if (mutation) reads.invalidate();
+  try { return await sendWithAuth(path, init); }
+  finally { if (mutation) reads.invalidate(); }
+}
+
+async function sendWithAuth(path: string, init: RequestInit = {}): Promise<Response> {
   const session = loadCrmSession();
   if (!session) {
     throw new Error("Сессия истекла. Войдите заново.");
@@ -108,10 +119,11 @@ async function fetchWithAuth(path: string, init: RequestInit = {}): Promise<Resp
 }
 
 export async function fetchJson<T>(path: string): Promise<T> {
-  const response = await fetchWithAuth(path);
-  await ensureOk(response);
-
-  return parseJsonOrNull<T>(response);
+  return reads.read<T>(readSessionKey(), path, async () => {
+    const response = await fetchWithAuth(path);
+    await ensureOk(response);
+    return parseJsonOrNull<T>(response);
+  });
 }
 
 export async function fetchJsonWithQuery<T>(
@@ -119,11 +131,7 @@ export async function fetchJsonWithQuery<T>(
   query: Record<string, string>,
 ): Promise<T> {
   const search = new URLSearchParams(query).toString();
-  const response = await fetchWithAuth(`${path}${search ? `?${search}` : ""}`);
-
-  await ensureOk(response);
-
-  return parseJsonOrNull<T>(response);
+  return fetchJson<T>(`${path}${search ? `?${search}` : ""}`);
 }
 
 export async function postJson<TResponse, TBody>(path: string, body: TBody): Promise<TResponse> {

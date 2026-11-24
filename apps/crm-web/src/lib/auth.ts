@@ -59,7 +59,22 @@ export async function loginCrm(login: string, password: string): Promise<CrmAuth
   return session;
 }
 
-export async function refreshCrmSession(session: CrmAuthSession | null = loadCrmSession()): Promise<CrmAuthSession | null> {
+let sessionRefresh: { token: string; promise: Promise<CrmAuthSession | null> } | null = null;
+
+export function refreshCrmSession(session: CrmAuthSession | null = loadCrmSession()): Promise<CrmAuthSession | null> {
+  if (!session) return Promise.resolve(null);
+  const current = loadCrmSession();
+  if (!current) return Promise.resolve(null);
+  if (current.refreshToken !== session.refreshToken) return Promise.resolve(current);
+  if (sessionRefresh?.token === session.refreshToken) return sessionRefresh.promise;
+  const promise = performSessionRefresh(session).finally(() => {
+    if (sessionRefresh?.promise === promise) sessionRefresh = null;
+  });
+  sessionRefresh = { token: session.refreshToken, promise };
+  return promise;
+}
+
+async function performSessionRefresh(session: CrmAuthSession | null = loadCrmSession()): Promise<CrmAuthSession | null> {
   if (!session) {
     return null;
   }
@@ -70,7 +85,10 @@ export async function refreshCrmSession(session: CrmAuthSession | null = loadCrm
       "content-type": "application/json",
     },
     body: JSON.stringify({ refreshToken: session.refreshToken }),
+    signal: AbortSignal.timeout(15_000),
   });
+
+  if (loadCrmSession()?.refreshToken !== session.refreshToken) return loadCrmSession();
 
   if (!response.ok) {
     clearCrmSession();
@@ -78,6 +96,7 @@ export async function refreshCrmSession(session: CrmAuthSession | null = loadCrm
   }
 
   const refreshedSession = await response.json() as CrmAuthSession;
+  if (loadCrmSession()?.refreshToken !== session.refreshToken) return loadCrmSession();
   if (!isAllowedCrmRole(refreshedSession.requestUserRole)) {
     clearCrmSession();
     return null;
