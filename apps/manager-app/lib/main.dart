@@ -14,6 +14,7 @@ import 'repository.dart';
 import 'service_screens.dart';
 import 'service_dispatch_form.dart';
 import 'vehicle_incident_actions.dart';
+import 'support_links.dart';
 
 const _managerBg = ManagerDesign.background;
 const _managerSurface = ManagerDesign.surface;
@@ -5788,21 +5789,16 @@ class _ManagerLoginPageState extends State<ManagerLoginPage> {
                                 const SizedBox(height: 32),
                                 TextField(
                                     controller: loginController,
-                                    keyboardType: TextInputType.phone,
+                                    keyboardType: TextInputType.emailAddress,
                                     autofillHints: const [
                                       AutofillHints.username
                                     ],
                                     textInputAction: TextInputAction.next,
-                                    inputFormatters: [
-                                      FilteringTextInputFormatter.allow(
-                                          RegExp(r'[0-9+\s()-]'))
-                                    ],
                                     decoration: _managerInputDecoration(
-                                            'Телефон', Icons.phone_outlined)
+                                            'Логин', Icons.person_outline)
                                         .copyWith(
-                                            prefixText: '+996 ',
                                             helperText:
-                                                'Введите номер без кода страны')),
+                                                'Телефон с кодом страны или email')),
                                 const SizedBox(height: 20),
                                 TextField(
                                     controller: passwordController,
@@ -5842,6 +5838,7 @@ class _ManagerLoginPageState extends State<ManagerLoginPage> {
                                         color: _managerMuted,
                                         fontSize: 13,
                                         height: 1.5)),
+                                const SupportLinks(),
                               ]))))))));
 }
 

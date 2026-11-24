@@ -1058,7 +1058,7 @@ String _resolveBaseUrl() {
     }
   }
 
-  return 'http://185.138.185.36/api';
+  return 'https://185.138.185.36/api';
 }
 
 int _asInt(Object? value) => (value as num?)?.toInt() ?? 0;

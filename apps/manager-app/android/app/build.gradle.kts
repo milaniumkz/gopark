@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -7,6 +9,18 @@ plugins {
 
 if (file("google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
+}
+
+val releaseSigning = Properties().apply {
+    val propertiesFile = rootProject.file("key.properties")
+    if (propertiesFile.exists()) propertiesFile.inputStream().use { load(it) }
+}
+val hasReleaseSigning = listOf("storeFile", "storePassword", "keyAlias", "keyPassword")
+    .all { !releaseSigning.getProperty(it).isNullOrBlank() }
+if (!hasReleaseSigning && gradle.startParameter.taskNames.any {
+        it.contains("bundle", ignoreCase = true) && it.contains("release", ignoreCase = true)
+    }) {
+    throw GradleException("A Play Store bundle requires release signing in android/key.properties")
 }
 
 android {
@@ -34,25 +48,25 @@ android {
         versionName = flutter.versionName
     }
 
-    // CI restores the existing protected key so updates install over the
-    // released brigadier app instead of receiving a fresh ephemeral signature.
     signingConfigs {
         getByName("debug") {
-            val existingKey = System.getenv("GOPARK_MANAGER_KEYSTORE")
-            if (!existingKey.isNullOrBlank()) {
-                storeFile = file(existingKey)
-                storePassword = "android"
-                keyAlias = "androiddebugkey"
-                keyPassword = "android"
+            System.getenv("GOPARK_MANAGER_KEYSTORE")?.takeIf { it.isNotBlank() }?.let {
+                storeFile = file(it)
+            }
+        }
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseSigning.getProperty("storeFile"))
+                storePassword = releaseSigning.getProperty("storePassword")
+                keyAlias = releaseSigning.getProperty("keyAlias")
+                keyPassword = releaseSigning.getProperty("keyPassword")
             }
         }
     }
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName(if (hasReleaseSigning) "release" else "debug")
         }
     }
 }

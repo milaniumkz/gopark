@@ -1,7 +1,7 @@
 name: gopark_driver_app
 description: GoPark driver mobile application
 publish_to: "none"
-version: 0.1.0+3
+version: 1.0.0+2026112001
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -14,6 +14,7 @@ dependencies:
   http: ^1.2.2
   image_picker: ^1.1.2
   shared_preferences: ^2.3.3
+  url_launcher: ^6.3.3
   web: ^1.1.1
 
 dev_dependencies:

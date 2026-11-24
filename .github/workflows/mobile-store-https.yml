@@ -1,0 +1,35 @@
+name: provision-mobile-https
+on:
+  push:
+    branches: ['Project/mobile-store-release']
+    paths:
+      - 'scripts/provision_mobile_https.sh'
+      - '.github/workflows/mobile-store-https.yml'
+  workflow_dispatch:
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure SSH
+        env:
+          PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Provision and verify HTTPS
+        env:
+          SSH_PORT: ${{ secrets.PROD_SSH_PORT }}
+          SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+        run: |
+          bash -n scripts/provision_mobile_https.sh
+          scp -i ~/.ssh/id_ed25519 -P "$SSH_PORT" scripts/provision_mobile_https.sh "$SSH_USER@$SSH_HOST:/tmp/gopark-https-$GITHUB_SHA.sh"
+          ssh -i ~/.ssh/id_ed25519 -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "bash /tmp/gopark-https-$GITHUB_SHA.sh"

@@ -101,8 +101,8 @@ jobs:
         working-directory: apps/manager-app
         run: |
           test -s "$GOPARK_MANAGER_KEYSTORE"
-          build_number=$(( $(date +%s) / 60 ))
-          flutter build apk --release --dart-define=API_BASE_URL=http://185.138.185.36/api --build-number="$build_number"
+          build_number=$(python3 -c 'import re,time; from pathlib import Path; version=re.search(r"^version:.*[+]([0-9]+)",Path("pubspec.yaml").read_text(),re.M); print(max(int(time.time())//60, int(version[1])+1))')
+          flutter build apk --release --dart-define=API_BASE_URL=https://185.138.185.36/api --build-number="$build_number"
       - name: Build matching manager web application
         if: inputs.signing_diagnostics != true
         working-directory: apps/manager-app

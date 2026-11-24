@@ -9,6 +9,7 @@ import 'api.dart';
 import 'platform_storage.dart';
 import 'push_notifications.dart';
 import 'repository.dart';
+import 'support_links.dart';
 
 const _driverBg = Color(0xFFF2F7F3);
 const _driverSurface = Color(0xFFFFFFFF);
@@ -562,7 +563,7 @@ class _DriverDashboardPageState extends State<DriverDashboardPage> {
       messenger.showSnackBar(
         SnackBar(
           content: Text(
-            'Оплата через банк проведена: ${_driverMoneyLabel(amount)}',
+            'Платёж записан в CRM: ${_driverMoneyLabel(amount)}',
           ),
         ),
       );
@@ -873,7 +874,7 @@ class _DriverPaymentActionCard extends StatelessWidget {
                           ),
                         )
                       : const Icon(Icons.credit_card_rounded),
-                  label: Text(submitting ? 'Проводим' : 'Оплатить'),
+                  label: Text(submitting ? 'Сохраняем' : 'Отметить оплату'),
                   style: FilledButton.styleFrom(
                     backgroundColor: _driverGreen,
                     padding: const EdgeInsets.symmetric(vertical: 16),
@@ -4426,7 +4427,7 @@ class _DriverLoginPageState extends State<DriverLoginPage> {
         ),
         child: SafeArea(
           child: Center(
-            child: Padding(
+            child: SingleChildScrollView(
               padding: const EdgeInsets.all(24),
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 380),
@@ -4472,19 +4473,18 @@ class _DriverLoginPageState extends State<DriverLoginPage> {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'Аккаунт создаётся в CRM. Первый пароль: 123456.',
+                        'Доступ выдаёт администрация вашего автопарка.',
                         style: TextStyle(color: _driverMuted, height: 1.5),
                       ),
                       const SizedBox(height: 20),
                       TextField(
                         controller: loginController,
-                        keyboardType: TextInputType.phone,
+                        keyboardType: TextInputType.emailAddress,
                         decoration: _driverInputDecoration(
                           'Логин',
                           Icons.phone_android_rounded,
                         ).copyWith(
-                          prefixText: '+996 ',
-                          helperText: 'Введите номер без кода страны',
+                          helperText: 'Телефон с кодом страны или email',
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -4549,6 +4549,7 @@ class _DriverLoginPageState extends State<DriverLoginPage> {
                               : 'Запросить сброс пароля',
                         ),
                       ),
+                      const SupportLinks(),
                     ],
                   ),
                 ),
@@ -5363,13 +5364,13 @@ Future<num?> _showPartialPaymentSheet(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'Оплата частями',
+                      'Отметить внесённый платёж',
                       style:
                           TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
                     ),
                     const SizedBox(height: 8),
                     const Text(
-                      'Можно оплатить любую сумму. Сначала закрывается платеж за сегодня, затем просрочка, остаток уходит на будущие платежи.',
+                      'Укажите сумму, которую вы уже внесли наличными или перевели предприятию. Приложение только записывает платёж в CRM и не списывает деньги. Сначала закрывается платёж за сегодня, затем просрочка, остаток уходит на будущие платежи.',
                       style: TextStyle(color: _driverMuted, height: 1.5),
                     ),
                     const SizedBox(height: 16),
@@ -5437,7 +5438,7 @@ Future<num?> _showPartialPaymentSheet(
                             style: FilledButton.styleFrom(
                               backgroundColor: _driverGreen,
                             ),
-                            child: const Text('Оплатить'),
+                            child: const Text('Подтвердить оплату'),
                           ),
                         ),
                       ],
