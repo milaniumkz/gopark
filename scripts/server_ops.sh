@@ -12,6 +12,28 @@ compose() {
 }
 
 case "$OPERATION" in
+  release-diagnostic)
+    cat "$BASE/gopark-current-sha"
+    docker inspect --format '{{.Name}} {{.Config.Image}} running={{.State.Running}}' gopark-api gopark-worker gopark-crm-web
+    docker exec -i gopark-api node --input-type=module <<'JS'
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
+const { PrismaClient } = require("./apps/api/node_modules/@prisma/client");
+const p = new PrismaClient();
+try {
+  await Promise.all([
+    p.incident.findFirst({select:{serviceDetails:true,accidentDetails:true,statusHistory:true}}),
+    p.partMovement.findFirst({select:{requesterCompany:true,incidentId:true,expenseId:true}}),
+    p.managerCalendarComment.findFirst({select:{id:true}}),
+    p.car.count({where:{status:"written_off"}}),
+  ]);
+  console.log("Service, inventory and manager calendar database reads OK");
+} finally { await p.$disconnect(); }
+JS
+    docker exec gopark-crm-web sha256sum /usr/share/nginx/html/index.html
+    curl --max-time 20 -fsS https://185.138.185.36/api/health
+    printf '\n'
+    ;;
   manager-performance-diagnostic)
     docker exec gopark-api node --input-type=module -e 'const {PrismaClient}=await import("./apps/api/node_modules/@prisma/client/default.js");const {MobileManagerService}=await import("./apps/api/dist/apps/api/src/modules/mobile-manager/mobile-manager.service.js");const {DriverMobileReadService}=await import("./apps/api/dist/apps/api/src/modules/mobile-read/driver-mobile-read.service.js");const {MobileAccessService}=await import("./apps/api/dist/apps/api/src/modules/mobile-read/mobile-access.service.js");const p=new PrismaClient();let failed=false;try{const users=await p.user.findMany({where:{role:"manager",status:"active"},select:{id:true,companyName:true,manager:{select:{level:true}}}});const service=new MobileManagerService(new DriverMobileReadService(),new MobileAccessService(),{});const results=[];for(const user of users){try{const actor={id:user.id,role:"manager",companyName:user.companyName,managerLevel:user.manager?.level??"regular"};let start=performance.now();const summary=await service.getSummary(actor);const summaryMs=Math.round(performance.now()-start);start=performance.now();const cars=await service.getVehicles(actor);const vehiclesMs=Math.round(performance.now()-start);start=performance.now();const drivers=await service.getDrivers(actor);results.push({level:actor.managerLevel,drivers:drivers.length,cars:cars.length,summaryMs,vehiclesMs,driversMs:Math.round(performance.now()-start),summaryMatches:summary.assignedDrivers===drivers.length});if(summary.assignedDrivers!==drivers.length)failed=true;}catch(e){failed=true;results.push({error:e.constructor.name});}}console.log(JSON.stringify({managerAccounts:users.length,results,passed:!failed}));}finally{await p.$disconnect();process.exit(failed?1:0)}'
     ;;
