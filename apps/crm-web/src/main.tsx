@@ -6,7 +6,9 @@ import { loadCrmSession, loginCrm, logoutCrm, type CrmAuthSession } from "./lib/
 import "./styles.css";
 import { LoginPage } from "./ui/LoginPage";
 import { AuthProvider } from "./ui/AuthContext";
-import { registerCrmBrowserPush } from "./lib/browser-push";
+function registerCrmBrowserPush() {
+  return import("./lib/browser-push").then((module) => module.registerCrmBrowserPush()).catch(() => undefined);
+}
 
 function CrmRoot() {
   const [session, setSession] = React.useState<CrmAuthSession | null>(() => loadCrmSession());

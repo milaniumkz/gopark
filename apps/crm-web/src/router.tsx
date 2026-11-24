@@ -1,42 +1,54 @@
-import type { ReactElement } from "react";
+import { Component, lazy, Suspense, type ReactElement, type ReactNode } from "react";
 import { createBrowserRouter } from "react-router-dom";
 import { Navigate } from "react-router-dom";
 import { AppLayout } from "./ui/AppLayout";
-import { DashboardPage } from "./pages/DashboardPage";
-import { VehiclesPage } from "./pages/VehiclesPage";
-import { DriversPage } from "./pages/DriversPage";
-import { DriverDetailPage } from "./pages/DriverDetailPage";
-import { ContractsPage } from "./pages/ContractsPage";
-import { PaymentsPage } from "./pages/PaymentsPage";
-import { ServicePage } from "./pages/ServicePage";
-import { PartsPage } from "./pages/PartsPage";
-import { InsuranceGpsPage } from "./pages/InsuranceGpsPage";
-import { InspectionPage } from "./pages/InspectionPage";
-import { FinesPage } from "./pages/FinesPage";
-import { BlacklistPage } from "./pages/BlacklistPage";
-import { WriteoffsPage } from "./pages/WriteoffsPage";
-import { ImportsPage } from "./pages/ImportsPage";
-import { PayoutsPage } from "./pages/PayoutsPage";
-import { LedgerPage } from "./pages/LedgerPage";
-import { ReportsPage } from "./pages/ReportsPage";
-import { UsersPage } from "./pages/UsersPage";
-import { SettingsPage } from "./pages/SettingsPage";
-import { AuditPage } from "./pages/AuditPage";
-import { OutboxPage } from "./pages/OutboxPage";
-import { FinancialOpsPage } from "./pages/FinancialOpsPage";
-import { IncidentsPage } from "./pages/IncidentsPage";
-import { ContractDetailPage } from "./pages/ContractDetailPage";
-import { NotificationsPage } from "./pages/NotificationsPage";
-import { VehicleDetailPage } from "./pages/VehicleDetailPage";
-import { SupportPage } from "./pages/SupportPage";
-import { ChatsPage } from "./pages/ChatsPage";
+const DashboardPage = lazy(() => import("./pages/DashboardPage").then((module) => ({ default: module.DashboardPage })));
+const VehiclesPage = lazy(() => import("./pages/VehiclesPage").then((module) => ({ default: module.VehiclesPage })));
+const DriversPage = lazy(() => import("./pages/DriversPage").then((module) => ({ default: module.DriversPage })));
+const DriverDetailPage = lazy(() => import("./pages/DriverDetailPage").then((module) => ({ default: module.DriverDetailPage })));
+const ContractsPage = lazy(() => import("./pages/ContractsPage").then((module) => ({ default: module.ContractsPage })));
+const PaymentsPage = lazy(() => import("./pages/PaymentsPage").then((module) => ({ default: module.PaymentsPage })));
+const ServicePage = lazy(() => import("./pages/ServicePage").then((module) => ({ default: module.ServicePage })));
+const PartsPage = lazy(() => import("./pages/PartsPage").then((module) => ({ default: module.PartsPage })));
+const InsuranceGpsPage = lazy(() => import("./pages/InsuranceGpsPage").then((module) => ({ default: module.InsuranceGpsPage })));
+const InspectionPage = lazy(() => import("./pages/InspectionPage").then((module) => ({ default: module.InspectionPage })));
+const FinesPage = lazy(() => import("./pages/FinesPage").then((module) => ({ default: module.FinesPage })));
+const BlacklistPage = lazy(() => import("./pages/BlacklistPage").then((module) => ({ default: module.BlacklistPage })));
+const WriteoffsPage = lazy(() => import("./pages/WriteoffsPage").then((module) => ({ default: module.WriteoffsPage })));
+const ImportsPage = lazy(() => import("./pages/ImportsPage").then((module) => ({ default: module.ImportsPage })));
+const PayoutsPage = lazy(() => import("./pages/PayoutsPage").then((module) => ({ default: module.PayoutsPage })));
+const LedgerPage = lazy(() => import("./pages/LedgerPage").then((module) => ({ default: module.LedgerPage })));
+const ReportsPage = lazy(() => import("./pages/ReportsPage").then((module) => ({ default: module.ReportsPage })));
+const UsersPage = lazy(() => import("./pages/UsersPage").then((module) => ({ default: module.UsersPage })));
+const SettingsPage = lazy(() => import("./pages/SettingsPage").then((module) => ({ default: module.SettingsPage })));
+const AuditPage = lazy(() => import("./pages/AuditPage").then((module) => ({ default: module.AuditPage })));
+const OutboxPage = lazy(() => import("./pages/OutboxPage").then((module) => ({ default: module.OutboxPage })));
+const FinancialOpsPage = lazy(() => import("./pages/FinancialOpsPage").then((module) => ({ default: module.FinancialOpsPage })));
+const IncidentsPage = lazy(() => import("./pages/IncidentsPage").then((module) => ({ default: module.IncidentsPage })));
+const ContractDetailPage = lazy(() => import("./pages/ContractDetailPage").then((module) => ({ default: module.ContractDetailPage })));
+const NotificationsPage = lazy(() => import("./pages/NotificationsPage").then((module) => ({ default: module.NotificationsPage })));
+const VehicleDetailPage = lazy(() => import("./pages/VehicleDetailPage").then((module) => ({ default: module.VehicleDetailPage })));
+const SupportPage = lazy(() => import("./pages/SupportPage").then((module) => ({ default: module.SupportPage })));
+const ChatsPage = lazy(() => import("./pages/ChatsPage").then((module) => ({ default: module.ChatsPage })));
 import { RoleGate } from "./ui/RoleGate";
 import { crmNavigationItems, hasCrmAccess } from "./lib/crm-access";
 import { useAuth } from "./ui/AuthContext";
 import { RouteEntityModal } from "./ui/RouteEntityModal";
 
+class PageLoadBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  render() {
+    if (this.state.failed) return <div role="alert" style={{ padding: 24 }}>
+      <p>Не удалось загрузить раздел. Проверьте соединение или обновите страницу.</p>
+      <button type="button" onClick={() => window.location.reload()}>Обновить страницу</button>
+    </div>;
+    return this.props.children;
+  }
+}
+
 function withRoleGate(routeKey: import("./lib/crm-access").CrmRouteKey, element: ReactElement) {
-  return <RoleGate routeKey={routeKey}>{element}</RoleGate>;
+  return <RoleGate routeKey={routeKey}><PageLoadBoundary key={routeKey}><Suspense fallback={<div role="status" style={{ padding: 24 }}>Загрузка раздела…</div>}>{element}</Suspense></PageLoadBoundary></RoleGate>;
 }
 
 function CrmHomeRedirect() {

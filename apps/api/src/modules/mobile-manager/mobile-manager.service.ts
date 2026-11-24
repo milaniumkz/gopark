@@ -91,16 +91,15 @@ export class MobileManagerService {
   ): Promise<ManagerDashboardSummary> {
     const scopedDrivers =
       await this.mobileAccessService.getScopedDrivers(currentUser);
-    const [cars, alerts] = await Promise.all([
+    const [cars, alerts, summarySnapshot] = await Promise.all([
       this.getVehicles(currentUser),
       this.getScopedAlerts(currentUser),
-    ]);
-    const summarySnapshot =
-      await this.driverMobileReadService.getManagerDriversSummary(
+      this.driverMobileReadService.getManagerDriversSummary(
         scopedDrivers.map((driver) => driver.id),
         this.today(),
         scopedDrivers,
-      );
+      ),
+    ]);
 
     return {
       assignedDrivers: scopedDrivers.length,
@@ -126,7 +125,7 @@ export class MobileManagerService {
     const drivers =
       await this.mobileAccessService.getScopedDrivers(currentUser);
     const duePeriod = this.getDatePeriod(dueDateFrom, dueDateTo);
-    const [assignmentSnapshots, financeSnapshots, users] = await Promise.all([
+    const [assignmentSnapshots, financeSnapshots, users, historicalSnapshots, effectiveStatuses] = await Promise.all([
       this.driverMobileReadService.getDriverAssignmentSnapshots(
         drivers.map((driver) => ({
           driverId: driver.id,
@@ -140,16 +139,9 @@ export class MobileManagerService {
       currentUser?.companyName
         ? this.userRepository.listAdminByCompany(currentUser.companyName)
         : this.userRepository.listAdmin(),
+      this.getHistoricalFinanceSnapshots(drivers, currentUser),
+      this.statusRequestPolicyService.getEffectiveCurrentStatuses(drivers, this.today()),
     ]);
-    const historicalSnapshots = await this.getHistoricalFinanceSnapshots(
-      drivers,
-      currentUser,
-    );
-    const effectiveStatuses =
-      await this.statusRequestPolicyService.getEffectiveCurrentStatuses(
-        drivers,
-        this.today(),
-      );
     const duePeriodAmounts = new Map<string, number>();
     const overduePeriodAmounts = new Map<string, number>();
     if (duePeriod) {
