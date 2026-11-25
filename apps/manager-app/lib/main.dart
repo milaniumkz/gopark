@@ -1848,6 +1848,20 @@ String _managerCurrentVehicleDriver(ManagerVehicleDto vehicle) {
   return 'назначен';
 }
 
+Future<bool> _confirmManagerContractTermination(BuildContext context) async {
+  return await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Расторгнуть договор?'),
+      content: const Text('Договор будет расторгнут, автомобиль перейдет в офис. Долг сохранится.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(dialogContext).pop(false), child: const Text('Отмена')),
+        FilledButton(onPressed: () => Navigator.of(dialogContext).pop(true), child: const Text('Расторгнуть')),
+      ],
+    ),
+  ) ?? false;
+}
+
 class ManagerDriversPage extends StatefulWidget {
   const ManagerDriversPage({
     super.key,
@@ -1877,6 +1891,24 @@ class _ManagerDriversPageState extends State<ManagerDriversPage> {
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  Future<void> _terminateDriverContract(ManagerAssignedDriverDto driver) async {
+    if (_pendingDriverAction != null) return;
+    final confirmed = await _confirmManagerContractTermination(context);
+    if (!confirmed || !mounted) return;
+    setState(() => _pendingDriverAction = '${driver.id}:terminate-contract');
+    try {
+      await widget.repository.terminateDriverContract(driver.id);
+      if (!mounted) return;
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Договор расторгнут')));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Не удалось расторгнуть договор: ${_managerUserError(error)}')));
+    } finally {
+      if (mounted) setState(() => _pendingDriverAction = null);
+    }
   }
 
   Future<void> _createDriverIncidentAction(
@@ -2248,6 +2280,7 @@ class _ManagerDriversPageState extends State<ManagerDriversPage> {
                     ),
                     onRiskStatusChanged: (riskStatus) =>
                         _updateDriverRiskStatus(item, riskStatus),
+                    onTerminate: () => _terminateDriverContract(item),
                   ),
                 ),
               ),
@@ -3369,28 +3402,9 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
   }
 
   Future<void> _terminateContract() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Расторгнуть договор?'),
-        content: const Text(
-          'Договор будет расторгнут, автомобиль перейдет в офис.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Отмена'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Расторгнуть'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) {
-      return;
-    }
+    if (_pendingAction != null) return;
+    final confirmed = await _confirmManagerContractTermination(context);
+    if (!confirmed || !mounted) return;
 
     setState(() => _pendingAction = 'terminate-contract');
     try {
@@ -3619,7 +3633,7 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
                         driverId: widget.driverId,
                         embedded: true),
                     const SizedBox(height: 6),
-                    if (data.contractNumber != null)
+                    if (data.canTerminateContract ?? (data.contractNumber != null && data.status != 'terminated'))
                       OutlinedButton.icon(
                         onPressed:
                             _pendingAction == null ? _terminateContract : null,
@@ -3628,7 +3642,9 @@ class _ManagerDriverDetailPageState extends State<ManagerDriverDetailPage> {
                           'Расторгнуть',
                           style: TextStyle(fontSize: 12.5),
                         ),
-                      ),
+                      )
+                    else
+                      const Text('Нет действующего договора для расторжения'),
                   ] else if (_selectedTab == 2) ...[
                     const _SectionTitle('Инциденты'),
                     const SizedBox(height: 6),
@@ -4672,8 +4688,10 @@ class ManagerDriverCard extends StatelessWidget {
     required this.onAccident,
     required this.onImpound,
     required this.onRiskStatusChanged,
+    this.onTerminate,
   });
 
+  final VoidCallback? onTerminate;
   final ManagerAssignedDriverDto driver;
   final ManagerRepository? repository;
   final num? yesterdayOverdue;
@@ -4851,6 +4869,15 @@ class ManagerDriverCard extends StatelessWidget {
                   repository: repository!,
                   driverId: driver.id,
                   embedded: true),
+            const SizedBox(height: 12),
+            if (onTerminate != null && (driver.canTerminateContract ?? (driver.contractId != null && driver.status != 'terminated')))
+              OutlinedButton.icon(
+                onPressed: disabled ? null : onTerminate,
+                icon: const Icon(Icons.link_off_rounded),
+                label: const Text('Расторгнуть договор'),
+              )
+            else if (driver.canTerminateContract == false || driver.contractId == null || driver.status == 'terminated')
+              const Text('Нет действующего договора для расторжения'),
           ]),
     ]));
   }

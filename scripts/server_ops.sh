@@ -30,7 +30,7 @@ try {
   console.log(JSON.stringify({matchedDrivers:matches.length,paymentsLast24h:payments.length,succeededLast24h:payments.filter(p=>p.status==="succeeded").length,latestAt:latest?.createdAt.toISOString()??null,latestStatus:latest?.status??null,latestLedgerRecorded:ledger>0,latestOutboxRecorded:events>0,possibleRepeatPairs:duplicates}));
 } finally { await p.$disconnect(); }
 JS
-    for container in gopark-api gopark-crm-web gopark-https; do docker logs --since=48h "$container" 2>&1 || true; done | docker exec -i -e DRIVER_SEARCH gopark-api node --input-type=module -e '
+    for container in gopark-api gopark-crm-web gopark-https; do docker logs --since=48h --tail=10000 "$container" 2>&1 || true; done | docker exec -i -e DRIVER_SEARCH gopark-api node --input-type=module -e '
 import {createRequire} from "node:module"; import {readFileSync} from "node:fs";
 const require=createRequire(import.meta.url); const {PrismaClient}=require("./apps/api/node_modules/@prisma/client");const p=new PrismaClient();
 try {const term=process.env.DRIVER_SEARCH.trim();const users=await p.driver.findMany({where:{OR:[{firstName:{contains:term,mode:"insensitive"}},{lastName:{contains:term,mode:"insensitive"}}]},select:{id:true}});

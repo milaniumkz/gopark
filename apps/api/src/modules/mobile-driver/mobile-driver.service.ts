@@ -396,7 +396,7 @@ export class MobileDriverService {
       paymentForDate: new Date().toISOString().slice(0, 10),
       paymentType: body.paymentType,
     });
-    await Promise.allSettled([
+    void Promise.allSettled([
       this.notificationsCreateService.createDriverPaymentRegistered(driverId),
       this.notificationsCreateService.createManagerPaymentRegistered(driverId, amount),
     ]);
