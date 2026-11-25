@@ -12,6 +12,34 @@ compose() {
 }
 
 case "$OPERATION" in
+  driver-payment-diagnostic)
+    test -n "${DRIVER_SEARCH:-}"
+    docker exec -i -e DRIVER_SEARCH gopark-api node --input-type=module <<'JS'
+import {createRequire} from "node:module";
+const require=createRequire(import.meta.url);
+const {PrismaClient}=require("./apps/api/node_modules/@prisma/client");
+const p=new PrismaClient();
+try {
+  const term=process.env.DRIVER_SEARCH.trim();
+  const matches=await p.driver.findMany({where:{OR:[{firstName:{contains:term,mode:"insensitive"}},{lastName:{contains:term,mode:"insensitive"}}]},select:{id:true}});
+  const payments=await p.payment.findMany({where:{driverId:{in:matches.map(d=>d.id)},createdAt:{gte:new Date(Date.now()-86400000)}},orderBy:{createdAt:"desc"},take:50,select:{id:true,driverId:true,status:true,amount:true,createdAt:true}});
+  const latest=payments[0];
+  const ledger=latest?await p.ledgerEntry.count({where:{OR:[{paymentId:latest.id},{externalReference:latest.id}]}}):0;
+  const events=latest?await p.outboxEvent.count({where:{topic:"payment.registered",aggregateId:latest.id}}):0;
+  const duplicates=payments.filter((a,i)=>payments.slice(i+1).some(b=>a.driverId===b.driverId&&a.amount.toString()===b.amount.toString()&&Math.abs(a.createdAt-b.createdAt)<120000)).length;
+  console.log(JSON.stringify({matchedDrivers:matches.length,paymentsLast24h:payments.length,succeededLast24h:payments.filter(p=>p.status==="succeeded").length,latestAt:latest?.createdAt.toISOString()??null,latestStatus:latest?.status??null,latestLedgerRecorded:ledger>0,latestOutboxRecorded:events>0,possibleRepeatPairs:duplicates}));
+} finally { await p.$disconnect(); }
+JS
+    for container in gopark-api gopark-crm-web gopark-https; do docker logs --since=48h --tail=10000 "$container" 2>&1 || true; done | docker exec -i -e DRIVER_SEARCH gopark-api node --input-type=module -e '
+import {createRequire} from "node:module"; import {readFileSync} from "node:fs";
+const require=createRequire(import.meta.url); const {PrismaClient}=require("./apps/api/node_modules/@prisma/client");const p=new PrismaClient();
+try {const term=process.env.DRIVER_SEARCH.trim();const users=await p.driver.findMany({where:{OR:[{firstName:{contains:term,mode:"insensitive"}},{lastName:{contains:term,mode:"insensitive"}}]},select:{id:true}});
+const rows=readFileSync(0,"utf8").split("\n").filter(l=>users.some(d=>l.includes(d.id)));
+const posts=rows.filter(l=>l.includes("POST")&&/payment/.test(l));const statuses={};let maxPostMs=0,maxReadMs=0;
+for(const line of rows){const m=line.match(/ -> (\d{3}) (\d+)ms/);if(!m)continue;if(line.includes("POST")&&/payment/.test(line)){statuses[m[1]]=(statuses[m[1]]??0)+1;maxPostMs=Math.max(maxPostMs,Number(m[2]));}else if(line.includes("GET"))maxReadMs=Math.max(maxReadMs,Number(m[2]));}
+console.log(JSON.stringify({paymentPostLogLines:posts.length,paymentPostCompletedStatuses:statuses,maxPaymentPostMs:maxPostMs,maxDriverReadMs:maxReadMs,gatewayTimeoutLines:rows.filter(l=>/HTTP[^ ]*" 504|upstream timed out/.test(l)).length}));
+}finally{await p.$disconnect();}'
+    ;;
   release-diagnostic)
     cat "$BASE/gopark-current-sha"
     docker inspect --format '{{.Name}} {{.Config.Image}} running={{.State.Running}}' gopark-api gopark-worker gopark-crm-web

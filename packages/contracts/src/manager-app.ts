@@ -10,6 +10,7 @@ export interface ManagerDashboardSummary {
 }
 
 export interface ManagerAssignedDriverItem {
+  canTerminateContract?: boolean;
   id: string;
   fullName: string;
   phone: string;
@@ -79,6 +80,7 @@ export interface ManagerTeamItem {
 }
 
 export interface ManagerDriverDetail {
+  canTerminateContract?: boolean;
   id: string;
   fullName: string;
   phone: string;

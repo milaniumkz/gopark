@@ -211,6 +211,7 @@ export class MobileManagerService {
           ? (managerNameById.get(driver.managerId) ?? null)
           : null,
         contractId: effectiveContractId,
+        canTerminateContract: !!driver.activeContractId,
         photoUrl: driver.photoUrl ?? null,
         photoStatus: driver.photoStatus ?? "missing",
       };
@@ -864,6 +865,7 @@ export class MobileManagerService {
       weeklyDayOff: driver.weeklyDayOff ?? null,
       vehicle: effectiveVehicle,
       contractNumber: effectiveContractNumber,
+      canTerminateContract: !!driver.activeContractId,
       managerId: driver.managerId,
       debt: effectiveFinance.currentDebt,
       creditBalance: effectiveFinance.creditBalance,
@@ -950,11 +952,11 @@ export class MobileManagerService {
     }
 
     await this.contractRepository.update(contract.id, { status: "terminated" });
-    await this.notificationsCreateService.createManagerDriverEvent(
+    void this.notificationsCreateService.createManagerDriverEvent(
       driverId,
       `Договор расторгнут: ${contract.contractNumber}`,
       "Договор расторгнут бригадиром, автомобиль переведен в офис",
-    );
+    ).catch(() => console.warn("Contract termination notification failed"));
 
     return this.getDriverDetail(driverId, currentUser);
   }

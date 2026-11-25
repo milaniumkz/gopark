@@ -28,13 +28,11 @@ export class OutboxService {
     });
 
     if (!dispatchAt || new Date(dispatchAt).getTime() <= Date.now()) {
-      try {
-        await this.outboxDispatchService.enqueueEvent(event.id);
-      } catch (error) {
-        console.warn(
-          `[gopark-api] failed to enqueue outbox event ${event.id}: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
+      // The event is already durable in PostgreSQL. The worker sweep retries
+      // pending events if Redis is slow, unavailable, or the API restarts.
+      void Promise.resolve().then(() => this.outboxDispatchService.enqueueEvent(event.id)).catch(() => {
+        console.warn("[gopark-api] outbox enqueue deferred to the pending-event sweep");
+      });
     }
 
     return event;

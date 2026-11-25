@@ -82,6 +82,7 @@ class ManagerSummaryDto {
 class ManagerAssignedDriverDto {
   const ManagerAssignedDriverDto({
     required this.id,
+    this.canTerminateContract,
     required this.fullName,
     required this.phone,
     required this.status,
@@ -109,6 +110,7 @@ class ManagerAssignedDriverDto {
   factory ManagerAssignedDriverDto.fromJson(Map<String, dynamic> json) {
     return ManagerAssignedDriverDto(
       id: json['id'] as String,
+      canTerminateContract: json['canTerminateContract'] as bool?,
       fullName: json['fullName'] as String,
       phone: json['phone'] as String,
       status: json['status'] as String,
@@ -137,6 +139,7 @@ class ManagerAssignedDriverDto {
   }
 
   final String id;
+  final bool? canTerminateContract;
   final String fullName;
   final String phone;
   final String status;
@@ -529,6 +532,7 @@ class ManagerDriverIncidentDto {
 class ManagerDriverDetailDto {
   const ManagerDriverDetailDto({
     required this.id,
+    this.canTerminateContract,
     required this.fullName,
     required this.phone,
     required this.status,
@@ -559,6 +563,7 @@ class ManagerDriverDetailDto {
   factory ManagerDriverDetailDto.fromJson(Map<String, dynamic> json) {
     return ManagerDriverDetailDto(
       id: json['id'] as String,
+      canTerminateContract: json['canTerminateContract'] as bool?,
       fullName: json['fullName'] as String,
       phone: json['phone'] as String,
       status: json['status'] as String,
@@ -592,6 +597,7 @@ class ManagerDriverDetailDto {
   }
 
   final String id;
+  final bool? canTerminateContract;
   final String fullName;
   final String phone;
   final String status;
