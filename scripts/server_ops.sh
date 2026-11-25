@@ -30,6 +30,15 @@ try {
   console.log(JSON.stringify({matchedDrivers:matches.length,paymentsLast24h:payments.length,succeededLast24h:payments.filter(p=>p.status==="succeeded").length,latestAt:latest?.createdAt.toISOString()??null,latestStatus:latest?.status??null,latestLedgerRecorded:ledger>0,latestOutboxRecorded:events>0,possibleRepeatPairs:duplicates}));
 } finally { await p.$disconnect(); }
 JS
+    for container in gopark-api gopark-crm-web gopark-https; do docker logs --since=48h "$container" 2>&1 || true; done | docker exec -i -e DRIVER_SEARCH gopark-api node --input-type=module -e '
+import {createRequire} from "node:module"; import {readFileSync} from "node:fs";
+const require=createRequire(import.meta.url); const {PrismaClient}=require("./apps/api/node_modules/@prisma/client");const p=new PrismaClient();
+try {const term=process.env.DRIVER_SEARCH.trim();const users=await p.driver.findMany({where:{OR:[{firstName:{contains:term,mode:"insensitive"}},{lastName:{contains:term,mode:"insensitive"}}]},select:{id:true}});
+const rows=readFileSync(0,"utf8").split("\n").filter(l=>users.some(d=>l.includes(d.id)));
+const posts=rows.filter(l=>l.includes("POST")&&/payment/.test(l));const statuses={};let maxPostMs=0,maxReadMs=0;
+for(const line of rows){const m=line.match(/ -> (\d{3}) (\d+)ms/);if(!m)continue;if(line.includes("POST")&&/payment/.test(line)){statuses[m[1]]=(statuses[m[1]]??0)+1;maxPostMs=Math.max(maxPostMs,Number(m[2]));}else if(line.includes("GET"))maxReadMs=Math.max(maxReadMs,Number(m[2]));}
+console.log(JSON.stringify({paymentPostLogLines:posts.length,paymentPostCompletedStatuses:statuses,maxPaymentPostMs:maxPostMs,maxDriverReadMs:maxReadMs,gatewayTimeoutLines:rows.filter(l=>/HTTP[^ ]*" 504|upstream timed out/.test(l)).length}));
+}finally{await p.$disconnect();}'
     ;;
   release-diagnostic)
     cat "$BASE/gopark-current-sha"
