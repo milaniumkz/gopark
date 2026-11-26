@@ -18,17 +18,20 @@ case "$OPERATION" in
 import {createRequire} from "node:module";const require=createRequire(import.meta.url);const {PrismaClient}=require("./apps/api/node_modules/@prisma/client");const p=new PrismaClient();
 try {
  const phone=process.env.DRIVER_PHONE;
- const all=await p.driver.findMany({select:{id:true,userId:true,phone:true,managerId:true,firstName:true,lastName:true}});
+ const all=await p.driver.findMany({select:{id:true,userId:true,phone:true,managerId:true,firstName:true,lastName:true,companyName:true}});
  const accounts=await p.user.findMany({select:{id:true,phone:true,email:true,role:true}});
  const matchedAccounts=accounts.filter(u=>(u.phone??"").replace(/\D/g,"").endsWith(phone)||(u.email??"").split("@")[0]===phone);
- const matches=all.filter(d=>d.phone.replace(/\D/g,"").endsWith(phone)||matchedAccounts.some(u=>u.id===d.userId));
+ let matches=all.filter(d=>d.phone.replace(/\D/g,"").endsWith(phone)||matchedAccounts.some(u=>u.id===d.userId));
+ const matchedManagers=await p.manager.findMany({where:{userId:{in:matchedAccounts.filter(u=>u.role==="manager").map(u=>u.id)}},select:{id:true,userId:true,level:true,user:{select:{companyName:true}}}});
+ const selectedViaManager=matches.length===0&&matchedManagers.length>0;
+ if(selectedViaManager)matches=all.filter(d=>matchedManagers.some(m=>d.managerId===m.id||d.managerId===m.userId||(m.level==="senior"&&d.companyName===m.user.companyName)));
  const ids=matches.map(d=>d.id),users=[...new Set([...matches.map(d=>d.userId).filter(Boolean),...matchedAccounts.map(u=>u.id)])];
  const requests=await p.driverStatusRequest.findMany({where:{driverId:{in:[...ids,...users]}},orderBy:{createdAt:"desc"},take:20});
  const managers=await p.manager.findMany({where:{id:{in:matches.map(d=>d.managerId).filter(Boolean)}},select:{id:true,userId:true}});
  const alerts=await p.managerAlert.findMany({where:{createdAt:{gte:new Date(Date.now()-7*86400000)},OR:matches.map(d=>({details:{contains:[d.firstName,d.lastName].join(" ")}}))},select:{managerId:true,createdAt:true,title:true}});
  const notices=await p.notification.groupBy({by:["templateCode","status"],where:{driverId:{in:ids},createdAt:{gte:new Date(Date.now()-7*86400000)}},_count:{_all:true}});
  const incidents=await p.incident.findMany({where:{driverId:{in:ids},incidentType:{in:["force_majeure","sick","illness"]}},select:{incidentType:true,status:true,occurredAt:true},take:10});
- console.log(JSON.stringify({matchedDrivers:matches.length,matchedAccounts:matchedAccounts.map(u=>({role:u.role,hasDriverProfile:all.some(d=>d.userId===u.id)})),possibleSameSuffixProfiles:all.filter(d=>d.phone.replace(/\D/g,"").endsWith(phone.slice(-6))).length,hasAssignedManager:matches.map(d=>!!d.managerId),managerProfilesFound:managers.length,requests:requests.map(r=>({type:r.type,status:r.status,period:r.period,createdAt:r.createdAt.toISOString(),hasNote:!!r.note,canonicalDriver:ids.includes(r.driverId)})),alertsLast7d:alerts.length,assignedManagerAlerts:alerts.filter(a=>managers.some(m=>a.managerId===m.id||a.managerId===m.userId)).length,notices:notices.map(n=>({template:n.templateCode,status:n.status,count:n._count._all})),relatedIncidents:incidents}));
+ console.log(JSON.stringify({matchedDrivers:matches.length,selectedViaManager,matchedAccounts:matchedAccounts.map(u=>({role:u.role,hasDriverProfile:all.some(d=>d.userId===u.id)})),possibleSameSuffixProfiles:all.filter(d=>d.phone.replace(/\D/g,"").endsWith(phone.slice(-6))).length,hasAssignedManager:matches.map(d=>!!d.managerId),managerProfilesFound:managers.length,requests:requests.map(r=>({type:r.type,status:r.status,period:r.period,createdAt:r.createdAt.toISOString(),hasNote:!!r.note,canonicalDriver:ids.includes(r.driverId)})),alertsLast7d:alerts.length,assignedManagerAlerts:alerts.filter(a=>managers.some(m=>a.managerId===m.id||a.managerId===m.userId)).length,notices:notices.map(n=>({template:n.templateCode,status:n.status,count:n._count._all})),relatedIncidents:incidents}));
 }finally{await p.$disconnect();}
 JS
     for container in gopark-api gopark-crm-web gopark-https; do docker logs --since=48h --tail=10000 "$container" 2>&1 || true; done | docker exec -i -e DRIVER_PHONE gopark-api node --input-type=module -e '
