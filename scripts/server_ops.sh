@@ -19,19 +19,21 @@ import {createRequire} from "node:module";const require=createRequire(import.met
 try {
  const phone=process.env.DRIVER_PHONE;
  const all=await p.driver.findMany({select:{id:true,userId:true,phone:true,managerId:true,firstName:true,lastName:true}});
- const matches=all.filter(d=>d.phone.replace(/\D/g,"").endsWith(phone));
- const ids=matches.map(d=>d.id),users=matches.map(d=>d.userId).filter(Boolean);
+ const accounts=await p.user.findMany({select:{id:true,phone:true,email:true,role:true}});
+ const matchedAccounts=accounts.filter(u=>(u.phone??"").replace(/\D/g,"").endsWith(phone)||(u.email??"").split("@")[0]===phone);
+ const matches=all.filter(d=>d.phone.replace(/\D/g,"").endsWith(phone)||matchedAccounts.some(u=>u.id===d.userId));
+ const ids=matches.map(d=>d.id),users=[...new Set([...matches.map(d=>d.userId).filter(Boolean),...matchedAccounts.map(u=>u.id)])];
  const requests=await p.driverStatusRequest.findMany({where:{driverId:{in:[...ids,...users]}},orderBy:{createdAt:"desc"},take:20});
  const managers=await p.manager.findMany({where:{id:{in:matches.map(d=>d.managerId).filter(Boolean)}},select:{id:true,userId:true}});
  const alerts=await p.managerAlert.findMany({where:{createdAt:{gte:new Date(Date.now()-7*86400000)},OR:matches.map(d=>({details:{contains:[d.firstName,d.lastName].join(" ")}}))},select:{managerId:true,createdAt:true,title:true}});
  const notices=await p.notification.groupBy({by:["templateCode","status"],where:{driverId:{in:ids},createdAt:{gte:new Date(Date.now()-7*86400000)}},_count:{_all:true}});
  const incidents=await p.incident.findMany({where:{driverId:{in:ids},incidentType:{in:["force_majeure","sick","illness"]}},select:{incidentType:true,status:true,occurredAt:true},take:10});
- console.log(JSON.stringify({matchedDrivers:matches.length,hasAssignedManager:matches.map(d=>!!d.managerId),managerProfilesFound:managers.length,requests:requests.map(r=>({type:r.type,status:r.status,period:r.period,createdAt:r.createdAt.toISOString(),hasNote:!!r.note,canonicalDriver:ids.includes(r.driverId)})),alertsLast7d:alerts.length,assignedManagerAlerts:alerts.filter(a=>managers.some(m=>a.managerId===m.id||a.managerId===m.userId)).length,notices:notices.map(n=>({template:n.templateCode,status:n.status,count:n._count._all})),relatedIncidents:incidents}));
+ console.log(JSON.stringify({matchedDrivers:matches.length,matchedAccounts:matchedAccounts.map(u=>({role:u.role,hasDriverProfile:all.some(d=>d.userId===u.id)})),possibleSameSuffixProfiles:all.filter(d=>d.phone.replace(/\D/g,"").endsWith(phone.slice(-6))).length,hasAssignedManager:matches.map(d=>!!d.managerId),managerProfilesFound:managers.length,requests:requests.map(r=>({type:r.type,status:r.status,period:r.period,createdAt:r.createdAt.toISOString(),hasNote:!!r.note,canonicalDriver:ids.includes(r.driverId)})),alertsLast7d:alerts.length,assignedManagerAlerts:alerts.filter(a=>managers.some(m=>a.managerId===m.id||a.managerId===m.userId)).length,notices:notices.map(n=>({template:n.templateCode,status:n.status,count:n._count._all})),relatedIncidents:incidents}));
 }finally{await p.$disconnect();}
 JS
     for container in gopark-api gopark-crm-web gopark-https; do docker logs --since=48h --tail=10000 "$container" 2>&1 || true; done | docker exec -i -e DRIVER_PHONE gopark-api node --input-type=module -e '
 import {createRequire} from "node:module";import{readFileSync}from"node:fs";const require=createRequire(import.meta.url);const{PrismaClient}=require("./apps/api/node_modules/@prisma/client");const p=new PrismaClient();try{
-const all=await p.driver.findMany({select:{id:true,phone:true}});const ids=all.filter(d=>d.phone.replace(/\D/g,"").endsWith(process.env.DRIVER_PHONE)).map(d=>d.id);
+const all=await p.driver.findMany({select:{id:true,userId:true,phone:true}});const accounts=await p.user.findMany({select:{id:true,phone:true,email:true}});const phone=process.env.DRIVER_PHONE;const users=accounts.filter(u=>(u.phone??"").replace(/\D/g,"").endsWith(phone)||(u.email??"").split("@")[0]===phone).map(u=>u.id);const ids=all.filter(d=>d.phone.replace(/\D/g,"").endsWith(phone)||users.includes(d.userId)).map(d=>d.id);
 const lines=readFileSync(0,"utf8").split("\n").filter(l=>ids.some(id=>l.includes(id))&&l.includes("status-requests"));const statuses={};
 for(const l of lines){const m=l.match(/ -> (\d{3}) (\d+)ms/);if(m&&l.includes("POST"))statuses[m[1]]=(statuses[m[1]]??0)+1;}
 console.log(JSON.stringify({requestPostStatuses:statuses,gatewayTimeoutLines:lines.filter(l=>/HTTP[^ ]*" 504|upstream timed out/.test(l)).length,sampledLogLines:lines.length}));
