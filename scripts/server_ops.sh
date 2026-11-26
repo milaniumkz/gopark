@@ -29,6 +29,24 @@ try {
  const requests=await p.driverStatusRequest.findMany({where:{driverId:{in:[...ids,...users]}},orderBy:{createdAt:"desc"},take:20});
  const managers=await p.manager.findMany({where:{id:{in:matches.map(d=>d.managerId).filter(Boolean)}},select:{id:true,userId:true}});
  const alerts=await p.managerAlert.findMany({where:{createdAt:{gte:new Date(Date.now()-7*86400000)},OR:matches.map(d=>({details:{contains:[d.firstName,d.lastName].join(" ")}}))},select:{managerId:true,createdAt:true,title:true}});
+ const {MobileManagerService}=await import("./apps/api/dist/apps/api/src/modules/mobile-manager/mobile-manager.service.js");
+ const {DriverMobileReadService}=await import("./apps/api/dist/apps/api/src/modules/mobile-read/driver-mobile-read.service.js");
+ const {MobileAccessService}=await import("./apps/api/dist/apps/api/src/modules/mobile-read/mobile-access.service.js");
+ const read=new DriverMobileReadService(), service=new MobileManagerService(read,new MobileAccessService(),{});
+ const pendingChecks=[];
+ for(const r of requests.filter(r=>r.status==="pending")){
+  const d=matches.find(d=>d.id===r.driverId);if(!d)continue;
+  const recipients=await p.manager.findMany({where:{OR:[{id:d.managerId??""},{level:"senior",user:{companyName:d.companyName}}]},select:{id:true,userId:true,level:true,user:{select:{companyName:true}}}});
+  const driverVisible=(await read.listDriverStatusRequests(d.id)).some(x=>x.id===r.id);
+  const receiptChecks=[];
+  for(const m of recipients){
+   const visible=(await service.getStatusRequests({id:m.userId,role:"manager",companyName:m.user.companyName,managerLevel:m.level})).some(x=>x.id===r.id);
+   const alertCount=await p.managerAlert.count({where:{managerId:m.id,title:"Новый запрос водителя",details:{contains:r.period},createdAt:{gte:new Date(r.createdAt.getTime()-5000),lte:new Date(r.createdAt.getTime()+60000)}}});
+   receiptChecks.push({level:m.level,visible,alertRecorded:alertCount>0});
+  }
+  pendingChecks.push({type:r.type,createdAt:r.createdAt.toISOString(),driverVisible,recipients:receiptChecks});
+ }
+ console.log(JSON.stringify({pendingChecks}));
  const notices=await p.notification.groupBy({by:["templateCode","status"],where:{driverId:{in:ids},createdAt:{gte:new Date(Date.now()-7*86400000)}},_count:{_all:true}});
  const incidents=await p.incident.findMany({where:{driverId:{in:ids},incidentType:{in:["force_majeure","sick","illness"]}},select:{incidentType:true,status:true,occurredAt:true},take:10});
  console.log(JSON.stringify({matchedDrivers:matches.length,selectedViaManager,matchedAccounts:matchedAccounts.map(u=>({role:u.role,hasDriverProfile:all.some(d=>d.userId===u.id)})),possibleSameSuffixProfiles:all.filter(d=>d.phone.replace(/\D/g,"").endsWith(phone.slice(-6))).length,hasAssignedManager:matches.map(d=>!!d.managerId),managerProfilesFound:managers.length,requests:requests.map(r=>({type:r.type,status:r.status,period:r.period,createdAt:r.createdAt.toISOString(),hasNote:!!r.note,canonicalDriver:ids.includes(r.driverId)})),alertsLast7d:alerts.length,assignedManagerAlerts:alerts.filter(a=>managers.some(m=>a.managerId===m.id||a.managerId===m.userId)).length,notices:notices.map(n=>({template:n.templateCode,status:n.status,count:n._count._all})),relatedIncidents:incidents}));
