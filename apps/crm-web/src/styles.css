@@ -8019,3 +8019,14 @@ a {
 .parts-period-stats strong { display: block; font-size: 22px; margin-top: 6px; }
 .parts-table-scroll { overflow-x: auto; }
 @media(max-width:600px) { .parts-page .entity-modal { padding: 14px; } .parts-page .entity-modal__body { grid-template-columns: 1fr; } .parts-period-stats { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+
+/* Polling updates only the inner transcript; the page and reading position stay fixed. */
+.chat-reading-area { position: relative; }
+.chat-reading-area .chat-messages {
+  height: min(60dvh, 580px);
+  min-height: 280px;
+  max-height: 580px;
+  overflow-y: auto;
+  overflow-anchor: none;
+}
+.chat-new-messages { position: absolute; right: 16px; bottom: 12px; font-size: 16px; }

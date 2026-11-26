@@ -2957,6 +2957,9 @@ class _DriverManagerChatPanelState extends State<DriverManagerChatPanel> {
   late Future<List<DriverChatThreadDto>> _threadsFuture;
   String? _selectedThreadId;
   bool _isSending = false;
+  bool _isRefreshing = false;
+  bool _hasNewMessages = false;
+  int _readVersion = 0;
   bool _isThreadLoading = false;
   Timer? _refreshTimer;
   String? _lastMessageSignature;
@@ -2988,7 +2991,10 @@ class _DriverManagerChatPanelState extends State<DriverManagerChatPanel> {
     if (!_messagesScrollController.hasClients) {
       return;
     }
-    _stickMessagesToBottom = _isMessagesListNearBottom(threshold: 140);
+    _stickMessagesToBottom = _isMessagesListNearBottom(threshold: 8);
+    if (_stickMessagesToBottom && _hasNewMessages && mounted) {
+      setState(() => _hasNewMessages = false);
+    }
   }
 
   void _reloadThreads() {
@@ -3006,6 +3012,7 @@ class _DriverManagerChatPanelState extends State<DriverManagerChatPanel> {
     if (!force && _selectedThreadId == threadId && _threadDetailCache != null) {
       return;
     }
+    final version = ++_readVersion;
     setState(() {
       if (_selectedThreadId != threadId) {
         _lastMessageSignature = null;
@@ -3018,7 +3025,7 @@ class _DriverManagerChatPanelState extends State<DriverManagerChatPanel> {
 
     try {
       final detail = await _loadChatAndMarkRead(threadId);
-      if (!mounted || _selectedThreadId != threadId) {
+      if (!mounted || _selectedThreadId != threadId || version != _readVersion) {
         return;
       }
       setState(() {
@@ -3027,7 +3034,7 @@ class _DriverManagerChatPanelState extends State<DriverManagerChatPanel> {
       });
       _rememberMessagesAndScrollIfNeeded(detail);
     } catch (error) {
-      if (!mounted || _selectedThreadId != threadId) {
+      if (!mounted || _selectedThreadId != threadId || version != _readVersion) {
         return;
       }
       setState(() {
@@ -3037,7 +3044,8 @@ class _DriverManagerChatPanelState extends State<DriverManagerChatPanel> {
     }
   }
 
-  void _scheduleMessagesScrollToBottom({bool animated = true, int attempt = 0}) {
+  void _scheduleMessagesScrollToBottom({bool animated = true, int attempt = 0, bool preserveReading = false}) {
+    final previousOffset = _messagesScrollController.hasClients ? _messagesScrollController.offset : null;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_messagesScrollController.hasClients) {
         if (attempt < 5 && mounted) {
@@ -3050,6 +3058,12 @@ class _DriverManagerChatPanelState extends State<DriverManagerChatPanel> {
             }
           });
         }
+        return;
+      }
+      if (preserveReading && previousOffset != null &&
+          (_messagesScrollController.position.isScrollingNotifier.value ||
+           (_messagesScrollController.offset - previousOffset).abs() > 1)) {
+        if (mounted) setState(() => _hasNewMessages = true);
         return;
       }
       final target = _messagesScrollController.position.maxScrollExtent;
@@ -3090,51 +3104,56 @@ class _DriverManagerChatPanelState extends State<DriverManagerChatPanel> {
       return;
     }
 
-    final shouldScroll =
-        force || _lastMessageSignature == null || _stickMessagesToBottom;
+    final initial = _lastMessageSignature == null;
+    final shouldScroll = force || initial ||
+        (_isMessagesListNearBottom(threshold: 8) &&
+         (!_messagesScrollController.hasClients || !_messagesScrollController.position.isScrollingNotifier.value));
     _lastMessageSignature = signature;
+    setState(() => _hasNewMessages = !shouldScroll);
     if (shouldScroll) {
-      _scheduleMessagesScrollToBottom();
+      _scheduleMessagesScrollToBottom(animated: false, preserveReading: !force && !initial);
     }
   }
 
-  Future<void> _refreshChat() async {
-    if (_isSending) {
-      return;
+  bool _sameVisibleThread(DriverChatThreadDetailDto a, DriverChatThreadDetailDto c) {
+    if (a.id != c.id || a.managerName != c.managerName || a.messages.length != c.messages.length) return false;
+    for (var i = 0; i < a.messages.length; i++) {
+      final x = a.messages[i], y = c.messages[i];
+      if (x.id != y.id || x.body != y.body || x.createdAt != y.createdAt ||
+          x.senderName != y.senderName || x.senderRole != y.senderRole) return false;
     }
+    return true;
+  }
 
+  Future<void> _refreshChat() async {
+    if (!mounted || _isSending || _isRefreshing || _isThreadLoading ||
+        ModalRoute.of(context)?.isCurrent == false ||
+        WidgetsBinding.instance.lifecycleState == AppLifecycleState.paused) return;
+    _isRefreshing = true;
+    final version = ++_readVersion;
     try {
-      final keepBottom = _stickMessagesToBottom || _isMessagesListNearBottom();
-      final threads = await widget.repository.loadChats();
-      final selectedId =
-          _selectedThreadId ?? (threads.isNotEmpty ? threads.first.id : null);
-      final selectedStillExists = selectedId != null &&
-          threads.any((thread) => thread.id == selectedId);
-      final effectiveThreadId = selectedStillExists
-          ? selectedId
-          : (threads.isNotEmpty ? threads.first.id : null);
-      final detail = effectiveThreadId == null
-          ? null
-          : await _loadChatAndMarkRead(effectiveThreadId);
-      if (!mounted) {
+      final id = _selectedThreadId;
+      if (id == null) {
+        final threads = await widget.repository.loadChats();
+        if (!mounted || version != _readVersion || _selectedThreadId != null) return;
+        if (threads.isNotEmpty) await _selectThread(threads.first.id);
         return;
       }
+      final detail = await widget.repository.loadChat(id);
+      if (!mounted || version != _readVersion || _selectedThreadId != id) return;
+      if (_threadDetailCache != null && _sameVisibleThread(_threadDetailCache!, detail)) return;
       setState(() {
-        _threadsFuture = Future.value(threads);
-        if (_selectedThreadId != effectiveThreadId) {
-          _lastMessageSignature = null;
-          _threadDetailCache = null;
-        }
-        _selectedThreadId = effectiveThreadId;
         _threadDetailCache = detail;
         _threadError = null;
         _isThreadLoading = false;
       });
-      if (detail != null && keepBottom) {
-        _rememberMessagesAndScrollIfNeeded(detail);
-      }
+      _rememberMessagesAndScrollIfNeeded(detail);
+      final read = widget.onRead?.call();
+      if (read != null) unawaited(read.catchError((_) {}));
     } catch (_) {
-      // Следующий опрос попробует обновить чат ещё раз.
+      // Keep the reading position and retry silently on the next poll.
+    } finally {
+      _isRefreshing = false;
     }
   }
 
@@ -3145,6 +3164,7 @@ class _DriverManagerChatPanelState extends State<DriverManagerChatPanel> {
     }
 
     final messenger = ScaffoldMessenger.of(context);
+    ++_readVersion;
     setState(() {
       _isSending = true;
     });
@@ -3157,17 +3177,15 @@ class _DriverManagerChatPanelState extends State<DriverManagerChatPanel> {
       if (!mounted) {
         return;
       }
-      _messageController.clear();
+      if (_messageController.text.trim() == text) _messageController.clear();
       setState(() {
         _selectedThreadId = updated.id;
         _threadDetailCache = updated;
         _threadError = null;
         _isThreadLoading = false;
-        _reloadThreads();
       });
-      _rememberMessagesAndScrollIfNeeded(updated, force: true);
-      _scheduleMessagesScrollToBottom(animated: false);
-      await widget.onChanged();
+      _rememberMessagesAndScrollIfNeeded(updated);
+      unawaited(widget.onChanged().catchError((_) {}));
     } catch (error) {
       if (!mounted) {
         return;
@@ -3189,7 +3207,7 @@ class _DriverManagerChatPanelState extends State<DriverManagerChatPanel> {
     return FutureBuilder<List<DriverChatThreadDto>>(
       future: _threadsFuture,
       builder: (context, snapshot) {
-        if (snapshot.hasError) {
+        if (snapshot.hasError && _threadDetailCache == null) {
           return _DriverErrorCard(
             title: 'Чат с бригадиром недоступен',
             lines: const [
@@ -3264,15 +3282,7 @@ class _DriverManagerChatPanelState extends State<DriverManagerChatPanel> {
                     ),
                   ),
                   IconButton(
-                    onPressed: () {
-                      setState(() => _reloadThreads());
-                      if (_selectedThreadId != null) {
-                        unawaited(_selectThread(
-                          _selectedThreadId!,
-                          force: true,
-                        ));
-                      }
-                    },
+                    onPressed: () => unawaited(_refreshChat()),
                     icon: const Icon(Icons.refresh_rounded),
                   ),
                 ],
@@ -3333,18 +3343,29 @@ class _DriverManagerChatPanelState extends State<DriverManagerChatPanel> {
 
   Widget _buildThreadDetail(DriverChatThreadDetailDto thread) {
     final messages = thread.messages;
-    _rememberMessagesAndScrollIfNeeded(thread);
-    final messageList = ListView(
+    final messageList = Stack(children: [ListView(
+      key: PageStorageKey('driver-chat-${thread.id}'),
       controller: _messagesScrollController,
       padding: EdgeInsets.zero,
       children: messages
           .map(
-            (message) => _DriverChatBubble(
-              message: message,
+            (message) => KeyedSubtree(
+              key: ValueKey(message.id),
+              child: _DriverChatBubble(message: message),
             ),
           )
           .toList(),
-    );
+    ),
+    if (_hasNewMessages) Positioned(right: 8, bottom: 8,
+      child: FilledButton.icon(
+        onPressed: () {
+          setState(() => _hasNewMessages = false);
+          _scheduleMessagesScrollToBottom();
+        },
+        icon: const Icon(Icons.arrow_downward_rounded),
+        label: const Text('Новые сообщения'),
+      )),
+    ]);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,

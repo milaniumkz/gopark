@@ -1,0 +1,67 @@
+name: driver-web
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Exact tested and deployed source revision
+        required: true
+      publish:
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: ${{ inputs.publish == true && 'production-deploy' || format('driver-web-{0}', github.ref) }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.1'
+          cache: true
+      - name: Verify and build driver web without Android signing material
+        working-directory: apps/driver-app
+        run: |
+          flutter pub get --enforce-lockfile
+          git diff --exit-code -- pubspec.lock pubspec.yaml
+          git restore -- analysis_options.yaml
+          flutter analyze --no-pub
+          flutter test --no-pub
+          flutter build web --release --no-pub --base-href=/driver/ --pwa-strategy=none --no-web-resources-cdn
+          tar -czf /tmp/driver-web.tar.gz -C build/web .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gopark-driver-web
+          path: /tmp/driver-web.tar.gz
+          if-no-files-found: error
+      - name: Publish matching web bundle with backup and rollback
+        if: inputs.publish == true
+        env:
+          PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
+          SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+          SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          SSH_PORT: ${{ secrets.PROD_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          ssh_dir=$(mktemp -d "$RUNNER_TEMP/driver-web-ssh.XXXXXX")
+          trap 'rm -rf "$ssh_dir"' EXIT
+          chmod 700 "$ssh_dir"
+          printf '%s\n' "$PRIVATE_KEY" > "$ssh_dir/key"
+          chmod 600 "$ssh_dir/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          options=(-i "$ssh_dir/key" -o "UserKnownHostsFile=$ssh_dir/known_hosts" -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=15)
+          code_sha=$(git rev-parse HEAD)
+          digest=$(sha256sum /tmp/driver-web.tar.gz | cut -d' ' -f1)
+          remote="$SSH_USER@$SSH_HOST"
+          stage="/tmp/gopark-driver-web-$GITHUB_RUN_ID"
+          ssh "${options[@]}" -p "$SSH_PORT" "$remote" "test \"\$(cat /home/client/gopark-current-sha)\" = '$code_sha'; mkdir -p '$stage'; chmod 700 '$stage'"
+          scp "${options[@]}" -P "$SSH_PORT" /tmp/driver-web.tar.gz scripts/publish_driver_web.sh "$remote:$stage/"
+          ssh "${options[@]}" -p "$SSH_PORT" "$remote" "CODE_SHA='$code_sha' WEB_SHA256='$digest' STAGE='$stage' bash '$stage/publish_driver_web.sh'"

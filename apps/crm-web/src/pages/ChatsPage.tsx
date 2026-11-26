@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type {
   ChatMessageItem,
   ChatThreadDetail,
@@ -27,7 +27,39 @@ export function ChatsPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const messagesRef = useRef<HTMLDivElement | null>(null);
+  const selectedRef = useRef<ChatThreadDetail | null>(null);
+  const selectedIdRef = useRef(selectedThreadId);
+  selectedIdRef.current = selectedThreadId;
+  const requestVersion = useRef(0);
+  const pendingLoad = useRef<{ id: string; version: number } | null>(null);
+  const followAfterUpdate = useRef(false);
+  const mounted = useRef(true);
+  const submitting = useRef(false);
+  const [newMessages, setNewMessages] = useState(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; requestVersion.current++; }; }, []);
+  const applyThread = useCallback((data: ChatThreadDetail) => {
+    const old = selectedRef.current;
+    const same = old?.id === data.id && old.managerName === data.managerName &&
+      old.messages.length === data.messages.length && old.messages.every((x, i) => {
+        const y = data.messages[i];
+        return x.id === y.id && x.body === y.body && x.createdAt === y.createdAt &&
+          x.senderName === y.senderName && x.senderRole === y.senderRole;
+      });
+    if (same) return;
+    const box = messagesRef.current;
+    const follow = !old || old.id !== data.id || !box || box.scrollHeight - box.clientHeight - box.scrollTop <= 8;
+    followAfterUpdate.current = follow;
+    selectedRef.current = data;
+    setSelectedThread(data);
+    setNewMessages(!follow);
+  }, []);
+  useLayoutEffect(() => {
+    if (followAfterUpdate.current && messagesRef.current) {
+      messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
+      followAfterUpdate.current = false;
+    }
+  }, [selectedThread]);
   const threads = threadsApi.data ?? [];
   const drivers = driversApi.data ?? [];
   const filteredThreads = useMemo(() => {
@@ -59,56 +91,46 @@ export function ChatsPage() {
   }, [selectedThreadId, threads]);
 
   const loadSelectedThread = useCallback((threadId: string, options?: { showLoading?: boolean }) => {
-    let active = true;
-    if (options?.showLoading) {
-      setThreadLoading(true);
-    }
-    setThreadError(null);
+    if (pendingLoad.current?.id === threadId && pendingLoad.current.version === requestVersion.current) return () => undefined;
+    const version = ++requestVersion.current;
+    pendingLoad.current = { id: threadId, version };
+    if (options?.showLoading && selectedRef.current?.id !== threadId) setThreadLoading(true);
     fetchJson<ChatThreadDetail>(`chats/${threadId}`)
       .then((data) => {
-        if (!active) {
-          return;
-        }
-        setSelectedThread(data);
+        if (!mounted.current || selectedIdRef.current !== threadId || version !== requestVersion.current) return;
+        applyThread(data);
+        setThreadError(null);
         setThreadLoading(false);
       })
       .catch((error: Error) => {
-        if (!active) {
-          return;
-        }
-        setSelectedThread(null);
-        setThreadError(error.message);
+        if (!mounted.current || selectedIdRef.current !== threadId || version !== requestVersion.current) return;
+        if (selectedRef.current?.id !== threadId) setThreadError(error.message);
         setThreadLoading(false);
+      }).finally(() => {
+        if (pendingLoad.current?.version === version) pendingLoad.current = null;
       });
-
-    return () => {
-      active = false;
-    };
-  }, []);
+    return () => { if (requestVersion.current === version) requestVersion.current++; };
+  }, [applyThread]);
 
   useEffect(() => {
     if (!selectedThreadId) {
+      selectedRef.current = null;
       setSelectedThread(null);
       return undefined;
     }
-
+    setNewMessages(false);
     return loadSelectedThread(selectedThreadId, { showLoading: true });
   }, [loadSelectedThread, selectedThreadId]);
 
+  const refetchThreads = threadsApi.refetch;
   useEffect(() => {
     const timer = window.setInterval(() => {
-      void threadsApi.refetch({ silent: true }).catch(() => undefined);
-      if (selectedThreadId) {
-        loadSelectedThread(selectedThreadId);
-      }
+      if (submitting.current || document.hidden) return;
+      void refetchThreads({ silent: true }).catch(() => undefined);
+      if (selectedThreadId) loadSelectedThread(selectedThreadId);
     }, 3000);
-
     return () => window.clearInterval(timer);
-  }, [loadSelectedThread, selectedThreadId, threadsApi]);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ block: "end" });
-  }, [selectedThread?.id, selectedThread?.messages.length]);
+  }, [loadSelectedThread, selectedThreadId, refetchThreads]);
 
   function appendOptimisticMessage(thread: ChatThreadDetail, body: string): void {
     const createdAt = new Date().toISOString();
@@ -121,7 +143,7 @@ export function ChatsPage() {
       body,
       createdAt,
     };
-    setSelectedThread({
+    applyThread({
       ...thread,
       lastMessagePreview: body,
       lastMessageAt: createdAt,
@@ -130,6 +152,7 @@ export function ChatsPage() {
   }
 
   async function handleCreateThread(): Promise<void> {
+    if (submitting.current) return;
     setFormError(null);
     if (!driverId) {
       setFormError("Выберите водителя для чата.");
@@ -140,6 +163,8 @@ export function ChatsPage() {
       return;
     }
 
+    submitting.current = true;
+    ++requestVersion.current;
     setIsSubmitting(true);
     try {
       const created = await postJson<ChatThreadDetail, CreateChatThreadRequest>("chats", {
@@ -147,27 +172,31 @@ export function ChatsPage() {
         subject: `Чат с ${selectedDriver?.fullName ?? "водителем"}`,
         body: newBody,
       });
+      if (!mounted.current) return;
       setSelectedThreadId(created.id);
-      setSelectedThread(created);
+      applyThread(created);
       setDriverId("");
       setNewBody("");
       setIsCreateOpen(false);
-      threadsApi.refetch();
+      void threadsApi.refetch({ silent: true }).catch(() => undefined);
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Не удалось создать чат.");
     } finally {
-      setIsSubmitting(false);
+      submitting.current = false;
+      if (mounted.current) setIsSubmitting(false);
     }
   }
 
   async function handleSendMessage(): Promise<void> {
-    if (!selectedThread || !replyBody.trim()) {
+    if (submitting.current || !selectedThread || !replyBody.trim()) {
       return;
     }
 
     const text = replyBody.trim();
     appendOptimisticMessage(selectedThread, text);
     setReplyBody("");
+    submitting.current = true;
+    ++requestVersion.current;
     setIsSubmitting(true);
     setFormError(null);
     try {
@@ -175,13 +204,17 @@ export function ChatsPage() {
         `chats/${selectedThread.id}/messages`,
         { body: text },
       );
-      setSelectedThread(updated);
-      threadsApi.refetch();
+      if (!mounted.current || selectedIdRef.current !== selectedThread.id) return;
+      applyThread(updated);
+      void threadsApi.refetch({ silent: true }).catch(() => undefined);
     } catch (error) {
+      if (!mounted.current || selectedIdRef.current !== selectedThread.id) return;
       setFormError(error instanceof Error ? error.message : "Не удалось отправить сообщение.");
+      setReplyBody((current) => current || text);
       loadSelectedThread(selectedThread.id);
     } finally {
-      setIsSubmitting(false);
+      submitting.current = false;
+      if (mounted.current) setIsSubmitting(false);
     }
   }
 
@@ -255,7 +288,11 @@ export function ChatsPage() {
               <AsyncState loading={threadLoading} error={threadError}>
                 {selectedThread ? (
                   <>
-                    <div className="chat-messages">
+                    <div className="chat-reading-area">
+                    <div className="chat-messages" ref={messagesRef} onScroll={() => {
+                      const box = messagesRef.current;
+                      if (box && box.scrollHeight - box.clientHeight - box.scrollTop <= 8) setNewMessages(false);
+                    }}>
                       {selectedThread.messages.map((message) => (
                         <div
                           key={message.id}
@@ -266,7 +303,12 @@ export function ChatsPage() {
                           <small>{new Date(message.createdAt).toLocaleString("ru-RU")}</small>
                         </div>
                       ))}
-                      <div ref={messagesEndRef} />
+                    </div>
+                    {newMessages && <button type="button" className="chat-new-messages" onClick={() => {
+                      const box = messagesRef.current;
+                      if (box) box.scrollTop = box.scrollHeight;
+                      setNewMessages(false);
+                    }}>Новые сообщения ↓</button>}
                     </div>
                     <div className="chat-reply">
                       <label>
