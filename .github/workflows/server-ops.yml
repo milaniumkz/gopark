@@ -29,7 +29,7 @@ concurrency:
 
 jobs:
   ops:
-    if: inputs.operation != 'connectivity-mac'
+    if: inputs.operation != 'connectivity-mac' && inputs.operation != 'driver-signing-diagnostic'
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -96,3 +96,57 @@ jobs:
             -o "UserKnownHostsFile=$ssh_dir/known_hosts" -p "$PROD_SSH_PORT" \
             "$PROD_SSH_USER@$PROD_SSH_HOST" \
             'cat /home/client/gopark-current-sha; curl --max-time 15 -fsS http://127.0.0.1:3000/api/health'
+
+  driver-signing:
+    if: inputs.operation == 'driver-signing-diagnostic'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    environment: production
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Compare original driver signing identities without publishing
+        shell: bash
+        env:
+          PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
+          SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+          SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          SSH_PORT: ${{ secrets.PROD_SSH_PORT }}
+          UPLOAD_KEY: ${{ secrets.GOPARK_DRIVER_UPLOAD_KEYSTORE_BASE64 }}
+          UPLOAD_PASSWORD: ${{ secrets.GOPARK_DRIVER_UPLOAD_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          stage=$(mktemp -d "$RUNNER_TEMP/driver-signing.XXXXXX")
+          trap 'rm -rf "$stage"' EXIT
+          chmod 700 "$stage"
+          printf '%s\n' "$PRIVATE_KEY" > "$stage/key"
+          chmod 600 "$stage/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$stage/known_hosts"
+          remote="$SSH_USER@$SSH_HOST"
+          options=(-i "$stage/key" -o "UserKnownHostsFile=$stage/known_hosts" -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=15)
+          scp "${options[@]}" -P "$SSH_PORT" "$remote:/home/client/gopark-current/gopark-driver.apk" "$stage/installed.apk"
+          signer=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
+          installed=$("$signer" verify --print-certs "$stage/installed.apk" | sed -n 's/.*certificate SHA-256 digest: //p' | sort -u)
+          test -n "$installed"
+          echo "Installed driver certificate: $installed"
+          ssh "${options[@]}" -p "$SSH_PORT" "$remote" 'find /home/client/gopark/secrets /home/client/.android /home/client/.config/.android /home/client/gopark-releases -maxdepth 4 -type f \( -name "*.jks" -o -name "*.keystore" \) -print 2>/dev/null || true' > "$stage/candidates"
+          count=0
+          while IFS= read -r candidate; do
+            count=$((count+1)); [ "$count" -le 30 ] || break
+            scp "${options[@]}" -P "$SSH_PORT" "$remote:$candidate" "$stage/candidate.jks"
+            chmod 600 "$stage/candidate.jks"
+            if fingerprint=$(keytool -exportcert -alias androiddebugkey -keystore "$stage/candidate.jks" -storepass android 2>/dev/null | sha256sum | cut -d' ' -f1); then
+              echo "Server candidate $count public certificate: $fingerprint"
+              if [ "$fingerprint" = "$installed" ]; then echo "Matching original driver key found: $candidate"; fi
+            fi
+          done < "$stage/candidates"
+          if [ -n "$UPLOAD_KEY" ] && [ -n "$UPLOAD_PASSWORD" ]; then
+            printf '%s' "$UPLOAD_KEY" | base64 --decode > "$stage/upload.jks"
+            chmod 600 "$stage/upload.jks"
+            fingerprint=$(keytool -exportcert -alias gopark-upload -keystore "$stage/upload.jks" -storepass "$UPLOAD_PASSWORD" 2>/dev/null | sha256sum | cut -d' ' -f1)
+            echo "Configured upload public certificate: $fingerprint"
+            if [ "$fingerprint" = "$installed" ]; then echo 'Configured driver upload key matches the installed APK.'; fi
+          fi
