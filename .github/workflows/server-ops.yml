@@ -7,6 +7,9 @@ on:
         description: status, incident-schema, logs, restart, redeploy, rollback
         required: true
         default: status
+      driver_phone:
+        description: Driver phone suffix for read-only request diagnostics
+        required: false
       driver_search:
         description: Driver name prefix for read-only payment diagnostics
         required: false
@@ -45,6 +48,7 @@ jobs:
           printf '%s\n' "${{ secrets.PROD_SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
       - name: Run operation
         env:
+          DRIVER_PHONE: ${{ github.event.inputs.driver_phone }}
           DRIVER_SEARCH: ${{ github.event.inputs.driver_search }}
           OPERATION: ${{ github.event.inputs.operation }}
           ROLLBACK_SHA: ${{ github.event.inputs.rollback_sha }}
@@ -52,6 +56,7 @@ jobs:
           WORKSHOP: ${{ github.event.inputs.workshop }}
           CONTRACT_NUMBER: ${{ github.event.inputs.contract_number }}
         run: |
+          [[ "$DRIVER_PHONE" =~ ^[0-9]{0,15}$ ]]
           [[ "$DRIVER_SEARCH" =~ ^[[:alpha:][:space:]-]{0,64}$ ]]
           [[ -z "$CONTRACT_NUMBER" || "$CONTRACT_NUMBER" =~ ^[0-9]{1,12}$ ]]
           [[ "$OPERATION" =~ ^[a-z-]+$ ]]
@@ -67,7 +72,7 @@ jobs:
           fi
           OPS_SCRIPT_PATH="/tmp/gopark-server-ops-$GITHUB_RUN_ID.sh"
           scp -i ~/.ssh/id_ed25519 -P "${{ secrets.PROD_SSH_PORT }}" scripts/server_ops.sh "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}:$OPS_SCRIPT_PATH"
-          ssh -i ~/.ssh/id_ed25519 -p "${{ secrets.PROD_SSH_PORT }}" "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}" "DRIVER_SEARCH='$DRIVER_SEARCH' OPERATION='$OPERATION' CONTRACT_NUMBER='$CONTRACT_NUMBER' REPAIR_SCRIPT_PATH='/tmp/gopark-repair-contract-$GITHUB_RUN_ID.mjs' ROLLBACK_SHA='$ROLLBACK_SHA' VEHICLE_PLATE='$VEHICLE_PLATE' WORKSHOP='$WORKSHOP' RESET_SQL_PATH='$RESET_SQL_PATH' bash '$OPS_SCRIPT_PATH'"
+          ssh -i ~/.ssh/id_ed25519 -p "${{ secrets.PROD_SSH_PORT }}" "${{ secrets.PROD_SSH_USER }}@${{ secrets.PROD_SSH_HOST }}" "DRIVER_PHONE='$DRIVER_PHONE' DRIVER_SEARCH='$DRIVER_SEARCH' OPERATION='$OPERATION' CONTRACT_NUMBER='$CONTRACT_NUMBER' REPAIR_SCRIPT_PATH='/tmp/gopark-repair-contract-$GITHUB_RUN_ID.mjs' ROLLBACK_SHA='$ROLLBACK_SHA' VEHICLE_PLATE='$VEHICLE_PLATE' WORKSHOP='$WORKSHOP' RESET_SQL_PATH='$RESET_SQL_PATH' bash '$OPS_SCRIPT_PATH'"
 
   mac-connectivity:
     if: inputs.operation == 'connectivity-mac'
