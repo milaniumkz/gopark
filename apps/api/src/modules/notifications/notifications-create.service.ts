@@ -105,7 +105,7 @@ export class NotificationsCreateService {
     }
 
     if (alerts.length === 0) {
-      await this.fcmService.sendToCrmStaffByManager(null, title, details).catch(() => undefined);
+      void this.fcmService.sendToCrmStaffByManager(null, title, details).catch(() => undefined);
       return null;
     }
 
@@ -187,7 +187,7 @@ export class NotificationsCreateService {
     }
 
     if (alerts.length === 0) {
-      await this.fcmService.sendToCrmStaffByManager(null, title, details).catch(() => undefined);
+      void this.fcmService.sendToCrmStaffByManager(null, title, details).catch(() => undefined);
       return null;
     }
 
@@ -252,7 +252,7 @@ export class NotificationsCreateService {
       template,
     });
     await this.dispatchNotification(notification);
-    await this.fcmService
+    void this.fcmService
       .sendToDriver(driverId, title, body)
       .catch(() => undefined);
     if (options.notifyStakeholders !== false) {
@@ -264,7 +264,7 @@ export class NotificationsCreateService {
   private async createDriverStakeholderAlerts(driverId: string, title: string, body: string) {
     const driver = await this.driverRepository.getById(driverId);
     if (!driver) {
-      await this.fcmService.sendToCrmStaffByDriver(driverId, title, body).catch(() => undefined);
+      void this.fcmService.sendToCrmStaffByDriver(driverId, title, body).catch(() => undefined);
       return [];
     }
 
@@ -289,7 +289,7 @@ export class NotificationsCreateService {
     }
 
     if (alerts.length === 0) {
-      await this.fcmService.sendToCrmStaffByDriver(driverId, title, details).catch(() => undefined);
+      void this.fcmService.sendToCrmStaffByDriver(driverId, title, details).catch(() => undefined);
     }
 
     return alerts;
@@ -298,12 +298,10 @@ export class NotificationsCreateService {
   private async createManagerAlert(input: Omit<ManagerAlertItem, "id">) {
     const alert = await this.managerAlertRepository.create(input);
     await this.dispatchManagerAlert(alert);
-    await this.fcmService
-      .sendToManager(alert.managerId, alert.title, alert.details)
-      .catch(() => undefined);
-    await this.fcmService
-      .sendToCrmStaffByManager(alert.managerId, alert.title, alert.details)
-      .catch(() => undefined);
+    void Promise.allSettled([
+      this.fcmService.sendToManager(alert.managerId, alert.title, alert.details),
+      this.fcmService.sendToCrmStaffByManager(alert.managerId, alert.title, alert.details),
+    ]);
     return alert;
   }
 

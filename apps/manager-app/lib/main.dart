@@ -4182,6 +4182,7 @@ class _ManagerChatThreadPageState extends State<ManagerChatThreadPage>
   final _scrollController = ScrollController();
   String? _threadId;
   bool _isSending = false;
+  bool _hasNewMessages = false;
   String? _pendingText;
   bool _isRefreshing = false;
   int _readVersion = 0;
@@ -4225,7 +4226,8 @@ class _ManagerChatThreadPageState extends State<ManagerChatThreadPage>
     if (!_scrollController.hasClients) {
       return;
     }
-    _stickToBottom = _isNearBottom(threshold: 140);
+    _stickToBottom = _isNearBottom(threshold: 8);
+    if (_stickToBottom && _hasNewMessages && mounted) setState(() => _hasNewMessages = false);
   }
 
   bool _isNearBottom({double threshold = 80}) {
@@ -4252,15 +4254,18 @@ class _ManagerChatThreadPageState extends State<ManagerChatThreadPage>
     if (!force && _lastMessageSignature == signature) {
       return;
     }
-    final shouldScroll =
-        force || _lastMessageSignature == null || _stickToBottom;
+    final initial = _lastMessageSignature == null;
+    final shouldScroll = force || initial || (_isNearBottom(threshold: 8) &&
+        (!_scrollController.hasClients || !_scrollController.position.isScrollingNotifier.value));
     _lastMessageSignature = signature;
+    setState(() => _hasNewMessages = !shouldScroll);
     if (shouldScroll) {
-      _scheduleScrollToBottom(animated: force ? false : true);
+      _scheduleScrollToBottom(animated: false, preserveReading: !force && !initial);
     }
   }
 
-  void _scheduleScrollToBottom({bool animated = true, int attempt = 0}) {
+  void _scheduleScrollToBottom({bool animated = true, int attempt = 0, bool preserveReading = false}) {
+    final previousOffset = _scrollController.hasClients ? _scrollController.offset : null;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) {
         if (attempt < 5 && mounted) {
@@ -4273,6 +4278,12 @@ class _ManagerChatThreadPageState extends State<ManagerChatThreadPage>
             }
           });
         }
+        return;
+      }
+      if (preserveReading && previousOffset != null &&
+          (_scrollController.position.isScrollingNotifier.value ||
+           (_scrollController.offset - previousOffset).abs() > 1)) {
+        if (mounted) setState(() => _hasNewMessages = true);
         return;
       }
       final target = _scrollController.position.maxScrollExtent;
@@ -4337,21 +4348,27 @@ class _ManagerChatThreadPageState extends State<ManagerChatThreadPage>
     _isRefreshing = true;
     final version = ++_readVersion;
     try {
-      final keepBottom = _stickToBottom || _isNearBottom();
       final updated = await widget.repository.loadChat(threadId);
       if (!mounted || _threadId != threadId || version != _readVersion) {
         return;
       }
+      final previous = _threadDetail;
+      final same = previous != null && previous.messages.length == updated.messages.length &&
+          previous.messages.asMap().entries.every((entry) {
+            final x = entry.value, y = updated.messages[entry.key];
+            return x.id == y.id && x.body == y.body && x.createdAt == y.createdAt &&
+                x.senderName == y.senderName && x.senderRole == y.senderRole;
+          });
+      if (same) return;
+      final keepBottom = _isNearBottom(threshold: 8) && (!_scrollController.hasClients || !_scrollController.position.isScrollingNotifier.value);
       setState(() {
         _threadDetail = updated;
         _threadError = null;
         _isThreadLoading = false;
       });
-      if (keepBottom) {
-        _scrollToBottomIfNeeded(updated);
-      } else {
-        _lastMessageSignature = _messageSignature(updated);
-      }
+      _lastMessageSignature = _messageSignature(updated);
+      setState(() => _hasNewMessages = !keepBottom);
+      if (keepBottom) _scheduleScrollToBottom(animated: false, preserveReading: true);
     } catch (_) {
       // Следующий опрос попробует обновить чат ещё раз.
     } finally {
@@ -4396,7 +4413,7 @@ class _ManagerChatThreadPageState extends State<ManagerChatThreadPage>
         _threadError = null;
         _isThreadLoading = false;
       });
-      _scrollToBottomIfNeeded(updated, force: true);
+      _scrollToBottomIfNeeded(updated);
     } catch (error) {
       if (!mounted) {
         return;
@@ -4424,7 +4441,8 @@ class _ManagerChatThreadPageState extends State<ManagerChatThreadPage>
         child: Column(
           children: [
             Expanded(
-              child: ListView(
+              child: Stack(children: [ListView(
+                key: PageStorageKey('manager-chat-${widget.threadId ?? widget.driverId}'),
                 controller: _scrollController,
                 padding: const EdgeInsets.all(16),
                 children: [
@@ -4447,6 +4465,12 @@ class _ManagerChatThreadPageState extends State<ManagerChatThreadPage>
                     ),
                 ],
               ),
+              if (_hasNewMessages) Positioned(right: 12, bottom: 12,
+                child: FilledButton.icon(
+                  onPressed: () { setState(() => _hasNewMessages = false); _scheduleScrollToBottom(); },
+                  icon: const Icon(Icons.arrow_downward_rounded), label: const Text('Новые сообщения'),
+                )),
+              ]),
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(8, 5, 8, 8),
@@ -4512,7 +4536,7 @@ class _ManagerChatThreadPageState extends State<ManagerChatThreadPage>
     return Column(
       children: thread.messages
           .map(
-            (message) => _ManagerChatBubble(message: message),
+            (message) => KeyedSubtree(key: ValueKey(message.id), child: _ManagerChatBubble(message: message)),
           )
           .toList(),
     );

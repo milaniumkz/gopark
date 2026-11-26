@@ -12,6 +12,54 @@ compose() {
 }
 
 case "$OPERATION" in
+  driver-request-diagnostic)
+    test -n "${DRIVER_PHONE:-}"
+    docker exec -i -e DRIVER_PHONE gopark-api node --input-type=module <<'JS'
+import {createRequire} from "node:module";const require=createRequire(import.meta.url);const {PrismaClient}=require("./apps/api/node_modules/@prisma/client");const p=new PrismaClient();
+try {
+ const phone=process.env.DRIVER_PHONE;
+ const all=await p.driver.findMany({select:{id:true,userId:true,phone:true,managerId:true,firstName:true,lastName:true,companyName:true}});
+ const accounts=await p.user.findMany({select:{id:true,phone:true,email:true,role:true}});
+ const matchedAccounts=accounts.filter(u=>(u.phone??"").replace(/\D/g,"").endsWith(phone)||(u.email??"").split("@")[0]===phone);
+ let matches=all.filter(d=>d.phone.replace(/\D/g,"").endsWith(phone)||matchedAccounts.some(u=>u.id===d.userId));
+ const matchedManagers=await p.manager.findMany({where:{userId:{in:matchedAccounts.filter(u=>u.role==="manager").map(u=>u.id)}},select:{id:true,userId:true,level:true,user:{select:{companyName:true}}}});
+ const selectedViaManager=matches.length===0&&matchedManagers.length>0;
+ if(selectedViaManager)matches=all.filter(d=>matchedManagers.some(m=>d.managerId===m.id||d.managerId===m.userId||(m.level==="senior"&&d.companyName===m.user.companyName)));
+ const ids=matches.map(d=>d.id),users=[...new Set([...matches.map(d=>d.userId).filter(Boolean),...matchedAccounts.map(u=>u.id)])];
+ const requests=await p.driverStatusRequest.findMany({where:{driverId:{in:[...ids,...users]}},orderBy:{createdAt:"desc"},take:20});
+ const managers=await p.manager.findMany({where:{id:{in:matches.map(d=>d.managerId).filter(Boolean)}},select:{id:true,userId:true}});
+ const alerts=await p.managerAlert.findMany({where:{createdAt:{gte:new Date(Date.now()-7*86400000)},OR:matches.map(d=>({details:{contains:[d.firstName,d.lastName].join(" ")}}))},select:{managerId:true,createdAt:true,title:true}});
+ const {MobileManagerService}=await import("./apps/api/dist/apps/api/src/modules/mobile-manager/mobile-manager.service.js");
+ const {DriverMobileReadService}=await import("./apps/api/dist/apps/api/src/modules/mobile-read/driver-mobile-read.service.js");
+ const {MobileAccessService}=await import("./apps/api/dist/apps/api/src/modules/mobile-read/mobile-access.service.js");
+ const read=new DriverMobileReadService(), service=new MobileManagerService(read,new MobileAccessService(),{});
+ const pendingChecks=[];
+ for(const r of requests.filter(r=>r.status==="pending")){
+  const d=matches.find(d=>d.id===r.driverId);if(!d)continue;
+  const recipients=await p.manager.findMany({where:{OR:[{id:d.managerId??""},{level:"senior",user:{companyName:d.companyName}}]},select:{id:true,userId:true,level:true,user:{select:{companyName:true}}}});
+  const driverVisible=(await read.listDriverStatusRequests(d.id)).some(x=>x.id===r.id);
+  const receiptChecks=[];
+  for(const m of recipients){
+   const visible=(await service.getStatusRequests({id:m.userId,role:"manager",companyName:m.user.companyName,managerLevel:m.level})).some(x=>x.id===r.id);
+   const alertCount=await p.managerAlert.count({where:{managerId:m.id,title:"Новый запрос водителя",details:{contains:r.period},createdAt:{gte:new Date(r.createdAt.getTime()-5000),lte:new Date(r.createdAt.getTime()+60000)}}});
+   receiptChecks.push({level:m.level,visible,alertRecorded:alertCount>0});
+  }
+  pendingChecks.push({type:r.type,createdAt:r.createdAt.toISOString(),driverVisible,recipients:receiptChecks});
+ }
+ console.log(JSON.stringify({pendingChecks}));
+ const notices=await p.notification.groupBy({by:["templateCode","status"],where:{driverId:{in:ids},createdAt:{gte:new Date(Date.now()-7*86400000)}},_count:{_all:true}});
+ const incidents=await p.incident.findMany({where:{driverId:{in:ids},incidentType:{in:["force_majeure","sick","illness"]}},select:{incidentType:true,status:true,occurredAt:true},take:10});
+ console.log(JSON.stringify({matchedDrivers:matches.length,selectedViaManager,matchedAccounts:matchedAccounts.map(u=>({role:u.role,hasDriverProfile:all.some(d=>d.userId===u.id)})),possibleSameSuffixProfiles:all.filter(d=>d.phone.replace(/\D/g,"").endsWith(phone.slice(-6))).length,hasAssignedManager:matches.map(d=>!!d.managerId),managerProfilesFound:managers.length,requests:requests.map(r=>({type:r.type,status:r.status,period:r.period,createdAt:r.createdAt.toISOString(),hasNote:!!r.note,canonicalDriver:ids.includes(r.driverId)})),alertsLast7d:alerts.length,assignedManagerAlerts:alerts.filter(a=>managers.some(m=>a.managerId===m.id||a.managerId===m.userId)).length,notices:notices.map(n=>({template:n.templateCode,status:n.status,count:n._count._all})),relatedIncidents:incidents}));
+}finally{await p.$disconnect();}
+JS
+    for container in gopark-api gopark-crm-web gopark-https; do docker logs --since=48h --tail=10000 "$container" 2>&1 || true; done | docker exec -i -e DRIVER_PHONE gopark-api node --input-type=module -e '
+import {createRequire} from "node:module";import{readFileSync}from"node:fs";const require=createRequire(import.meta.url);const{PrismaClient}=require("./apps/api/node_modules/@prisma/client");const p=new PrismaClient();try{
+const all=await p.driver.findMany({select:{id:true,userId:true,phone:true}});const accounts=await p.user.findMany({select:{id:true,phone:true,email:true}});const phone=process.env.DRIVER_PHONE;const users=accounts.filter(u=>(u.phone??"").replace(/\D/g,"").endsWith(phone)||(u.email??"").split("@")[0]===phone).map(u=>u.id);const ids=all.filter(d=>d.phone.replace(/\D/g,"").endsWith(phone)||users.includes(d.userId)).map(d=>d.id);
+const lines=readFileSync(0,"utf8").split("\n").filter(l=>ids.some(id=>l.includes(id))&&l.includes("status-requests"));const statuses={};
+for(const l of lines){const m=l.match(/ -> (\d{3}) (\d+)ms/);if(m&&l.includes("POST"))statuses[m[1]]=(statuses[m[1]]??0)+1;}
+console.log(JSON.stringify({requestPostStatuses:statuses,gatewayTimeoutLines:lines.filter(l=>/HTTP[^ ]*" 504|upstream timed out/.test(l)).length,sampledLogLines:lines.length}));
+}finally{await p.$disconnect();}'
+    ;;
   driver-payment-diagnostic)
     test -n "${DRIVER_SEARCH:-}"
     docker exec -i -e DRIVER_SEARCH gopark-api node --input-type=module <<'JS'
