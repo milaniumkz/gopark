@@ -7,6 +7,14 @@ on:
       source_ref:
         description: Checked driver source commit
         required: true
+      use_upload_key:
+        description: Build on hosted runner using the preserved driver upload key
+        type: boolean
+        default: false
+      allow_reinstall:
+        description: Explicitly allow a different certificate, requiring a clean installation
+        type: boolean
+        default: false
       publish:
         type: boolean
         default: false
@@ -15,6 +23,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   build:
+    if: inputs.use_upload_key != true
     runs-on: [milanium-mac-arm64, repo-gopark]
     timeout-minutes: 30
     environment: production
@@ -126,3 +135,133 @@ jobs:
           ssh -i "$DRIVER_SSH_DIR/key" -o "UserKnownHostsFile=$DRIVER_SSH_DIR/known_hosts" -p "$PROD_SSH_PORT" "$remote" "mkdir -p '$stage'"
           scp -i "$DRIVER_SSH_DIR/key" -o "UserKnownHostsFile=$DRIVER_SSH_DIR/known_hosts" -P "$PROD_SSH_PORT" /tmp/driver-upload/gopark-driver.apk /tmp/driver-upload/gopark-driver.zip /tmp/driver-upload/driver-download.html scripts/publish_driver_apk.sh "$remote:$stage/"
           ssh -i "$DRIVER_SSH_DIR/key" -o "UserKnownHostsFile=$DRIVER_SSH_DIR/known_hosts" -p "$PROD_SSH_PORT" "$remote" "DEPLOYED_SHA='$DEPLOYED_SHA' CODE_SHA='$CODE_SHA' APK_SHA256='$apk_sha256' ZIP_SHA256='$zip_sha256' STAGE='$stage' bash '$stage/publish_driver_apk.sh'"
+
+  upload-key-build:
+    if: inputs.use_upload_key == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.1'
+          cache: true
+      - name: Load preserved signing key and enforce explicit reinstall choice
+        env:
+          PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
+          SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+          SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          SSH_PORT: ${{ secrets.PROD_SSH_PORT }}
+          UPLOAD_KEY: ${{ secrets.GOPARK_DRIVER_UPLOAD_KEYSTORE_BASE64 }}
+          UPLOAD_PASSWORD: ${{ secrets.GOPARK_DRIVER_UPLOAD_KEYSTORE_PASSWORD }}
+          ALLOW_REINSTALL: ${{ inputs.allow_reinstall }}
+        run: |
+          set -euo pipefail
+          stage=$(mktemp -d "$RUNNER_TEMP/driver-upload-signing.XXXXXX")
+          echo "DRIVER_SIGNING_STAGE=$stage" >> "$GITHUB_ENV"
+          chmod 700 "$stage"
+          printf '%s\n' "$PRIVATE_KEY" > "$stage/key"
+          chmod 600 "$stage/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$stage/known_hosts"
+          options=(-i "$stage/key" -o "UserKnownHostsFile=$stage/known_hosts" -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=15)
+          remote="$SSH_USER@$SSH_HOST"
+          code_sha=$(git rev-parse HEAD)
+          deployed_sha=$(ssh "${options[@]}" -p "$SSH_PORT" "$remote" 'cat /home/client/gopark-current-sha')
+          test "$code_sha" = "$deployed_sha"
+          echo "CODE_SHA=$code_sha" >> "$GITHUB_ENV"
+          scp "${options[@]}" -P "$SSH_PORT" "$remote:/home/client/gopark-current/gopark-driver.apk" "$stage/previous.apk"
+          test -n "$UPLOAD_KEY"
+          test -n "$UPLOAD_PASSWORD"
+          printf '%s' "$UPLOAD_KEY" | base64 --decode > "$stage/upload.jks"
+          chmod 600 "$stage/upload.jks"
+          export SIGNING_STORE="$stage/upload.jks"
+          python3 - <<'PY'
+          import os,pathlib
+          def escape(v): return v.replace('\\','\\\\').replace('\n','\\n').replace('\r','\\r')
+          values={'storeFile':os.environ['SIGNING_STORE'],'storePassword':os.environ['UPLOAD_PASSWORD'],'keyPassword':os.environ['UPLOAD_PASSWORD'],'keyAlias':'gopark-upload'}
+          p=pathlib.Path('apps/driver-app/android/key.properties')
+          p.write_text(''.join(k+'='+escape(v)+'\n' for k,v in values.items()))
+          p.chmod(0o600)
+          PY
+          key_cert=$(keytool -exportcert -alias gopark-upload -keystore "$stage/upload.jks" -storepass "$UPLOAD_PASSWORD" 2>/dev/null | sha256sum | cut -d' ' -f1)
+          signer=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
+          old_cert=$("$signer" verify --print-certs "$stage/previous.apk" | sed -n 's/.*certificate SHA-256 digest: //p' | sort -u)
+          test -n "$key_cert"
+          test -n "$old_cert"
+          if [ "$key_cert" != "$old_cert" ]; then
+            test "$ALLOW_REINSTALL" = true || { echo 'Certificate differs; explicit reinstall choice is required.'; exit 1; }
+            echo 'User-authorized clean installation required for this APK.'
+          fi
+          echo "DRIVER_EXPECTED_CERT=$key_cert" >> "$GITHUB_ENV"
+      - name: Analyze, test and build driver APK
+        working-directory: apps/driver-app
+        run: |
+          set -euo pipefail
+          flutter pub get --enforce-lockfile
+          git diff --exit-code -- pubspec.lock pubspec.yaml
+          git restore -- analysis_options.yaml
+          flutter analyze --no-pub
+          flutter test --no-pub
+          aapt=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
+          old_code=$("$aapt" dump badging "$DRIVER_SIGNING_STAGE/previous.apk" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" | head -1)
+          [[ "$old_code" =~ ^[0-9]+$ ]]
+          build_number=$(( $(date +%s) / 60 ))
+          if [ "$build_number" -le "$old_code" ]; then build_number=$((old_code + 1)); fi
+          flutter build apk --release --no-pub --dart-define=API_BASE_URL=https://185.138.185.36/api --build-number="$build_number"
+      - name: Verify signed APK identity
+        run: |
+          set -euo pipefail
+          signer=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
+          cert=$("$signer" verify --verbose --print-certs apps/driver-app/build/app/outputs/flutter-apk/app-release.apk | sed -n 's/.*certificate SHA-256 digest: //p' | sort -u)
+          test "$cert" = "$DRIVER_EXPECTED_CERT"
+          aapt=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
+          "$aapt" dump badging apps/driver-app/build/app/outputs/flutter-apk/app-release.apk | head -1 | grep "name='com.milanium.goparkdriver'"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gopark-driver-apk
+          path: apps/driver-app/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+      - name: Publish driver APK with explicit installation instructions
+        if: inputs.publish == true
+        env:
+          SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+          SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          SSH_PORT: ${{ secrets.PROD_SSH_PORT }}
+          ALLOW_REINSTALL: ${{ inputs.allow_reinstall }}
+        run: |
+          set -euo pipefail
+          output="$RUNNER_TEMP/driver-download"
+          mkdir -p "$output"
+          cp apps/driver-app/build/app/outputs/flutter-apk/app-release.apk "$output/gopark-driver.apk"
+          python3 scripts/prepare_driver_download.py "$output" "$CODE_SHA"
+          export DRIVER_OUTPUT="$output"
+          python3 - <<'PY'
+          import os,pathlib
+          if os.environ['ALLOW_REINSTALL']=='true':
+              p=pathlib.Path(os.environ['DRIVER_OUTPUT'])/'driver-download.html'
+              s=p.read_text()
+              marker=s.index('>',s.index('<body'))+1
+              s=s[:marker]+'<aside style="background:#fff3cd;color:#111;padding:20px;font-size:20px"><strong>Требуется переустановка.</strong> Удалите старое приложение водителя, установите этот APK и войдите заново. Локальные черновики могут потеряться.</aside>'+s[marker:]
+              p.write_text(s)
+          PY
+          apk_sha256=$(sha256sum "$output/gopark-driver.apk" | cut -d' ' -f1)
+          zip_sha256=$(sha256sum "$output/gopark-driver.zip" | cut -d' ' -f1)
+          options=(-i "$DRIVER_SIGNING_STAGE/key" -o "UserKnownHostsFile=$DRIVER_SIGNING_STAGE/known_hosts" -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=15)
+          remote="$SSH_USER@$SSH_HOST"
+          stage="/tmp/gopark-driver-$GITHUB_RUN_ID"
+          ssh "${options[@]}" -p "$SSH_PORT" "$remote" "mkdir -p '$stage'; chmod 700 '$stage'"
+          scp "${options[@]}" -P "$SSH_PORT" "$output/gopark-driver.apk" "$output/gopark-driver.zip" "$output/driver-download.html" scripts/publish_driver_apk.sh "$remote:$stage/"
+          ssh "${options[@]}" -p "$SSH_PORT" "$remote" "DEPLOYED_SHA='$CODE_SHA' CODE_SHA='$CODE_SHA' APK_SHA256='$apk_sha256' ZIP_SHA256='$zip_sha256' STAGE='$stage' bash '$stage/publish_driver_apk.sh'"
+      - name: Remove temporary signing material
+        if: always()
+        run: |
+          rm -f apps/driver-app/android/key.properties
+          if [[ "${DRIVER_SIGNING_STAGE:-}" == "$RUNNER_TEMP/driver-upload-signing."* ]]; then rm -rf "$DRIVER_SIGNING_STAGE"; fi
