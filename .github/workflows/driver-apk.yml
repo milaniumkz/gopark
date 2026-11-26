@@ -248,7 +248,7 @@ jobs:
           if os.environ['ALLOW_REINSTALL']=='true':
               p=pathlib.Path(os.environ['DRIVER_OUTPUT'])/'driver-download.html'
               s=p.read_text()
-              marker=s.index('>',s.index('<body'))+1
+              marker=s.index('<h1')
               s=s[:marker]+'<aside style="background:#fff3cd;color:#111;padding:20px;font-size:20px"><strong>Требуется переустановка.</strong> Удалите старое приложение водителя, установите этот APK и войдите заново. Локальные черновики могут потеряться.</aside>'+s[marker:]
               p.write_text(s)
           PY
