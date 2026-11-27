@@ -63,6 +63,13 @@ for(const l of lines){const m=l.match(/ -> (\d{3}) (\d+)ms/);if(m&&l.includes("P
 console.log(JSON.stringify({requestPostStatuses:statuses,gatewayTimeoutLines:lines.filter(l=>/HTTP[^ ]*" 504|upstream timed out/.test(l)).length,sampledLogLines:lines.length}));
 }finally{await p.$disconnect();}'
     ;;
+  notification-delivery-diagnostic)
+    docker exec gopark-worker node --input-type=module -e 'try{const r=await fetch("http://127.0.0.1:3001/health",{signal:AbortSignal.timeout(5000)});const h=await r.json();console.log(JSON.stringify({workerHealth:r.status,service:h.service,appRuntime:h.appRuntime}));}catch(e){console.log(JSON.stringify({workerHealthError:e.name}));}'
+    docker exec -i gopark-api node --input-type=module <<'JS'
+import{createRequire}from"node:module";const require=createRequire(import.meta.url);const{PrismaClient}=require("./apps/api/node_modules/@prisma/client");const{Queue}=require("./apps/api/node_modules/bullmq");const{Redis}=require("./apps/api/node_modules/ioredis");const p=new PrismaClient(),connection=new Redis(process.env.REDIS_URL,{maxRetriesPerRequest:1}),q=new Queue("gopark-outbox",{connection});try{console.log(JSON.stringify({outbox:await p.outboxEvent.groupBy({by:["status"],_count:{_all:true}}),queue:await q.getJobCounts(),firebaseConfigured:!!(process.env.FIREBASE_SERVICE_ACCOUNT_JSON||process.env.FIREBASE_SERVICE_ACCOUNT_PATH)}));}finally{await q.close();await connection.quit();await p.$disconnect();}
+JS
+    for c in gopark-api gopark-worker; do docker logs --since=48h --tail=5000 "$c" 2>&1 || true; done | docker exec -i gopark-api node --input-type=module -e 'import{readFileSync}from"node:fs";const s=readFileSync(0,"utf8");console.log(JSON.stringify({fcmFailures:(s.match(/FCM send failed/g)||[]).length,fcmDisabled:(s.match(/FCM disabled:/g)||[]).length,invalidTokens:(s.match(/invalid push token/g)||[]).length,workerStarted:s.includes("gopark-outbox-worker] listening"),queueErrors:(s.match(/WRONGPASS|NOAUTH|ECONNREFUSED/g)||[]).length}));'
+    ;;
   driver-payment-diagnostic)
     test -n "${DRIVER_SEARCH:-}"
     docker exec -i -e DRIVER_SEARCH gopark-api node --input-type=module <<'JS'
