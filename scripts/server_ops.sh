@@ -63,6 +63,32 @@ for(const l of lines){const m=l.match(/ -> (\d{3}) (\d+)ms/);if(m&&l.includes("P
 console.log(JSON.stringify({requestPostStatuses:statuses,gatewayTimeoutLines:lines.filter(l=>/HTTP[^ ]*" 504|upstream timed out/.test(l)).length,sampledLogLines:lines.length}));
 }finally{await p.$disconnect();}'
     ;;
+  recover-redis-queue)
+    umask 077
+    BACKUP="$BASE/backups/queue-recovery-$(date -u +%Y%m%dT%H%M%S)-$$"
+    mkdir -p "$BACKUP"
+    docker exec gopark-postgres pg_dump -U gopark gopark | gzip > "$BACKUP/database.sql.gz"
+    gzip -t "$BACKUP/database.sql.gz"
+    cp "$BASE/gopark/.env" "$BACKUP/server.env"
+    timeout 30s docker cp gopark-redis:/data "$BACKUP/redis-data"
+    test -d "$BACKUP/redis-data"
+    docker restart -t 10 gopark-redis
+    ready=false
+    for attempt in $(seq 1 15); do
+      if timeout 3s docker exec gopark-redis redis-cli ping | grep -qx PONG; then ready=true; break; fi
+      sleep 1
+    done
+    test "$ready" = true
+    docker restart -t 10 gopark-worker
+    ready=false
+    for attempt in $(seq 1 20); do
+      if docker exec gopark-worker node -e 'fetch("http://127.0.0.1:3001/health",{signal:AbortSignal.timeout(1000)}).then(async r=>{if(!r.ok)process.exit(1);const h=await r.json();if(h.service!=="gopark-outbox-worker")process.exit(1);console.log(JSON.stringify(h))}).catch(()=>process.exit(1))'; then ready=true; break; fi
+      sleep 1
+    done
+    test "$ready" = true
+    curl --max-time 10 -fsS http://127.0.0.1:3000/api/health
+    echo "Preserved Redis volume, database and configuration backup: $BACKUP"
+    ;;
   notification-delivery-diagnostic)
     timeout 5s docker exec gopark-redis redis-cli ping || echo "Redis PING did not complete"
     docker inspect --format '{{.Name}} {{json .NetworkSettings.Networks}}' gopark-api gopark-worker gopark-redis
