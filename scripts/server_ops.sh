@@ -68,6 +68,39 @@ console.log(JSON.stringify({requestPostStatuses:statuses,gatewayTimeoutLines:lin
 import{createRequire}from"node:module";import{readFileSync}from"node:fs";const require=createRequire(new URL("./apps/api/package.json",import.meta.url));try{const raw=process.env.FIREBASE_SERVICE_ACCOUNT_JSON??readFileSync(process.env.FIREBASE_SERVICE_ACCOUNT_PATH,"utf8");const account=JSON.parse(raw),credential=require("firebase-admin/app").cert(account);const access=await credential.getAccessToken();const r=await fetch(`https://firebase.googleapis.com/v1beta1/projects/${account.project_id}/androidApps`,{headers:{authorization:`Bearer ${access.access_token}`},signal:AbortSignal.timeout(10000)});const data=await r.json();console.log(JSON.stringify({firebaseManagementStatus:r.status,packages:(data.apps??[]).map(a=>({packageName:a.packageName,appId:a.appId}))}));}catch(e){console.log(JSON.stringify({firebaseDiagnosticError:e.name}));process.exitCode=1;}
 JS
     ;;
+  rebuild-persisted-queue)
+    umask 077
+    BACKUP="$BASE/backups/queue-rebuild-$(date -u +%Y%m%dT%H%M%S)-$$"
+    mkdir -p "$BACKUP"
+    docker exec gopark-postgres pg_dump -U gopark gopark | gzip > "$BACKUP/database.sql.gz"
+    gzip -t "$BACKUP/database.sql.gz"
+    cp "$BASE/gopark/.env" "$BACKUP/server.env"
+    timeout 30s docker cp gopark-redis:/data "$BACKUP/previous-redis-data"
+    test -d "$BACKUP/previous-redis-data"
+    QUEUE_VOLUME="gopark_queue_recovery_$(date -u +%Y%m%dT%H%M%S)"
+    docker volume create "$QUEUE_VOLUME" >/dev/null
+    printf 'services:\n  redis:\n    ports: !override ["127.0.0.1:6379:6379"]\nvolumes:\n  gopark_redis_data:\n    external: true\n    name: %s\n' "$QUEUE_VOLUME" > "$BACKUP/queue.yml"
+    CURRENT=$(readlink -f "$BASE/gopark-current")
+    compose=(docker compose -p gopark --env-file "$BASE/gopark/.env" -f "$CURRENT/docker-compose.server.yml" -f "$BACKUP/queue.yml")
+    "${compose[@]}" config --quiet
+    docker stop -t 10 gopark-worker
+    "${compose[@]}" up -d --no-deps --no-build --force-recreate redis
+    ready=false
+    for attempt in $(seq 1 15); do
+      if timeout 3s docker exec gopark-redis redis-cli ping | grep -qx PONG; then ready=true; break; fi
+      sleep 1
+    done
+    test "$ready" = true
+    export QUEUE_VOLUME
+    python3 - "$BASE/gopark/.env" <<'PY'
+import os,pathlib,re,sys
+p=pathlib.Path(sys.argv[1]);s=p.read_text();line='REDIS_DATA_VOLUME='+os.environ['QUEUE_VOLUME']
+s=re.sub(r'^REDIS_DATA_VOLUME=.*$',line,s,flags=re.M) if re.search(r'^REDIS_DATA_VOLUME=',s,flags=re.M) else s.rstrip()+'\n'+line+'\n'
+p.write_text(s)
+PY
+    curl --max-time 10 -fsS http://127.0.0.1:3000/api/health
+    echo "Healthy replacement queue created; old volume and files preserved. Worker awaits checked application deployment. Backup: $BACKUP"
+    ;;
   redis-isolated-probe)
     name="gopark-redis-probe-$$"
     trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
