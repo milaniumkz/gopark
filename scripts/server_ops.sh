@@ -191,6 +191,17 @@ JS
 import{createRequire}from"node:module";const require=createRequire(import.meta.url);const{PrismaClient}=require("./apps/api/node_modules/@prisma/client");const{Queue}=require("./apps/api/node_modules/bullmq");const{Redis}=require("./apps/api/node_modules/ioredis");const p=new PrismaClient(),connection=new Redis(process.env.REDIS_URL,{maxRetriesPerRequest:1}),q=new Queue("gopark-outbox",{connection});setTimeout(()=>{console.log("Queue diagnostic timed out");connection.disconnect();process.exit(2);},15000).unref();try{console.log(JSON.stringify({outbox:await p.outboxEvent.groupBy({by:["status"],_count:{_all:true}}),queue:await q.getJobCounts(),firebaseConfigured:!!(process.env.FIREBASE_SERVICE_ACCOUNT_JSON||process.env.FIREBASE_SERVICE_ACCOUNT_PATH)}));}finally{await q.close();await connection.quit();await p.$disconnect();}
 JS
     ;;
+  public-download-diagnostic)
+    cat "$BASE/gopark-current-sha"
+    for app in driver manager; do
+      for file in "gopark-$app.apk" "gopark-$app.zip" "$app-download.html"; do
+        printf '%s\n' "$file"
+        curl --max-time 20 -fsSI "https://185.138.185.36/$file?verified=$(date -u +%s)" | tr -d '\r' | sed -n '/^HTTP\//p; /^[Cc]ontent-[Ll]ength:/p; /^[Cc]ontent-[Tt]ype:/p; /^[Cc]ontent-[Dd]isposition:/p'
+      done
+      docker exec gopark-crm-web stat -c '%a %n' "/usr/share/nginx/html/gopark-$app.apk"
+      docker exec gopark-crm-web sha256sum "/usr/share/nginx/html/gopark-$app.apk"
+    done
+    ;;
   repair-apk-downloads)
     CURRENT=$(readlink -f "$BASE/gopark-current")
     for file in gopark-driver.apk gopark-manager.apk gopark-driver.zip gopark-manager.zip driver-download.html manager-download.html; do
