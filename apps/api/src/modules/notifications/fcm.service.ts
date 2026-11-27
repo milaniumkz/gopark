@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { Injectable } from "@nestjs/common";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
@@ -5,6 +6,17 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service.js";
 import type { UserRole } from "@gopark/contracts";
 
 const require = createRequire(import.meta.url);
+
+function crmPushRecipientWhere(companyName: string | null | undefined): Prisma.UserWhereInput {
+  return {
+    status: "active",
+    ...(companyName ? { companyName } : {}),
+    OR: [
+      { role: { in: ["owner", "admin", "operator", "finance", "auditor"] } },
+      { role: "manager", manager: { is: { level: "senior" } } },
+    ],
+  };
+}
 
 @Injectable()
 export class FcmService {
@@ -106,14 +118,7 @@ export class FcmService {
       : null;
     const companyName = manager?.user?.companyName ?? null;
     const users = await prisma.user.findMany({
-      where: {
-        status: "active",
-        ...(companyName ? { companyName } : {}),
-        OR: [
-          { role: { in: ["owner", "admin", "operator", "finance", "auditor"] } },
-          { role: "manager", managerLevel: "senior" },
-        ],
-      },
+      where: crmPushRecipientWhere(companyName),
       select: { id: true },
     });
 
@@ -148,14 +153,7 @@ export class FcmService {
     }
 
     const users = await prisma.user.findMany({
-      where: {
-        status: "active",
-        ...(companyName ? { companyName } : {}),
-        OR: [
-          { role: { in: ["owner", "admin", "operator", "finance", "auditor"] } },
-          { role: "manager", managerLevel: "senior" },
-        ],
-      },
+      where: crmPushRecipientWhere(companyName),
       select: { id: true },
     });
 

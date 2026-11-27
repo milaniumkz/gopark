@@ -191,6 +191,19 @@ JS
 import{createRequire}from"node:module";const require=createRequire(import.meta.url);const{PrismaClient}=require("./apps/api/node_modules/@prisma/client");const{Queue}=require("./apps/api/node_modules/bullmq");const{Redis}=require("./apps/api/node_modules/ioredis");const p=new PrismaClient(),connection=new Redis(process.env.REDIS_URL,{maxRetriesPerRequest:1}),q=new Queue("gopark-outbox",{connection});setTimeout(()=>{console.log("Queue diagnostic timed out");connection.disconnect();process.exit(2);},15000).unref();try{console.log(JSON.stringify({outbox:await p.outboxEvent.groupBy({by:["status"],_count:{_all:true}}),queue:await q.getJobCounts(),firebaseConfigured:!!(process.env.FIREBASE_SERVICE_ACCOUNT_JSON||process.env.FIREBASE_SERVICE_ACCOUNT_PATH)}));}finally{await q.close();await connection.quit();await p.$disconnect();}
 JS
     ;;
+  retry-driver-request-alerts)
+    test -n "$DRIVER_PHONE"
+    umask 077
+    BACKUP="$BASE/backups/request-delivery-retry-$(date -u +%Y%m%dT%H%M%S)-$$"
+    mkdir -p "$BACKUP"
+    docker exec gopark-postgres pg_dump -U gopark gopark | gzip > "$BACKUP/database.sql.gz"
+    gzip -t "$BACKUP/database.sql.gz"
+    cp "$BASE/gopark/.env" "$BACKUP/server.env"
+    docker exec -i -e DRIVER_PHONE gopark-api node --input-type=module <<'JS'
+import{createRequire}from"node:module";import{randomUUID}from"node:crypto";const require=createRequire(new URL("./apps/api/package.json",import.meta.url));const{PrismaClient}=require("@prisma/client");const{Queue}=require("bullmq");const{Redis}=require("ioredis");const p=new PrismaClient(),connection=new Redis(process.env.REDIS_URL,{maxRetriesPerRequest:1}),q=new Queue("gopark-outbox",{connection});setTimeout(()=>{connection.disconnect();process.exit(2);},20000).unref();try{const drivers=(await p.driver.findMany({select:{id:true,phone:true,firstName:true,lastName:true}})).filter(d=>d.phone.replace(/\D/g,"").endsWith(process.env.DRIVER_PHONE));if(drivers.length!==1)throw Error("Expected one exact driver");const d=drivers[0];const requests=await p.driverStatusRequest.findMany({where:{driverId:d.id,status:"pending"},orderBy:{createdAt:"desc"},take:2});if(requests.length!==1)throw Error("Expected one pending request; refusing to choose");const r=requests[0];const alerts=await p.managerAlert.findMany({where:{title:"Новый запрос водителя",AND:[{details:{contains:[d.firstName,d.lastName].join(" ")}},{details:{contains:r.period}},...(r.note?[{details:{contains:r.note}}]:[])],createdAt:{gte:new Date(r.createdAt.getTime()-5000),lte:new Date(r.createdAt.getTime()+60000)}},select:{id:true}});if(!alerts.length)throw Error("No existing matching manager alert");const events=await p.outboxEvent.findMany({where:{topic:"manager_alert.dispatch",aggregateId:{in:alerts.map(a=>a.id)},status:"failed"},select:{id:true}});await p.$transaction(async tx=>{for(const e of events){await tx.outboxEvent.update({where:{id:e.id},data:{status:"pending",publishedAt:null}});await tx.auditLog.create({data:{action:"outbox.request_alert.retry",entityType:"outbox_event",entityId:e.id,correlationId:randomUUID(),beforeData:{status:"failed"},afterData:{status:"pending"}}});}});for(const e of events){const job=await q.getJob(e.id);if(job){if(await job.getState()==="failed")await job.retry("failed",{resetAttemptsMade:true,resetAttemptsStarted:true});}else await q.add("publish",{eventId:e.id},{jobId:e.id,attempts:5,backoff:{type:"exponential",delay:5000},removeOnComplete:true,removeOnFail:false});}console.log(JSON.stringify({existingAlerts:alerts.length,retried:events.length,requestStatus:r.status}));}finally{await q.close();await connection.quit();await p.$disconnect();}
+JS
+    echo "Delivery retry backup: $BACKUP"
+    ;;
   driver-payment-diagnostic)
     test -n "${DRIVER_SEARCH:-}"
     docker exec -i -e DRIVER_SEARCH gopark-api node --input-type=module <<'JS'
