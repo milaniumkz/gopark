@@ -43,6 +43,7 @@ trap rollback ERR
 for file in "${files[@]}"; do
   chmod 644 "$STAGE/$file"
   cp "$STAGE/$file" "$CURRENT/.$file.new"
+  chmod 644 "$CURRENT/.$file.new"
   docker cp "$STAGE/$file" "gopark-crm-web:/usr/share/nginx/html/.$file.new"
 done
 for file in "${files[@]}"; do

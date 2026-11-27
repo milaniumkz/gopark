@@ -32,3 +32,6 @@ tmp-upload-*
 crm-dist-live-*
 ._*
 .DS_Store
+!gopark-driver.zip
+!apps/driver-app/build/web/**
+!apps/manager-app/build/web/**
