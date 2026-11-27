@@ -68,7 +68,7 @@ console.log(JSON.stringify({requestPostStatuses:statuses,gatewayTimeoutLines:lin
     mkdir -p "$BASE/gopark/secrets/client-config-transfer"
     key="$BASE/gopark/secrets/client-config-transfer/key.pem"
     if [ ! -f "$key" ]; then openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$key" 2>/dev/null; fi
-    openssl pkey -in "$key" -pubout
+    openssl pkey -in "$key" -pubout | python3 -c 'import sys,base64;print("PUBLIC_CONFIG_TRANSFER_KEY="+".".join(base64.b64encode(sys.stdin.buffer.read()).decode()))'
     ;;
   install-client-configs)
     : "${CLIENT_CONFIG_CIPHERTEXT:?}"
