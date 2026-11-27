@@ -39,12 +39,20 @@ export class IntegrationEventsService {
           payload,
         };
       case "notification.dispatch":
+        if (typeof payload.driverId === "string") {
+          await this.fcmService.sendToDriver(payload.driverId, String(payload.title ?? "GoPark"), String(payload.body ?? ""));
+        }
+        if (typeof payload.notificationId === "string") await this.notificationRepository.updateStatus(payload.notificationId, "sent");
         return {
           integration: "notification-delivery",
           accepted: true,
           payload,
         };
       case "manager_alert.dispatch":
+        await Promise.all([
+          this.fcmService.sendToManager(typeof payload.managerId === "string" ? payload.managerId : null, String(payload.title ?? "GoPark"), String(payload.details ?? "")),
+          this.fcmService.sendToCrmStaffByManager(typeof payload.managerId === "string" ? payload.managerId : null, String(payload.title ?? "GoPark"), String(payload.details ?? "")),
+        ]);
         return {
           integration: "manager-alert-delivery",
           accepted: true,

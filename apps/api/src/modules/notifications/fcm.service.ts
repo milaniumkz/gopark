@@ -213,7 +213,7 @@ export class FcmService {
 
       const invalidTokens = response.responses
         .map((item: { success: boolean; error?: Error }, index: number) => ({ item, token: uniqueTokens[index] }))
-        .filter(({ item }: { item: { success: boolean; error?: Error }; token?: string }) => !item.success)
+        .filter(({ item }: { item: { success: boolean; error?: Error & {code?: string} }; token?: string }) => !item.success && ["messaging/invalid-registration-token", "messaging/registration-token-not-registered"].includes(item.error?.code ?? ""))
         .map(({ token }: { item: { success: boolean; error?: Error }; token?: string }) => token)
         .filter(Boolean) as string[];
 
@@ -224,8 +224,11 @@ export class FcmService {
           data: { disabledAt: new Date() },
         });
       }
+      const transient = response.responses.find((item: {success: boolean; error?: Error & {code?: string}}) => !item.success && !["messaging/invalid-registration-token", "messaging/registration-token-not-registered"].includes(item.error?.code ?? ""));
+      if (transient) throw transient.error ?? new Error("FCM delivery failed");
     } catch (error) {
       console.warn(`[gopark-api] FCM send failed: ${error instanceof Error ? error.message : String(error)}`);
+      throw error;
     }
   }
 

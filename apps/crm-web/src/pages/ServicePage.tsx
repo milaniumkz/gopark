@@ -106,7 +106,8 @@ function paymentCaption(cost: number | undefined, paidAmount: number) {
       : "Не оплачено · стоимость не указана";
   if (cost === 0) return "Оплата не требуется";
   if (paidAmount <= 0) return "Не оплачено";
-  if (paidAmount >= cost) return "Оплачено полностью";
+  if (paidAmount > cost) return `Оплачено ${formatCurrency(paidAmount)} · дополнительно в прибыль СТО ${formatCurrency(paidAmount - cost)}`;
+  if (paidAmount === cost) return "Оплачено полностью";
   return `Оплачено частично — ${formatCurrency(paidAmount)} из ${formatCurrency(cost)}`;
 }
 function paymentId() {
@@ -838,14 +839,8 @@ function ServiceWorkshopPage({
       setMessage("Выберите страховую и укажите дату оплаты");
       return;
     }
-    if (
-      details.serviceCost === undefined ||
-      amount + paid({ ...selected, serviceDetails: details }) >
-        details.serviceCost + 0.001
-    ) {
-      setMessage(
-        "Укажите стоимость услуг. Сумма оплат не должна превышать её.",
-      );
+    if (details.serviceCost === undefined) {
+      setMessage("Перед оплатой укажите стоимость услуг");
       return;
     }
     const attemptKey = JSON.stringify([

@@ -433,8 +433,8 @@ export function serviceWorkflow(
       )
         fail("Сохранённую оплату нельзя удалять или изменять");
     }
-    if (paid > (details.serviceCost ?? 0) + 0.001)
-      fail("Оплата не может превышать стоимость услуг");
+    if (paid > 0 && details.serviceCost === undefined)
+      fail("Перед оплатой укажите стоимость услуг");
     const now = new Date().toISOString();
     for (const key of [
       "sentAt",

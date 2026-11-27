@@ -1,3 +1,4 @@
+import { isImpoundRelease, releaseImpoundedCar } from "./impound-release.js";
 import { isDeepStrictEqual } from "node:util";
 import { applyServiceInventory } from "./service-inventory.js";
 import { normalizeServicePayments } from "@gopark/contracts";
@@ -802,6 +803,7 @@ async function syncRepairCar(tx: any, incident: any): Promise<void> {
   const car = await tx.car.findUnique({ where: { id: incident.carId } });
   if (!car || ["sold", "written_off"].includes(car.status)) return;
   if (!isServiceRepair(incident)) {
+    await releaseImpoundedCar(tx, incident, car);
     if (
       incident.status === "open" &&
       ["accident", "impound"].includes(incident.incidentType) &&
@@ -906,6 +908,10 @@ function syncSeedRepairCar(incident: ManagerIncidentItem): void {
   const car = seedCars.find((item) => item.id === incident.carId);
   if (!car || ["sold", "written_off"].includes(car.status)) return;
   if (!isServiceRepair(incident)) {
+    if (isImpoundRelease(incident, car) && !seedManagerIncidents.some(item => item.id !== incident.id && item.carId === car.id && item.status === "open")) {
+      const driver = seedDrivers.find(item => item.id === car.assignedDriverId);
+      car.status = driver && driver.status !== "terminated" ? "assigned" : "free";
+    }
     if (
       incident.status === "open" &&
       ["accident", "impound"].includes(incident.incidentType ?? "") &&

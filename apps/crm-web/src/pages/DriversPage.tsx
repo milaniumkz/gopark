@@ -1,3 +1,4 @@
+import { matchesDriverSearch } from "./driver-search";
 import { DateRangePicker } from "../ui/DateRangePicker";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Outlet, useSearchParams } from "react-router-dom";
@@ -12,7 +13,7 @@ import { EmptyStatePanel } from "../ui/EmptyStatePanel";
 import { ReadOnlyNotice } from "../ui/ReadOnlyNotice";
 import { downloadCsvTable } from "../lib/utils";
 import { DriversIcon, FinanceIcon, ShieldIcon } from "../ui/CrmIcons";
-import type { ContractListItem, DriverListItem, ManagerAssignedDriverItem, PayoutListItem, UserAdminListItem } from "@gopark/contracts";
+import type { ContractListItem, DriverListItem, ManagerAssignedDriverItem, PayoutListItem, UserAdminListItem, VehicleListItem } from "@gopark/contracts";
 
 const weeklyDayOffOptions = [
   { value: "", label: "Без фиксированного выходного" },
@@ -111,6 +112,7 @@ export function DriversPage() {
   const quickFormRef = useRef<HTMLDivElement | null>(null);
   const api = useApiQuery<DriverListItem[]>("drivers");
   const contractsApi = useApiQuery<ContractListItem[]>("contracts");
+  const vehiclesApi = useApiQuery<VehicleListItem[]>("cars");
   const payoutsApi = useApiQuery<PayoutListItem[]>("payouts");
   const usersApi = useApiQuery<UserAdminListItem[]>("users");
   const settingsApi = useApiQuery<{ companies: string[] }>("settings/overview");
@@ -121,6 +123,17 @@ export function DriversPage() {
   const canReadEffectiveDriverStates = ["owner", "admin", "finance", "manager"].includes(session.requestUserRole);
   const drivers = useMemo(() => api.data ?? [], [api.data]);
   const contracts = useMemo(() => contractsApi.data ?? [], [contractsApi.data]);
+  const driverPlates = useMemo(() => {
+    const result = new Map<string, string[]>();
+    const add = (id: string, plate: string) => result.set(id, [...(result.get(id) ?? []), plate]);
+    for (const car of vehiclesApi.data ?? []) {
+      if (car.assignedDriverId) add(car.assignedDriverId, car.plateNumber);
+      for (const contract of contracts) {
+        if (contract.carId === car.id && contract.status === "active") add(contract.driverId, car.plateNumber);
+      }
+    }
+    return result;
+  }, [contracts, vehiclesApi.data]);
   const payouts = useMemo(() => payoutsApi.data ?? [], [payoutsApi.data]);
   const users = useMemo(() => usersApi.data ?? [], [usersApi.data]);
   const companies = useMemo(() => settingsApi.data?.companies ?? [], [settingsApi.data?.companies]);
@@ -207,13 +220,12 @@ export function DriversPage() {
         })
         .filter((driver) => {
           const inSearch =
-            driver.fullName.toLowerCase().includes(query.toLowerCase()) ||
-            driver.phone.includes(query);
+            matchesDriverSearch(driver, query, driverPlates.get(driver.id) ?? []);
           const inCompany = companyFilter === "all" || (driver.companyName ?? "") === companyFilter;
           const inManager = managerFilter === "all" || (driver.managerId ?? "") === managerFilter;
           return inSearch && inCompany && inManager;
         }),
-    [companyFilter, drivers, dueDateFrom, dueDateTo, effectiveDriverMap, managerFilter, query],
+    [companyFilter, drivers, dueDateFrom, dueDateTo, effectiveDriverMap, driverPlates, managerFilter, query],
   );
   const rows = useMemo(
     () =>
@@ -256,7 +268,6 @@ export function DriversPage() {
   const allSelected = rows.length > 0 && selectedCount === rows.length;
   const isDebtView = status === "payment_due" || status === "overdue";
   const managerDebtCards = useMemo(() => {
-    const normalizedQuery = query.toLowerCase();
     const baseRows = drivers
       .map((driver) => {
         const effectiveDriver = effectiveDriverMap.get(driver.id);
@@ -270,7 +281,7 @@ export function DriversPage() {
         };
       })
       .filter((driver) => {
-        const inSearch = driver.fullName.toLowerCase().includes(normalizedQuery) || driver.phone.includes(query);
+        const inSearch = matchesDriverSearch(driver, query, driverPlates.get(driver.id) ?? []);
         const inStatus = getDebtViewAmount(status, driver) > 0;
         const inCompany = companyFilter === "all" || (driver.companyName ?? "") === companyFilter;
         return inSearch && inStatus && inCompany;
@@ -292,7 +303,7 @@ export function DriversPage() {
         amount,
       };
     }).filter((item) => item.count > 0 || item.amount > 0);
-  }, [companyFilter, dueDateFrom, dueDateTo, drivers, effectiveDriverMap, managerOptions, query, status]);
+  }, [companyFilter, dueDateFrom, dueDateTo, drivers, effectiveDriverMap, driverPlates, managerOptions, query, status]);
 
   useEffect(() => {
     setSelectedDriverIds((current) => current.filter((driverId) => rows.some((item) => item.id === driverId)));
@@ -601,7 +612,7 @@ export function DriversPage() {
         <div className="filter-panel__grid">
           <div className="filter-panel__stack">
             <div className="toolbar">
-              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Поиск по имени или телефону" />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Поиск по имени, телефону или госномеру" />
                 <select value={status} onChange={(e) => setStatus(e.target.value)}>
                   <option value="all">Все статусы</option>
                   <option value="active">Активен</option>

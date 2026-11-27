@@ -862,15 +862,21 @@ class DriverApiClient {
     String period,
     String? note,
   ) async {
-    final response = await client.post(
-      Uri.parse('$baseUrl/mobile/driver/$driverId/status-requests'),
-      headers: {..._headers, 'content-type': 'application/json'},
-      body: jsonEncode({
-        'type': type,
-        'period': period,
-        if (note?.trim().isNotEmpty == true) 'note': note!.trim(),
-      }),
-    );
+    final uri = Uri.parse('$baseUrl/mobile/driver/$driverId/status-requests');
+    final body = jsonEncode({
+      'type': type, 'period': period,
+      if (note?.trim().isNotEmpty == true) 'note': note!.trim(),
+    });
+    final token = _session?.accessToken;
+    Future<http.Response> send() => client.post(uri,
+      headers: {..._headers, 'content-type': 'application/json'}, body: body)
+      .timeout(const Duration(seconds: 20));
+    var response = await send();
+    // A rejected authorization cannot have created a request. Never replay an uncertain timeout.
+    if (response.statusCode == 401) {
+      if (_session?.accessToken == token) await refresh();
+      response = await send();
+    }
 
     return DriverStatusRequestDto.fromJson(_decodeObject(response));
   }

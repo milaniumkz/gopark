@@ -640,6 +640,12 @@ class _DriverDashboardPageState extends State<DriverDashboardPage> {
                 subtitle: 'GoPark',
                 icon: Icons.local_taxi_rounded,
               ),
+              const SizedBox(height: 12),
+              DriverStatusRequestSummary(
+                requests: _statusRequestsFuture,
+                onRetry: _refresh,
+                onOpenHistory: widget.onOpenProfile,
+              ),
               if (_driverRequiresPhoto(data)) ...[
                 const SizedBox(height: 12),
                 _DriverSelfieCard(
@@ -713,6 +719,32 @@ class _DriverDashboardPageState extends State<DriverDashboardPage> {
     }
     return _driverDateOnly(DateTime.now());
   }
+}
+
+class DriverStatusRequestSummary extends StatelessWidget {
+  const DriverStatusRequestSummary({super.key, required this.requests, required this.onRetry, required this.onOpenHistory});
+  final Future<List<DriverStatusRequestDto>> requests;
+  final Future<void> Function() onRetry;
+  final VoidCallback onOpenHistory;
+  @override
+  Widget build(BuildContext context) => FutureBuilder<List<DriverStatusRequestDto>>(
+    future: requests,
+    builder: (context, snapshot) {
+      if (snapshot.hasError) return _DriverErrorCard(title: 'Не удалось загрузить запросы', lines: const ['Обновите список запросов'], onRetry: onRetry);
+      if (!snapshot.hasData) return const LinearProgressIndicator();
+      final items = snapshot.data!;
+      final pending = items.where((item) => item.status == 'pending').toList();
+      final visible = pending.isNotEmpty ? pending : items.take(1);
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [const Expanded(child: SectionTitle('Мои запросы')), TextButton(onPressed: onOpenHistory, child: const Text('Все запросы'))]),
+        if (items.isEmpty) const InfoCard(title: 'Запросов пока нет', lines: ['Отправленные запросы и их статусы появятся здесь'], icon: Icons.event_note_outlined),
+        ...visible.map((item) => Padding(padding: const EdgeInsets.only(bottom: 8), child: DriverTimelineCard(
+          title: _driverRequestTypeLabel(item.type), subtitle: _driverStatusRequestSubtitle(item, includeDate: true),
+          badge: _driverRequestStatusLabel(item.status), icon: Icons.event_available_outlined,
+          accent: item.status == 'pending' ? _driverOrange : _driverGreen))),
+      ]);
+    },
+  );
 }
 
 bool _driverRequiresPhoto(DriverHomeSummaryDto? data) {
@@ -3695,16 +3727,18 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
                             return;
                           }
                           setDialogState(() => isSubmitting = true);
-                          await widget.repository.requestStatus(
-                            widget.driverId,
-                            typeController.value,
-                            period,
-                            note: note.isEmpty ? null : note,
-                          );
-                          if (!dialogContext.mounted) {
-                            return;
+                          try {
+                            await widget.repository.requestStatus(
+                              widget.driverId, typeController.value, period,
+                              note: note.isEmpty ? null : note,
+                            );
+                            if (dialogContext.mounted) Navigator.of(dialogContext).pop(true);
+                          } catch (error) {
+                            if (dialogContext.mounted) {
+                              setDialogState(() => isSubmitting = false);
+                              messenger.showSnackBar(SnackBar(content: Text('Не удалось отправить запрос: $error')));
+                            }
                           }
-                          Navigator.of(dialogContext).pop(true);
                         },
                   child: Text(isSubmitting ? 'Отправка...' : 'Отправить'),
                 ),
@@ -3964,6 +3998,9 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
                 );
               }
 
+              if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
+                return const LinearProgressIndicator();
+              }
               final items = snapshot.data ?? const [];
               if (items.isEmpty) {
                 return const InfoCard(
@@ -3979,7 +4016,7 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
                         padding: const EdgeInsets.only(bottom: 12),
                         child: DriverTimelineCard(
                           title: _driverRequestTypeLabel(item.type),
-                          subtitle: _driverStatusRequestSubtitle(item),
+                          subtitle: _driverStatusRequestSubtitle(item, includeDate: true),
                           badge: _driverRequestStatusLabel(item.status),
                           icon: Icons.event_available_outlined,
                           accent: item.status == 'approved'

@@ -2585,6 +2585,14 @@ class _ManagerAlertsPageState extends State<ManagerAlertsPage> {
     _incidentsFuture = widget.repository.loadIncidents();
   }
 
+  Future<void> _refreshRequests() async {
+    widget.repository.invalidate();
+    setState(_reload);
+    await Future.wait([
+      _alertsFuture, _requestsFuture, _riskRequestsFuture, _incidentsFuture,
+    ]).then<void>((_) {}, onError: (Object error, StackTrace stack) {});
+  }
+
   Future<void> _reviewStatusRequest(
     ManagerStatusRequestItemDto request,
     String action,
@@ -2762,7 +2770,9 @@ class _ManagerAlertsPageState extends State<ManagerAlertsPage> {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<List<ManagerAlertDto>>(
+    return RefreshIndicator(
+      onRefresh: _refreshRequests,
+      child: FutureBuilder<List<ManagerAlertDto>>(
       future: _alertsFuture,
       builder: (context, alertsSnapshot) {
         final alerts = alertsSnapshot.data ?? const [];
@@ -2937,9 +2947,20 @@ class _ManagerAlertsPageState extends State<ManagerAlertsPage> {
                         ],
                         if (_showManagerAlertsSection(_selectedSection,
                             ManagerAlertsSection.requests)) ...[
-                          const _SectionTitle('Запросы водителей'),
+                          Row(children: [
+                            const Expanded(child: _SectionTitle('Запросы водителей')),
+                            IconButton(tooltip: 'Обновить запросы',
+                              onPressed: _refreshRequests,
+                              icon: const Icon(Icons.refresh)),
+                          ]),
                           const SizedBox(height: 6),
-                          if (visibleRequests.isEmpty)
+                          if (requestsSnapshot.connectionState == ConnectionState.waiting && !requestsSnapshot.hasData)
+                            const LinearProgressIndicator(),
+                          if (requestsSnapshot.hasError)
+                            ManagerInfoCard(title: 'Не удалось загрузить запросы',
+                              lines: const ['Нажмите обновить или потяните экран вниз'],
+                              icon: Icons.cloud_off_outlined),
+                          if (visibleRequests.isEmpty && !requestsSnapshot.hasError && requestsSnapshot.connectionState == ConnectionState.done)
                             const ManagerInfoCard(
                               title: 'Нет запросов',
                               lines: [
@@ -3118,6 +3139,7 @@ class _ManagerAlertsPageState extends State<ManagerAlertsPage> {
           },
         );
       },
+    ),
     );
   }
 }

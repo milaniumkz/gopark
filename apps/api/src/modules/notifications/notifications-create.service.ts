@@ -252,9 +252,6 @@ export class NotificationsCreateService {
       template,
     });
     await this.dispatchNotification(notification);
-    void this.fcmService
-      .sendToDriver(driverId, title, body)
-      .catch(() => undefined);
     if (options.notifyStakeholders !== false) {
       await this.createDriverStakeholderAlerts(driverId, title, body);
     }
@@ -298,10 +295,6 @@ export class NotificationsCreateService {
   private async createManagerAlert(input: Omit<ManagerAlertItem, "id">) {
     const alert = await this.managerAlertRepository.create(input);
     await this.dispatchManagerAlert(alert);
-    void Promise.allSettled([
-      this.fcmService.sendToManager(alert.managerId, alert.title, alert.details),
-      this.fcmService.sendToCrmStaffByManager(alert.managerId, alert.title, alert.details),
-    ]);
     return alert;
   }
 
