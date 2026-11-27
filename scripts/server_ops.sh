@@ -42,9 +42,12 @@ try {
   for(const m of recipients){
    const visible=(await service.getStatusRequests({id:m.userId,role:"manager",companyName:m.user.companyName,managerLevel:m.level})).some(x=>x.id===r.id);
    const alertCount=await p.managerAlert.count({where:{managerId:m.id,title:"Новый запрос водителя",details:{contains:r.period},createdAt:{gte:new Date(r.createdAt.getTime()-5000),lte:new Date(r.createdAt.getTime()+60000)}}});
-   receiptChecks.push({level:m.level,visible,alertRecorded:alertCount>0});
+   const devices=await p.devicePushToken.groupBy({by:["app","platform"],where:{userId:m.userId,disabledAt:null},_count:{_all:true}});
+   const relatedAlerts=await p.managerAlert.findMany({where:{managerId:m.id,title:"Новый запрос водителя",details:{contains:r.period}},select:{id:true}});
+   const events=await p.outboxEvent.groupBy({by:["status"],where:{topic:"manager_alert.dispatch",aggregateId:{in:relatedAlerts.map(a=>a.id)}},_count:{_all:true}});
+   receiptChecks.push({level:m.level,visible,alertRecorded:alertCount>0,devices:devices.map(d=>({app:d.app,platform:d.platform,count:d._count._all})),outbox:events.map(e=>({status:e.status,count:e._count._all}))});
   }
-  pendingChecks.push({type:r.type,createdAt:r.createdAt.toISOString(),driverVisible,recipients:receiptChecks});
+  pendingChecks.push({type:r.type,createdAt:r.createdAt.toISOString(),driverVisible,noteMentionsIllness:/больнич|боле|здоров/iu.test(r.note??""),recipients:receiptChecks});
  }
  console.log(JSON.stringify({pendingChecks}));
  const notices=await p.notification.groupBy({by:["templateCode","status"],where:{driverId:{in:ids},createdAt:{gte:new Date(Date.now()-7*86400000)}},_count:{_all:true}});
