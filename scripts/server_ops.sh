@@ -63,6 +63,15 @@ for(const l of lines){const m=l.match(/ -> (\d{3}) (\d+)ms/);if(m&&l.includes("P
 console.log(JSON.stringify({requestPostStatuses:statuses,gatewayTimeoutLines:lines.filter(l=>/HTTP[^ ]*" 504|upstream timed out/.test(l)).length,sampledLogLines:lines.length}));
 }finally{await p.$disconnect();}'
     ;;
+  redis-isolated-probe)
+    name="gopark-redis-probe-$$"
+    trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
+    docker run -d --name "$name" --network none redis:7-alpine redis-server --save '' --appendonly no
+    sleep 1
+    timeout 5s docker exec "$name" redis-cli ping
+    docker inspect --format '{{range .Mounts}}{{.Name}} {{.Destination}}{{println}}{{end}}' gopark-redis
+    docker compose version --short
+    ;;
   redis-startup-diagnostic)
     docker inspect --format 'status={{.State.Status}} restartCount={{.RestartCount}} health={{if .State.Health}}{{.State.Health.Status}}{{end}} image={{.Config.Image}}' gopark-redis
     docker logs --tail=60 gopark-redis 2>&1
