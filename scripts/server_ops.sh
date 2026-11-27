@@ -63,6 +63,43 @@ for(const l of lines){const m=l.match(/ -> (\d{3}) (\d+)ms/);if(m&&l.includes("P
 console.log(JSON.stringify({requestPostStatuses:statuses,gatewayTimeoutLines:lines.filter(l=>/HTTP[^ ]*" 504|upstream timed out/.test(l)).length,sampledLogLines:lines.length}));
 }finally{await p.$disconnect();}'
     ;;
+  prepare-client-config-transfer)
+    umask 077
+    mkdir -p "$BASE/gopark/secrets/client-config-transfer"
+    key="$BASE/gopark/secrets/client-config-transfer/key.pem"
+    if [ ! -f "$key" ]; then openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$key" 2>/dev/null; fi
+    openssl pkey -in "$key" -pubout
+    ;;
+  install-client-configs)
+    : "${CLIENT_CONFIG_CIPHERTEXT:?}"
+    export BASE
+    python3 - <<'PY'
+import base64,hashlib,hmac,json,os,pathlib,subprocess
+root=pathlib.Path(os.environ['BASE'])/'gopark'/'secrets'
+key=root/'client-config-transfer'/'key.pem'
+payload=json.loads(base64.b64decode(os.environ['CLIENT_CONFIG_CIPHERTEXT']))
+material=subprocess.run(['openssl','pkeyutl','-decrypt','-inkey',str(key),'-pkeyopt','rsa_padding_mode:oaep','-pkeyopt','rsa_oaep_md:sha256'],input=base64.b64decode(payload['key']),capture_output=True,check=True).stdout
+assert len(material)==80
+cipher=base64.b64decode(payload['data']);iv=material[32:48]
+assert hmac.compare_digest(hmac.new(material[48:],iv+cipher,hashlib.sha256).hexdigest(),payload['mac'])
+plain=subprocess.run(['openssl','enc','-d','-aes-256-cbc','-K',material[:32].hex(),'-iv',iv.hex()],input=cipher,capture_output=True,check=True).stdout
+configs=json.loads(plain)
+account=json.loads((root/'firebase-service-account.json').read_text())
+for app in ['driver','manager']:
+ config=configs[app]
+ assert config['project_info']['project_id']==account['project_id']
+ assert 'private_key' not in config
+ packages=[x['client_info']['android_client_info']['package_name'] for x in config['client']]
+ assert 'com.milanium.gopark'+app in packages
+for app in ['driver','manager']:
+ target=root/('google-services-'+app+'.json')
+ if target.exists():
+  backup=target.with_name(target.name+'.before-install');backup.write_bytes(target.read_bytes());backup.chmod(0o600)
+ stage=target.with_suffix('.new');stage.write_text(json.dumps(configs[app]));stage.chmod(0o600);stage.replace(target)
+key.unlink()
+print('Validated Firebase Android client configurations installed for driver and manager; transfer key removed.')
+PY
+    ;;
   firebase-client-diagnostic)
     docker exec -i gopark-api node --input-type=module <<'JS'
 import{createRequire}from"node:module";import{readFileSync}from"node:fs";const require=createRequire(new URL("./apps/api/package.json",import.meta.url));try{const raw=process.env.FIREBASE_SERVICE_ACCOUNT_JSON??readFileSync(process.env.FIREBASE_SERVICE_ACCOUNT_PATH,"utf8");const account=JSON.parse(raw),credential=require("firebase-admin/app").cert(account);const access=await credential.getAccessToken();const r=await fetch(`https://firebase.googleapis.com/v1beta1/projects/${account.project_id}/androidApps`,{headers:{authorization:`Bearer ${access.access_token}`},signal:AbortSignal.timeout(10000)});const data=await r.json();console.log(JSON.stringify({firebaseManagementStatus:r.status,packages:(data.apps??[]).map(a=>({packageName:a.packageName,appId:a.appId}))}));}catch(e){console.log(JSON.stringify({firebaseDiagnosticError:e.name}));process.exitCode=1;}
