@@ -63,6 +63,11 @@ for(const l of lines){const m=l.match(/ -> (\d{3}) (\d+)ms/);if(m&&l.includes("P
 console.log(JSON.stringify({requestPostStatuses:statuses,gatewayTimeoutLines:lines.filter(l=>/HTTP[^ ]*" 504|upstream timed out/.test(l)).length,sampledLogLines:lines.length}));
 }finally{await p.$disconnect();}'
     ;;
+  firebase-client-diagnostic)
+    docker exec -i gopark-api node --input-type=module <<'JS'
+import{createRequire}from"node:module";import{readFileSync}from"node:fs";const require=createRequire(new URL("./apps/api/package.json",import.meta.url));try{const raw=process.env.FIREBASE_SERVICE_ACCOUNT_JSON??readFileSync(process.env.FIREBASE_SERVICE_ACCOUNT_PATH,"utf8");const account=JSON.parse(raw),credential=require("firebase-admin/app").cert(account);const access=await credential.getAccessToken();const r=await fetch(`https://firebase.googleapis.com/v1beta1/projects/${account.project_id}/androidApps`,{headers:{authorization:`Bearer ${access.access_token}`},signal:AbortSignal.timeout(10000)});const data=await r.json();console.log(JSON.stringify({firebaseManagementStatus:r.status,packages:(data.apps??[]).map(a=>({packageName:a.packageName,appId:a.appId}))}));}catch(e){console.log(JSON.stringify({firebaseDiagnosticError:e.name}));process.exitCode=1;}
+JS
+    ;;
   redis-isolated-probe)
     name="gopark-redis-probe-$$"
     trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
