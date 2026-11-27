@@ -191,6 +191,24 @@ JS
 import{createRequire}from"node:module";const require=createRequire(import.meta.url);const{PrismaClient}=require("./apps/api/node_modules/@prisma/client");const{Queue}=require("./apps/api/node_modules/bullmq");const{Redis}=require("./apps/api/node_modules/ioredis");const p=new PrismaClient(),connection=new Redis(process.env.REDIS_URL,{maxRetriesPerRequest:1}),q=new Queue("gopark-outbox",{connection});setTimeout(()=>{console.log("Queue diagnostic timed out");connection.disconnect();process.exit(2);},15000).unref();try{console.log(JSON.stringify({outbox:await p.outboxEvent.groupBy({by:["status"],_count:{_all:true}}),queue:await q.getJobCounts(),firebaseConfigured:!!(process.env.FIREBASE_SERVICE_ACCOUNT_JSON||process.env.FIREBASE_SERVICE_ACCOUNT_PATH)}));}finally{await q.close();await connection.quit();await p.$disconnect();}
 JS
     ;;
+  repair-apk-downloads)
+    CURRENT=$(readlink -f "$BASE/gopark-current")
+    for file in gopark-driver.apk gopark-manager.apk gopark-driver.zip gopark-manager.zip driver-download.html manager-download.html; do
+      if [ -f "$CURRENT/$file" ]; then
+        chmod 644 "$CURRENT/$file"
+        if ! docker exec gopark-crm-web test -f "/usr/share/nginx/html/$file"; then docker cp "$CURRENT/$file" "gopark-crm-web:/usr/share/nginx/html/$file"; fi
+      fi
+      if docker exec gopark-crm-web test -f "/usr/share/nginx/html/$file"; then docker exec gopark-crm-web chmod 644 "/usr/share/nginx/html/$file"; fi
+    done
+    for app in driver manager; do
+      expected=$(sha256sum "$CURRENT/gopark-$app.apk"); expected=${expected%% *}
+      actual=$(docker exec gopark-crm-web sha256sum "/usr/share/nginx/html/gopark-$app.apk"); actual=${actual%% *}
+      test "$expected" = "$actual"
+      curl --max-time 10 -fsSI "http://127.0.0.1:3000/gopark-$app.apk" | head -1
+      curl --max-time 10 -fsS "http://127.0.0.1:3000/$app-download.html" | grep -q "$expected"
+      echo "Verified $app public APK permissions and checksum: $expected"
+    done
+    ;;
   retry-driver-request-alerts)
     test -n "$DRIVER_PHONE"
     umask 077
