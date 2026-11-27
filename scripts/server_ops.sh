@@ -63,6 +63,12 @@ for(const l of lines){const m=l.match(/ -> (\d{3}) (\d+)ms/);if(m&&l.includes("P
 console.log(JSON.stringify({requestPostStatuses:statuses,gatewayTimeoutLines:lines.filter(l=>/HTTP[^ ]*" 504|upstream timed out/.test(l)).length,sampledLogLines:lines.length}));
 }finally{await p.$disconnect();}'
     ;;
+  redis-startup-diagnostic)
+    docker inspect --format 'status={{.State.Status}} restartCount={{.RestartCount}} health={{if .State.Health}}{{.State.Health.Status}}{{end}} image={{.Config.Image}}' gopark-redis
+    docker logs --tail=60 gopark-redis 2>&1
+    timeout 5s docker exec gopark-redis sh -c 'ls -lah /data; cat /proc/1/status | sed -n "/^Name:/p; /^State:/p; /^VmRSS:/p"' || true
+    docker stats --no-stream --format '{{.Name}} cpu={{.CPUPerc}} memory={{.MemUsage}}' gopark-redis
+    ;;
   recover-redis-queue)
     umask 077
     BACKUP="$BASE/backups/queue-recovery-$(date -u +%Y%m%dT%H%M%S)-$$"
