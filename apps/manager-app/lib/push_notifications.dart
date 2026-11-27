@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
@@ -40,6 +41,11 @@ class ManagerPushNotifications {
       debugPrint('GoPark manager push init failed: $error');
       return null;
     }
+  }
+
+  static StreamSubscription<RemoteMessage>? listenMessages(void Function(String, String) onMessage) {
+    if (kIsWeb || !_initialized) return null;
+    return FirebaseMessaging.onMessage.listen((message) => onMessage(message.notification?.title ?? 'GoPark', message.notification?.body ?? 'Новое уведомление'));
   }
 
   static void listenTokenRefresh(Future<void> Function(String token) onToken) {

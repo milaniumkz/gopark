@@ -90,12 +90,17 @@ export function serviceWorkProfit(
       : (work.amount ?? 0);
   return money(amount * 0.3);
 }
+export function serviceOverpayment(d: ServiceRepairDetails | undefined | null): number {
+  if (d?.serviceCost === undefined) return 0;
+  return money(Math.max(0, (d.payments ?? []).reduce((sum, p) => sum + p.amount, 0) - d.serviceCost));
+}
 export function serviceProfit(
   d: ServiceRepairDetails | undefined | null,
 ): number {
-  return d?.orderItems?.length
+  const base = d?.orderItems?.length
     ? money(
         d.orderItems.reduce((sum, work) => sum + serviceWorkProfit(d, work), 0),
       )
     : money(serviceFeeBase(d) * 0.3);
+  return money(base + serviceOverpayment(d));
 }

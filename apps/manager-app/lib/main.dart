@@ -1,3 +1,4 @@
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -98,6 +99,8 @@ class _ManagerShellState extends State<ManagerShell>
   String? authError;
   bool isAuthenticating = false;
   DateTime? _lastBackPressedAt;
+  int _notificationsRevision = 0;
+  StreamSubscription<RemoteMessage>? _pushMessages;
 
   @override
   void initState() {
@@ -114,6 +117,7 @@ class _ManagerShellState extends State<ManagerShell>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _pushMessages?.cancel();
     super.dispose();
   }
 
@@ -216,6 +220,7 @@ class _ManagerShellState extends State<ManagerShell>
       ManagerAlertsPage(
         repository: repository,
         initialSection: alertsSection,
+        revision: _notificationsRevision,
         isSeniorManager: activeSession.managerLevel == 'senior',
       ),
       ManagerChatPage(repository: repository),
@@ -407,6 +412,13 @@ class _ManagerShellState extends State<ManagerShell>
     }
 
     await repository.registerPushToken(token);
+    await _pushMessages?.cancel();
+    _pushMessages = ManagerPushNotifications.listenMessages((title, body) {
+      if (!mounted || session == null) return;
+      repository.invalidate();
+      setState(() => _notificationsRevision++);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$title\n$body'), action: SnackBarAction(label: 'Открыть', onPressed: showNotifications)));
+    });
     ManagerPushNotifications.listenTokenRefresh(repository.registerPushToken);
   }
 }
@@ -2543,11 +2555,13 @@ class ManagerAlertsPage extends StatefulWidget {
     required this.repository,
     required this.initialSection,
     required this.isSeniorManager,
+    this.revision = 0,
   });
 
   final ManagerRepository repository;
   final ManagerAlertsSection initialSection;
   final bool isSeniorManager;
+  final int revision;
 
   @override
   State<ManagerAlertsPage> createState() => _ManagerAlertsPageState();
@@ -2576,6 +2590,7 @@ class _ManagerAlertsPageState extends State<ManagerAlertsPage> {
     if (oldWidget.initialSection != widget.initialSection) {
       _selectedSection = widget.initialSection;
     }
+    if (oldWidget.revision != widget.revision) _reload();
   }
 
   void _reload() {
@@ -2583,6 +2598,14 @@ class _ManagerAlertsPageState extends State<ManagerAlertsPage> {
     _requestsFuture = widget.repository.loadStatusRequests();
     _riskRequestsFuture = widget.repository.loadRiskStatusRequests();
     _incidentsFuture = widget.repository.loadIncidents();
+  }
+
+  Future<void> _refreshRequests() async {
+    widget.repository.invalidate();
+    setState(_reload);
+    await Future.wait([
+      _alertsFuture, _requestsFuture, _riskRequestsFuture, _incidentsFuture,
+    ]).then<void>((_) {}, onError: (Object error, StackTrace stack) {});
   }
 
   Future<void> _reviewStatusRequest(
@@ -2762,7 +2785,9 @@ class _ManagerAlertsPageState extends State<ManagerAlertsPage> {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<List<ManagerAlertDto>>(
+    return RefreshIndicator(
+      onRefresh: _refreshRequests,
+      child: FutureBuilder<List<ManagerAlertDto>>(
       future: _alertsFuture,
       builder: (context, alertsSnapshot) {
         final alerts = alertsSnapshot.data ?? const [];
@@ -2937,9 +2962,20 @@ class _ManagerAlertsPageState extends State<ManagerAlertsPage> {
                         ],
                         if (_showManagerAlertsSection(_selectedSection,
                             ManagerAlertsSection.requests)) ...[
-                          const _SectionTitle('Запросы водителей'),
+                          Row(children: [
+                            const Expanded(child: _SectionTitle('Запросы водителей')),
+                            IconButton(tooltip: 'Обновить запросы',
+                              onPressed: _refreshRequests,
+                              icon: const Icon(Icons.refresh)),
+                          ]),
                           const SizedBox(height: 6),
-                          if (visibleRequests.isEmpty)
+                          if (requestsSnapshot.connectionState == ConnectionState.waiting && !requestsSnapshot.hasData)
+                            const LinearProgressIndicator(),
+                          if (requestsSnapshot.hasError)
+                            ManagerInfoCard(title: 'Не удалось загрузить запросы',
+                              lines: const ['Нажмите обновить или потяните экран вниз'],
+                              icon: Icons.cloud_off_outlined),
+                          if (visibleRequests.isEmpty && !requestsSnapshot.hasError && requestsSnapshot.connectionState == ConnectionState.done)
                             const ManagerInfoCard(
                               title: 'Нет запросов',
                               lines: [
@@ -3118,6 +3154,7 @@ class _ManagerAlertsPageState extends State<ManagerAlertsPage> {
           },
         );
       },
+    ),
     );
   }
 }

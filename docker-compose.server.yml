@@ -23,7 +23,7 @@ services:
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - gopark_redis_data:/data
     healthcheck:
@@ -119,3 +119,4 @@ services:
 volumes:
   gopark_postgres_data:
   gopark_redis_data:
+    name: ${REDIS_DATA_VOLUME:-gopark_gopark_redis_data}

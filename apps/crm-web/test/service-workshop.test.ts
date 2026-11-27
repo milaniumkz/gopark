@@ -251,3 +251,26 @@ test("painting profit is entered manually, main profit remains automatic and nei
     2000,
   );
 });
+
+test("receipts above the invoice add to profit once and are split consistently", () => {
+  const details: ServiceRepairDetails = {
+    reason: "Test", workshop: "main", serviceCost: 20000,
+    serviceBaseCost: 20000,
+    payments: [
+      { id: "a", payer: "company", amount: 20000, paidAt: "2026-11-27" },
+      { id: "b", payer: "driver", amount: 15000, paidAt: "2026-11-27" },
+    ],
+  };
+  assert.equal(workshopFinance(details, "main").profit, 21000);
+  assert.equal(workshopFinance(details, "main").paid, 35000);
+  assert.equal(workshopFinance(details, "main").cost, 20000);
+  const both: ServiceRepairDetails = { ...details, workshop: "both", orderItems: [
+    { id: "paint", description: "Paint", category: "painting", amount: 10000, profitAmount: 1000 },
+    { id: "repair", description: "Repair", category: "repair", amount: 10000 },
+  ] };
+  assert.equal(workshopFinance(both, "body").profit, 8500);
+  assert.equal(workshopFinance(both, "main").profit, 10500);
+  const body = { ...both, workshop: "body" as const };
+  assert.equal(workshopFinance(body, "body").profit, 19000);
+  assert.equal(workshopFinance({ ...details, payments: details.payments!.slice(0, 1) }, "main").profit, 6000);
+});

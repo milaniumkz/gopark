@@ -201,6 +201,15 @@ jobs:
             echo 'User-authorized clean installation required for this APK.'
           fi
           echo "DRIVER_EXPECTED_CERT=$key_cert" >> "$GITHUB_ENV"
+      - name: Install verified Firebase Android client configuration
+        env:
+          SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+          SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          SSH_PORT: ${{ secrets.PROD_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          scp -q -i "$DRIVER_SIGNING_STAGE/key" -o "UserKnownHostsFile=$DRIVER_SIGNING_STAGE/known_hosts" -o StrictHostKeyChecking=yes -P "$SSH_PORT" "$SSH_USER@$SSH_HOST:/home/client/gopark/secrets/google-services-driver.json" apps/driver-app/android/app/google-services.json
+          python3 scripts/validate_firebase_client.py apps/driver-app/android/app/google-services.json com.milanium.goparkdriver
       - name: Analyze, test and build driver APK
         working-directory: apps/driver-app
         run: |
@@ -222,6 +231,7 @@ jobs:
           signer=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
           cert=$("$signer" verify --verbose --print-certs apps/driver-app/build/app/outputs/flutter-apk/app-release.apk | sed -n 's/.*certificate SHA-256 digest: //p' | sort -u)
           test "$cert" = "$DRIVER_EXPECTED_CERT"
+          bash scripts/verify_android_firebase.sh apps/driver-app/build/app/outputs/flutter-apk/app-release.apk
           aapt=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
           "$aapt" dump badging apps/driver-app/build/app/outputs/flutter-apk/app-release.apk | head -1 | grep "name='com.milanium.goparkdriver'"
       - uses: actions/upload-artifact@v4
@@ -263,5 +273,5 @@ jobs:
       - name: Remove temporary signing material
         if: always()
         run: |
-          rm -f apps/driver-app/android/key.properties
+          rm -f apps/driver-app/android/key.properties apps/driver-app/android/app/google-services.json
           if [[ "${DRIVER_SIGNING_STAGE:-}" == "$RUNNER_TEMP/driver-upload-signing."* ]]; then rm -rf "$DRIVER_SIGNING_STAGE"; fi

@@ -41,7 +41,7 @@ test("STO requires a reason, confirms arrival sequentially, and does not accept 
   assert.ok(p.serviceDetails?.arrivedAt);
   assert.equal(p.serviceDetails?.completedAt, undefined);
 });
-test("completion requires an order and works, immutable payment history and no overpayment", () => {
+test("completion requires an order and works, immutable payment history and additional receipts", () => {
   const p = { ...previous, serviceStage: "in_repair" };
   assert.throws(
     () => serviceWorkflow({ serviceStage: "completed" }, p),
@@ -68,19 +68,11 @@ test("completion requires an order and works, immutable payment history and no o
   );
   assert.equal(completed.servicePaymentStatus, "partial");
   assert.ok(completed.serviceDetails?.completedAt);
-  assert.throws(
-    () =>
-      serviceWorkflow(
-        {
-          serviceDetails: {
-            ...details,
-            payments: [{ ...details.payments[0]!, amount: 1001 }],
-          },
-        },
-        p,
-      ),
-    /превышать/,
-  );
+  const overpaid = serviceWorkflow({ serviceDetails: {
+    ...details, payments: [{ ...details.payments[0]!, amount: 35000 }],
+  } }, p);
+  assert.equal(overpaid.servicePaymentStatus, "paid");
+  assert.equal(overpaid.serviceDetails?.payments?.[0]?.amount, 35000);
   assert.throws(
     () =>
       serviceWorkflow(

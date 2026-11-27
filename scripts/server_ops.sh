@@ -42,9 +42,12 @@ try {
   for(const m of recipients){
    const visible=(await service.getStatusRequests({id:m.userId,role:"manager",companyName:m.user.companyName,managerLevel:m.level})).some(x=>x.id===r.id);
    const alertCount=await p.managerAlert.count({where:{managerId:m.id,title:"Новый запрос водителя",details:{contains:r.period},createdAt:{gte:new Date(r.createdAt.getTime()-5000),lte:new Date(r.createdAt.getTime()+60000)}}});
-   receiptChecks.push({level:m.level,visible,alertRecorded:alertCount>0});
+   const devices=await p.devicePushToken.groupBy({by:["app","platform"],where:{userId:m.userId,disabledAt:null},_count:{_all:true}});
+   const relatedAlerts=await p.managerAlert.findMany({where:{managerId:m.id,title:"Новый запрос водителя",details:{contains:r.period}},select:{id:true}});
+   const events=await p.outboxEvent.groupBy({by:["status"],where:{topic:"manager_alert.dispatch",aggregateId:{in:relatedAlerts.map(a=>a.id)}},_count:{_all:true}});
+   receiptChecks.push({level:m.level,visible,alertRecorded:alertCount>0,devices:devices.map(d=>({app:d.app,platform:d.platform,count:d._count._all})),outbox:events.map(e=>({status:e.status,count:e._count._all}))});
   }
-  pendingChecks.push({type:r.type,createdAt:r.createdAt.toISOString(),driverVisible,recipients:receiptChecks});
+  pendingChecks.push({type:r.type,createdAt:r.createdAt.toISOString(),driverVisible,noteMentionsIllness:/больнич|боле|здоров/iu.test(r.note??""),recipients:receiptChecks});
  }
  console.log(JSON.stringify({pendingChecks}));
  const notices=await p.notification.groupBy({by:["templateCode","status"],where:{driverId:{in:ids},createdAt:{gte:new Date(Date.now()-7*86400000)}},_count:{_all:true}});
@@ -59,6 +62,134 @@ const lines=readFileSync(0,"utf8").split("\n").filter(l=>ids.some(id=>l.includes
 for(const l of lines){const m=l.match(/ -> (\d{3}) (\d+)ms/);if(m&&l.includes("POST"))statuses[m[1]]=(statuses[m[1]]??0)+1;}
 console.log(JSON.stringify({requestPostStatuses:statuses,gatewayTimeoutLines:lines.filter(l=>/HTTP[^ ]*" 504|upstream timed out/.test(l)).length,sampledLogLines:lines.length}));
 }finally{await p.$disconnect();}'
+    ;;
+  prepare-client-config-transfer)
+    umask 077
+    mkdir -p "$BASE/gopark/secrets/client-config-transfer"
+    key="$BASE/gopark/secrets/client-config-transfer/key.pem"
+    if [ ! -f "$key" ]; then openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$key" 2>/dev/null; fi
+    openssl pkey -in "$key" -pubout | python3 -c 'import sys,base64;print("PUBLIC_CONFIG_TRANSFER_KEY="+".".join(base64.b64encode(sys.stdin.buffer.read()).decode()))'
+    ;;
+  install-client-configs)
+    : "${CLIENT_CONFIG_CIPHERTEXT:?}"
+    export BASE
+    python3 - <<'PY'
+import base64,hashlib,hmac,json,os,pathlib,subprocess
+root=pathlib.Path(os.environ['BASE'])/'gopark'/'secrets'
+key=root/'client-config-transfer'/'key.pem'
+payload=json.loads(base64.b64decode(os.environ['CLIENT_CONFIG_CIPHERTEXT']))
+material=subprocess.run(['openssl','pkeyutl','-decrypt','-inkey',str(key),'-pkeyopt','rsa_padding_mode:oaep','-pkeyopt','rsa_oaep_md:sha256'],input=base64.b64decode(payload['key']),capture_output=True,check=True).stdout
+assert len(material)==80
+cipher=base64.b64decode(payload['data']);iv=material[32:48]
+assert hmac.compare_digest(hmac.new(material[48:],iv+cipher,hashlib.sha256).hexdigest(),payload['mac'])
+plain=subprocess.run(['openssl','enc','-d','-aes-256-cbc','-K',material[:32].hex(),'-iv',iv.hex()],input=cipher,capture_output=True,check=True).stdout
+configs=json.loads(plain)
+account=json.loads((root/'firebase-service-account.json').read_text())
+for app in ['driver','manager']:
+ config=configs[app]
+ assert config['project_info']['project_id']==account['project_id']
+ assert 'private_key' not in config
+ packages=[x['client_info']['android_client_info']['package_name'] for x in config['client']]
+ assert 'com.milanium.gopark'+app in packages
+for app in ['driver','manager']:
+ target=root/('google-services-'+app+'.json')
+ if target.exists():
+  backup=target.with_name(target.name+'.before-install');backup.write_bytes(target.read_bytes());backup.chmod(0o600)
+ stage=target.with_suffix('.new');stage.write_text(json.dumps(configs[app]));stage.chmod(0o600);stage.replace(target)
+key.unlink()
+print('Validated Firebase Android client configurations installed for driver and manager; transfer key removed.')
+PY
+    ;;
+  firebase-client-diagnostic)
+    docker exec -i gopark-api node --input-type=module <<'JS'
+import{createRequire}from"node:module";import{readFileSync}from"node:fs";const require=createRequire(new URL("./apps/api/package.json",import.meta.url));try{const raw=process.env.FIREBASE_SERVICE_ACCOUNT_JSON??readFileSync(process.env.FIREBASE_SERVICE_ACCOUNT_PATH,"utf8");const account=JSON.parse(raw),credential=require("firebase-admin/app").cert(account);const access=await credential.getAccessToken();const r=await fetch(`https://firebase.googleapis.com/v1beta1/projects/${account.project_id}/androidApps`,{headers:{authorization:`Bearer ${access.access_token}`},signal:AbortSignal.timeout(10000)});const data=await r.json();console.log(JSON.stringify({firebaseManagementStatus:r.status,packages:(data.apps??[]).map(a=>({packageName:a.packageName,appId:a.appId}))}));}catch(e){console.log(JSON.stringify({firebaseDiagnosticError:e.name}));process.exitCode=1;}
+JS
+    ;;
+  rebuild-persisted-queue)
+    umask 077
+    BACKUP="$BASE/backups/queue-rebuild-$(date -u +%Y%m%dT%H%M%S)-$$"
+    mkdir -p "$BACKUP"
+    docker exec gopark-postgres pg_dump -U gopark gopark | gzip > "$BACKUP/database.sql.gz"
+    gzip -t "$BACKUP/database.sql.gz"
+    cp "$BASE/gopark/.env" "$BACKUP/server.env"
+    timeout 30s docker cp gopark-redis:/data "$BACKUP/previous-redis-data"
+    test -d "$BACKUP/previous-redis-data"
+    QUEUE_VOLUME="gopark_queue_recovery_$(date -u +%Y%m%dT%H%M%S)"
+    docker volume create "$QUEUE_VOLUME" >/dev/null
+    printf 'services:\n  redis:\n    ports: !override ["127.0.0.1:6379:6379"]\nvolumes:\n  gopark_redis_data:\n    external: true\n    name: %s\n' "$QUEUE_VOLUME" > "$BACKUP/queue.yml"
+    CURRENT=$(readlink -f "$BASE/gopark-current")
+    compose=(docker compose -p gopark --env-file "$BASE/gopark/.env" -f "$CURRENT/docker-compose.server.yml" -f "$BACKUP/queue.yml")
+    "${compose[@]}" config --quiet
+    docker stop -t 10 gopark-worker
+    "${compose[@]}" up -d --no-deps --no-build --force-recreate redis
+    ready=false
+    for attempt in $(seq 1 15); do
+      if timeout 3s docker exec gopark-redis redis-cli ping | grep -qx PONG; then ready=true; break; fi
+      sleep 1
+    done
+    test "$ready" = true
+    export QUEUE_VOLUME
+    python3 - "$BASE/gopark/.env" <<'PY'
+import os,pathlib,re,sys
+p=pathlib.Path(sys.argv[1]);s=p.read_text();line='REDIS_DATA_VOLUME='+os.environ['QUEUE_VOLUME']
+s=re.sub(r'^REDIS_DATA_VOLUME=.*$',line,s,flags=re.M) if re.search(r'^REDIS_DATA_VOLUME=',s,flags=re.M) else s.rstrip()+'\n'+line+'\n'
+p.write_text(s)
+PY
+    curl --max-time 10 -fsS http://127.0.0.1:3000/api/health
+    echo "Healthy replacement queue created; old volume and files preserved. Worker awaits checked application deployment. Backup: $BACKUP"
+    ;;
+  redis-isolated-probe)
+    name="gopark-redis-probe-$$"
+    trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
+    docker run -d --name "$name" --network none redis:7-alpine redis-server --save '' --appendonly no
+    sleep 1
+    timeout 5s docker exec "$name" redis-cli ping
+    docker inspect --format '{{range .Mounts}}{{.Name}} {{.Destination}}{{println}}{{end}}' gopark-redis
+    docker compose version --short
+    ;;
+  redis-startup-diagnostic)
+    docker inspect --format 'status={{.State.Status}} restartCount={{.RestartCount}} health={{if .State.Health}}{{.State.Health.Status}}{{end}} image={{.Config.Image}}' gopark-redis
+    docker logs --tail=60 gopark-redis 2>&1
+    timeout 5s docker exec gopark-redis sh -c 'ls -lah /data; cat /proc/1/status | sed -n "/^Name:/p; /^State:/p; /^VmRSS:/p"' || true
+    docker stats --no-stream --format '{{.Name}} cpu={{.CPUPerc}} memory={{.MemUsage}}' gopark-redis
+    ;;
+  recover-redis-queue)
+    umask 077
+    BACKUP="$BASE/backups/queue-recovery-$(date -u +%Y%m%dT%H%M%S)-$$"
+    mkdir -p "$BACKUP"
+    docker exec gopark-postgres pg_dump -U gopark gopark | gzip > "$BACKUP/database.sql.gz"
+    gzip -t "$BACKUP/database.sql.gz"
+    cp "$BASE/gopark/.env" "$BACKUP/server.env"
+    timeout 30s docker cp gopark-redis:/data "$BACKUP/redis-data"
+    test -d "$BACKUP/redis-data"
+    docker restart -t 10 gopark-redis
+    ready=false
+    for attempt in $(seq 1 15); do
+      if timeout 3s docker exec gopark-redis redis-cli ping | grep -qx PONG; then ready=true; break; fi
+      sleep 1
+    done
+    test "$ready" = true
+    docker restart -t 10 gopark-worker
+    ready=false
+    for attempt in $(seq 1 20); do
+      if docker exec gopark-worker node -e 'fetch("http://127.0.0.1:3001/health",{signal:AbortSignal.timeout(1000)}).then(async r=>{if(!r.ok)process.exit(1);const h=await r.json();if(h.service!=="gopark-outbox-worker")process.exit(1);console.log(JSON.stringify(h))}).catch(()=>process.exit(1))'; then ready=true; break; fi
+      sleep 1
+    done
+    test "$ready" = true
+    curl --max-time 10 -fsS http://127.0.0.1:3000/api/health
+    echo "Preserved Redis volume, database and configuration backup: $BACKUP"
+    ;;
+  notification-delivery-diagnostic)
+    timeout 5s docker exec gopark-redis redis-cli ping || echo "Redis PING did not complete"
+    docker inspect --format '{{.Name}} {{json .NetworkSettings.Networks}}' gopark-api gopark-worker gopark-redis
+    for c in gopark-api gopark-worker; do docker logs --since=48h --tail=5000 "$c" 2>&1 || true; done | docker exec -i gopark-api node --input-type=module -e 'import{readFileSync}from"node:fs";const s=readFileSync(0,"utf8");console.log(JSON.stringify({fcmFailures:(s.match(/FCM send failed/g)||[]).length,fcmDisabled:(s.match(/FCM disabled:/g)||[]).length,invalidTokens:(s.match(/invalid push token/g)||[]).length,workerStarted:s.includes("gopark-outbox-worker] listening"),queueErrors:(s.match(/WRONGPASS|NOAUTH|ECONNREFUSED/g)||[]).length}));'
+    docker exec gopark-worker node --input-type=module -e 'try{const r=await fetch("http://127.0.0.1:3001/health",{signal:AbortSignal.timeout(5000)});const h=await r.json();console.log(JSON.stringify({workerHealth:r.status,service:h.service,appRuntime:h.appRuntime}));}catch(e){console.log(JSON.stringify({workerHealthError:e.name}));}'
+    docker exec -i gopark-api node --input-type=module <<'JS'
+import{createRequire}from"node:module";import{existsSync}from"node:fs";const require=createRequire(import.meta.url);const{Redis}=require("./apps/api/node_modules/ioredis");const configured=new URL(process.env.REDIS_URL);const result={configuredHost:configured.hostname,configuredPort:configured.port,credentialsPresent:!!configured.password,firebaseFileExists:existsSync(process.env.FIREBASE_SERVICE_ACCOUNT_PATH??"")};for(const [label,url]of[["configured",configured.href],["internal",(()=>{const u=new URL(configured);u.hostname="redis";u.port="6379";return u.href;})()]]){const c=new Redis(url,{lazyConnect:true,connectTimeout:3000,maxRetriesPerRequest:0,retryStrategy:()=>null,enableOfflineQueue:false});c.on("error",()=>{});try{await c.connect();result[label]=await c.ping();}catch(e){result[label]=e.code??e.name;}finally{c.disconnect();}}console.log(JSON.stringify(result));
+JS
+    docker exec -i gopark-api node --input-type=module <<'JS'
+import{createRequire}from"node:module";const require=createRequire(import.meta.url);const{PrismaClient}=require("./apps/api/node_modules/@prisma/client");const{Queue}=require("./apps/api/node_modules/bullmq");const{Redis}=require("./apps/api/node_modules/ioredis");const p=new PrismaClient(),connection=new Redis(process.env.REDIS_URL,{maxRetriesPerRequest:1}),q=new Queue("gopark-outbox",{connection});setTimeout(()=>{console.log("Queue diagnostic timed out");connection.disconnect();process.exit(2);},15000).unref();try{console.log(JSON.stringify({outbox:await p.outboxEvent.groupBy({by:["status"],_count:{_all:true}}),queue:await q.getJobCounts(),firebaseConfigured:!!(process.env.FIREBASE_SERVICE_ACCOUNT_JSON||process.env.FIREBASE_SERVICE_ACCOUNT_PATH)}));}finally{await q.close();await connection.quit();await p.$disconnect();}
+JS
     ;;
   driver-payment-diagnostic)
     test -n "${DRIVER_SEARCH:-}"
@@ -205,7 +336,24 @@ JS
     docker exec -i -e "TARGET_WORKSHOP=$WORKSHOP" gopark-api node --input-type=module -e 'import fs from "node:fs";import {isDeepStrictEqual} from "node:util";const before=JSON.parse(fs.readFileSync(0,"utf8"));const {PrismaClient}=await import("./apps/api/node_modules/@prisma/client/default.js");const {IncidentPrismaRepository}=await import("./apps/api/dist/apps/api/src/infrastructure/repositories/incident.prisma.repository.js");const p=new PrismaClient();try{const current=await p.incident.findUnique({where:{id:before.incident.id}});if(!current||current.status!=="open"||!isDeepStrictEqual(JSON.parse(JSON.stringify(current)),before.incident))throw Error("Incident changed; refresh and retry");const shop=process.env.TARGET_WORKSHOP;if(!["main","body","both"].includes(shop))throw Error("Invalid workshop");const active=["sent_to_service","awaiting_repair","in_repair"].includes(current.serviceStage);if(!active&&current.serviceStage!=="accident")throw Error("Unsupported current stage for handoff");if(!(active&&current.serviceDetails?.workshop===shop)){const d=current.serviceDetails??{};const reason=d.reason?.trim()||current.repairNote?.trim()||current.description?.trim()||(current.incidentType==="accident"?"ДТП":"Ремонт");await new IncidentPrismaRepository({client:p}).update(current.id,{serviceStage:active?current.serviceStage:"sent_to_service",serviceDetails:{...d,reason,workshop:shop,repairCategory:d.repairCategory??(current.incidentType==="accident"?"accident":"repair")},...(!d.expectedPayer&&!(d.payments?.length)?{servicePayer:null}:{})});}const item=await p.incident.findUniqueOrThrow({where:{id:current.id}});const car=await p.car.findUniqueOrThrow({where:{id:before.car.id},select:{plateNumber:true,status:true}});if(item.serviceDetails?.workshop!==shop||!["sent_to_service","awaiting_repair","in_repair"].includes(item.serviceStage))throw Error("Handoff verification failed");console.log(JSON.stringify({car,incidentId:item.id,stage:item.serviceStage,workshop:item.serviceDetails.workshop,expectedPayer:item.serviceDetails.expectedPayer??null,payer:item.servicePayer??null,sentAt:item.serviceDetails.sentAt??null,arrivedAt:item.serviceDetails.arrivedAt??null}));}finally{await p.$disconnect()}' < "$BACKUP/incident-before.json"
     echo "Saved handoff preimage on the server: $BACKUP"
     ;;
+  release-impounded-vehicles)
+    test -n "$VEHICLE_PLATE"
+    umask 077
+    BACKUP="$BASE/backups/impound-release-$(date -u +%Y%m%dT%H%M%S)-$$"
+    mkdir -p "$BACKUP"
+    docker exec gopark-postgres pg_dump -U gopark gopark | gzip > "$BACKUP/database.sql.gz"
+    gzip -t "$BACKUP/database.sql.gz"
+    cp "$BASE/gopark/.env" "$BACKUP/server.env"
+    docker exec -i -e TARGET_PLATES="$VEHICLE_PLATE" gopark-api node --input-type=module <<'JS'
+import{createRequire}from"node:module";import{randomUUID}from"node:crypto";const require=createRequire(import.meta.url);const{PrismaClient}=require("./apps/api/node_modules/@prisma/client");const p=new PrismaClient();try{const norm=s=>String(s??"").replace(/[^A-Za-z0-9]/g,"").toUpperCase();const keys=[...new Set(process.env.TARGET_PLATES.trim().split(/\s+/).map(norm))];const result=await p.$transaction(async tx=>{const all=await tx.car.findMany({select:{id:true,plateNumber:true,status:true}});const cars=keys.map(k=>{const found=all.filter(c=>norm(c.plateNumber)===k);if(found.length!==1)throw Error("Expected one exact vehicle per plate");return found[0];});const result=[];for(const car of cars){if(!["impound","assigned","free"].includes(car.status))throw Error("Vehicle status requires separate review");if(await tx.incident.count({where:{carId:car.id,status:"open"}}))throw Error("Active incident must be reviewed before release");const assignment=await tx.carAssignment.findFirst({where:{carId:car.id,endedAt:null},include:{driver:true},orderBy:{startedAt:"desc"}});const next=assignment&&assignment.driver.status!=="terminated"?"assigned":"free";if(car.status==="impound"){await tx.car.update({where:{id:car.id},data:{status:next}});await tx.auditLog.create({data:{action:"vehicle.impound.released",entityType:"car",entityId:car.id,correlationId:randomUUID(),beforeData:{status:car.status},afterData:{status:next,reason:"Owner confirmed physical release from impound"}}});}result.push({plate:car.plateNumber,status:next,driverStillAssigned:!!assignment});}return result;});console.log(JSON.stringify({released:result}));}finally{await p.$disconnect();}
+JS
+    echo "Verified database/configuration backup: $BACKUP"
+    ;;
   vehicle-diagnostic)
+    test -n "$VEHICLE_PLATE"
+    docker exec -i -e LOOKUP_PLATE="$VEHICLE_PLATE" gopark-api node --input-type=module <<'JS'
+import{createRequire}from"node:module";const require=createRequire(import.meta.url);const{PrismaClient}=require("./apps/api/node_modules/@prisma/client");const p=new PrismaClient();try{const norm=s=>String(s??"").replace(/[^A-Za-z0-9]/g,"").toUpperCase();const cars=(await p.car.findMany({select:{id:true,plateNumber:true,status:true}})).filter(c=>norm(c.plateNumber).includes(norm(process.env.LOOKUP_PLATE)));for(const c of cars){const assignments=await p.carAssignment.findMany({where:{carId:c.id},orderBy:{startedAt:"desc"},take:5,select:{startedAt:true,endedAt:true,driver:{select:{id:true,status:true,contracts:{where:{status:"active"},select:{id:true}}}}}});const contracts=await p.contract.findMany({where:{carId:c.id},select:{contractNumber:true,status:true,driverId:true}});const cases=await p.incident.findMany({where:{carId:c.id},select:{status:true,incidentType:true,serviceStage:true,driverId:true,statusHistory:true}});console.log(JSON.stringify({plate:c.plateNumber,vehicleStatus:c.status,assignments:assignments.map(a=>({startedAt:a.startedAt,endedAt:a.endedAt,driverStatus:a.driver.status,hasActiveContract:a.driver.contracts.length>0})),contracts:contracts.map(k=>({number:k.contractNumber,status:k.status,assignedToCurrentDriver:assignments.some(a=>!a.endedAt&&a.driver.id===k.driverId)})),cases:cases.map(k=>({status:k.status,type:k.incidentType,stage:k.serviceStage,hasDriver:!!k.driverId,history:(k.statusHistory??[]).map(h=>({status:h.status,serviceStage:h.serviceStage,at:h.at??h.changedAt}))}))}));}}finally{await p.$disconnect();}
+JS
     test -n "$VEHICLE_PLATE"
     cat "$BASE/gopark-current-sha"
     docker exec -e "LOOKUP_PLATE=$VEHICLE_PLATE" gopark-api node --input-type=module -e 'const {PrismaClient}=await import("./apps/api/node_modules/@prisma/client/default.js");const p=new PrismaClient();try{const norm=s=>String(s??"").replace(/[^A-Za-z0-9]/g,"").toUpperCase();const key=norm(process.env.LOOKUP_PLATE);const cars=(await p.car.findMany({select:{id:true,plateNumber:true,status:true}})).filter(c=>norm(c.plateNumber).includes(key));const cases=await p.incident.findMany({where:{carId:{in:cars.map(c=>c.id)}},orderBy:{createdAt:"desc"},take:20,select:{id:true,carId:true,incidentType:true,status:true,serviceStage:true,createdAt:true,occurredAt:true,serviceDetails:true,accidentDetails:true}});console.log(JSON.stringify({cars,incidents:cases.map(({serviceDetails,accidentDetails,...i})=>({...i,workshop:serviceDetails?.workshop??null,hasReason:!!serviceDetails?.reason,repairCategory:serviceDetails?.repairCategory??null,hasAccidentDetails:!!accidentDetails,sentAt:serviceDetails?.sentAt??null,arrivedAt:serviceDetails?.arrivedAt??null}))}));}finally{await p.$disconnect()}'

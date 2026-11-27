@@ -6,6 +6,7 @@ import {
   billableServiceExpenses,
   serviceFeeBase,
   serviceProfit,
+  serviceOverpayment,
   serviceWorkProfit,
 } from "@gopark/contracts";
 type Shop = "main" | "body";
@@ -93,7 +94,7 @@ export function workshopFinance(
       ? money(base + workshopPayment(d, shop, billableServiceExpenses(d)))
       : 0,
     paid: money(payments),
-    profit: d.orderItems?.length
+    profit: money((d.orderItems?.length
       ? money(
           d.orderItems
             .filter(
@@ -102,7 +103,7 @@ export function workshopFinance(
             )
             .reduce((sum, work) => sum + serviceWorkProfit(d, work), 0),
         )
-      : money(base * 0.3),
+      : money(base * 0.3)) + workshopPayment(d, shop, serviceOverpayment(d))),
     known,
   };
 }

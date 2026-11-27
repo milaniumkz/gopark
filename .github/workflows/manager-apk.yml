@@ -77,6 +77,16 @@ jobs:
             keytool -exportcert -keystore "$private_copy" -storepass android -alias androiddebugkey 2>/dev/null | openssl x509 -inform DER -noout -fingerprint -sha256 || echo 'Not a default Android debug key.'
             rm -f "$private_copy"
           done < /tmp/signing-candidate-paths
+      - name: Install verified Firebase Android client configuration
+        if: inputs.signing_diagnostics != true
+        env:
+          SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+          SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          SSH_PORT: ${{ secrets.PROD_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          scp -q -i ~/.ssh/id_ed25519 -P "$SSH_PORT" "$SSH_USER@$SSH_HOST:/home/client/gopark/secrets/google-services-manager.json" apps/manager-app/android/app/google-services.json
+          python3 scripts/validate_firebase_client.py apps/manager-app/android/app/google-services.json com.milanium.goparkmanager
       - name: Resolve manager dependencies
         if: inputs.signing_diagnostics != true
         working-directory: apps/manager-app
@@ -101,7 +111,10 @@ jobs:
         working-directory: apps/manager-app
         run: |
           test -s "$GOPARK_MANAGER_KEYSTORE"
-          build_number=$(python3 -c 'import re,time; from pathlib import Path; version=re.search(r"^version:.*[+]([0-9]+)",Path("pubspec.yaml").read_text(),re.M); print(max(int(time.time())//60, int(version[1])+1))')
+          aapt=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
+          old_code=$("$aapt" dump badging /tmp/previous-manager.apk | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" | head -1)
+          [[ "$old_code" =~ ^[0-9]+$ ]]
+          build_number=$(python3 -c 'import re,time,sys; from pathlib import Path; version=re.search(r"^version:.*[+]([0-9]+)",Path("pubspec.yaml").read_text(),re.M); print(max(int(time.time())//60, int(version[1])+1, int(sys.argv[1])+1))' "$old_code")
           flutter build apk --release --dart-define=API_BASE_URL=https://185.138.185.36/api --build-number="$build_number"
       - name: Build matching manager web application
         if: inputs.signing_diagnostics != true
@@ -115,6 +128,7 @@ jobs:
           "$apksigner" verify --verbose --print-certs /tmp/previous-manager.apk > /tmp/old-manager-cert.txt
           old_cert=$(sed -n 's/.*certificate SHA-256 digest: //p' /tmp/old-manager-cert.txt | sort -u)
           new_cert=$(sed -n 's/.*certificate SHA-256 digest: //p' /tmp/new-manager-cert.txt | sort -u)
+          bash scripts/verify_android_firebase.sh apps/manager-app/build/app/outputs/flutter-apk/app-release.apk
           if [ -n "$old_cert" ] && [ "$old_cert" = "$new_cert" ]; then
             echo 'APK signing certificate matches the existing manager APK.'
           else
@@ -168,3 +182,6 @@ jobs:
           ssh -i ~/.ssh/id_ed25519 -p "$PROD_SSH_PORT" "$remote" "deployed_sha=\$(cat /home/client/gopark-current-sha); if [ \"\$deployed_sha\" != '$code_sha' ]; then echo 'Deployed commit differs from APK source; publication cancelled.'; exit 1; fi"
           ssh -i ~/.ssh/id_ed25519 -p "$PROD_SSH_PORT" "$remote" "CODE_SHA='$code_sha' APK_SHA256='$apk_sha256' ZIP_SHA256='$zip_sha256' STAGE='$stage' bash '$stage/publish_manager_apk.sh'"
           ssh -i ~/.ssh/id_ed25519 -p "$PROD_SSH_PORT" "$remote" "CODE_SHA='$code_sha' WEB_SHA256='$web_sha256' STAGE='$stage' bash '$stage/publish_manager_web.sh'"
+      - name: Remove temporary Android client configuration
+        if: always()
+        run: rm -f apps/manager-app/android/app/google-services.json
